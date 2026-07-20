@@ -23,8 +23,11 @@ const searchQuery = ref('')
 
 const showLinkDialog = ref(false)
 const showCategoryDialog = ref(false)
+const showUploadDialog = ref(false)
 const linkForm = ref({ name: '', url: '', category_id: 0 })
 const categoryForm = ref({ name: '' })
+const uploadForm = ref({ category_id: 0 })
+const selectedFile = ref<File | null>(null)
 
 onMounted(async () => {
   await loadCategories()
@@ -100,6 +103,43 @@ async function handleDeleteCategory(id: number) {
     ElMessage.error('删除失败，分类可能正在被使用')
   }
 }
+
+function handleFileChange(file: any) {
+  selectedFile.value = file.raw
+  return false
+}
+
+async function handleUploadFile() {
+  if (!selectedFile.value) {
+    ElMessage.warning('请选择文件')
+    return
+  }
+  try {
+    await knowledgeApi.uploadFile(selectedFile.value, uploadForm.value.category_id)
+    ElMessage.success('上传成功')
+    showUploadDialog.value = false
+    selectedFile.value = null
+    await loadItems()
+  } catch {
+    ElMessage.error('上传失败')
+  }
+}
+
+async function handleDownloadFile(id: number, name: string) {
+  try {
+    const res = await knowledgeApi.downloadFile(id)
+    const url = window.URL.createObjectURL(new Blob([res.data]))
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', name)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+  } catch {
+    ElMessage.error('下载失败')
+  }
+}
 </script>
 
 <template>
@@ -161,6 +201,9 @@ async function handleDeleteCategory(id: number) {
             <el-button type="primary" @click="showLinkDialog = true">
               <el-icon><Link /></el-icon> 添加链接
             </el-button>
+            <el-button type="success" @click="showUploadDialog = true">
+              <el-icon><Upload /></el-icon> 上传文件
+            </el-button>
           </div>
         </div>
 
@@ -183,14 +226,24 @@ async function handleDeleteCategory(id: number) {
                 <span v-if="item.file_size">{{ item.file_size }}</span>
               </div>
             </div>
-            <el-button
-              v-if="authStore.isCaptain || authStore.user?.id === item.id"
-              size="small"
-              type="danger"
-              @click="handleDeleteItem(item.id)"
-            >
-              删除
-            </el-button>
+            <div class="item-actions">
+              <el-button
+                v-if="item.type === 'file'"
+                size="small"
+                type="primary"
+                @click="handleDownloadFile(item.id, item.name)"
+              >
+                下载
+              </el-button>
+              <el-button
+                v-if="authStore.isCaptain || authStore.user?.id === item.uploader_id"
+                size="small"
+                type="danger"
+                @click="handleDeleteItem(item.id)"
+              >
+                删除
+              </el-button>
+            </div>
           </div>
           <el-empty v-if="items.length === 0" description="暂无资源" />
         </div>
@@ -226,6 +279,33 @@ async function handleDeleteCategory(id: number) {
       <template #footer>
         <el-button @click="showCategoryDialog = false">取消</el-button>
         <el-button type="primary" @click="handleCreateCategory">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="showUploadDialog" title="上传文件" width="500px">
+      <el-form :model="uploadForm" label-width="80px">
+        <el-form-item label="文件">
+          <el-upload
+            :auto-upload="false"
+            :limit="1"
+            :on-change="handleFileChange"
+            :on-exceed="() => ElMessage.warning('只能上传一个文件')"
+          >
+            <el-button type="primary">选择文件</el-button>
+            <template #tip>
+              <div class="el-upload__tip">支持 PDF、Word、Markdown、ZIP、EXE 等格式</div>
+            </template>
+          </el-upload>
+        </el-form-item>
+        <el-form-item label="分类">
+          <el-select v-model="uploadForm.category_id" placeholder="请选择分类">
+            <el-option v-for="cat in categories" :key="cat.id" :label="cat.name" :value="cat.id" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showUploadDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleUploadFile">上传</el-button>
       </template>
     </el-dialog>
   </div>
@@ -352,5 +432,10 @@ async function handleDeleteCategory(id: number) {
   gap: 1rem;
   font-size: 0.75rem;
   color: var(--text-muted);
+}
+
+.item-actions {
+  display: flex;
+  gap: 0.5rem;
 }
 </style>

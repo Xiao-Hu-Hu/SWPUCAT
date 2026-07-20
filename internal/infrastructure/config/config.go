@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/spf13/viper"
 )
 
@@ -16,6 +17,8 @@ type Config struct {
 	Redis    RedisConfig    `mapstructure:"redis"`
 	JWT      JWTConfig      `mapstructure:"jwt"`
 	Log      LogConfig      `mapstructure:"log"`
+	Storage  StorageConfig  `mapstructure:"storage"`
+	Email    EmailConfig    `mapstructure:"email"`
 }
 
 type ServerConfig struct {
@@ -59,7 +62,23 @@ type LogConfig struct {
 	Format string `mapstructure:"format"`
 }
 
+type StorageConfig struct {
+	UploadDir   string `mapstructure:"upload_dir"`
+	MaxFileSize int64  `mapstructure:"max_file_size"`
+}
+
+type EmailConfig struct {
+	SMTPHost string `mapstructure:"smtp_host"`
+	SMTPPort int    `mapstructure:"smtp_port"`
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
+	From     string `mapstructure:"from"`
+}
+
 func Load() (*Config, error) {
+	// Load .env file if it exists
+	godotenv.Load()
+
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(".")
@@ -89,6 +108,13 @@ func Load() (*Config, error) {
 	viper.SetDefault("jwt.refresh_secret", "dev-refresh-secret-change-in-production")
 	viper.SetDefault("log.level", "debug")
 	viper.SetDefault("log.format", "console")
+	viper.SetDefault("storage.upload_dir", "./uploads")
+	viper.SetDefault("storage.max_file_size", 100*1024*1024) // 100MB
+	viper.SetDefault("email.smtp_host", "")
+	viper.SetDefault("email.smtp_port", 587)
+	viper.SetDefault("email.username", "")
+	viper.SetDefault("email.password", "")
+	viper.SetDefault("email.from", "")
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
@@ -124,6 +150,23 @@ func Load() (*Config, error) {
 	}
 	if secret := os.Getenv("CSA_JWT_REFRESH_SECRET"); secret != "" {
 		cfg.JWT.RefreshSecret = secret
+	}
+	if host := os.Getenv("CSA_EMAIL_SMTP_HOST"); host != "" {
+		cfg.Email.SMTPHost = host
+	}
+	if port := os.Getenv("CSA_EMAIL_SMTP_PORT"); port != "" {
+		if p, err := strconv.Atoi(port); err == nil {
+			cfg.Email.SMTPPort = p
+		}
+	}
+	if username := os.Getenv("CSA_EMAIL_USERNAME"); username != "" {
+		cfg.Email.Username = username
+	}
+	if password := os.Getenv("CSA_EMAIL_PASSWORD"); password != "" {
+		cfg.Email.Password = password
+	}
+	if from := os.Getenv("CSA_EMAIL_FROM"); from != "" {
+		cfg.Email.From = from
 	}
 
 	return &cfg, nil

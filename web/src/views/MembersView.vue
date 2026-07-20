@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { memberApi } from '@/api/member'
+import { checkinApi } from '@/api/checkin'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -9,13 +10,16 @@ const members = ref<Array<{
   id: number
   nickname: string
   username: string
+  student_id: string
   role: string
   joined_at: string
   checkin_count: number
 }>>([])
+const onlineMembers = ref<Array<{ user_id: number; nickname: string; online: boolean }>>([])
 
 onMounted(async () => {
   await loadMembers()
+  await loadOnlineMembers()
 })
 
 async function loadMembers() {
@@ -25,6 +29,19 @@ async function loadMembers() {
   } catch {
     console.error('Failed to load members')
   }
+}
+
+async function loadOnlineMembers() {
+  try {
+    const res = await checkinApi.getOnlineMembers()
+    onlineMembers.value = res.data || []
+  } catch {
+    console.error('Failed to load online members')
+  }
+}
+
+function isOnline(userId: number) {
+  return onlineMembers.value.find(m => m.user_id === userId)?.online || false
 }
 
 async function handleTransferCaptain(id: number) {
@@ -59,15 +76,16 @@ async function handleRemoveMember(id: number) {
       </div>
 
       <el-table :data="members" style="width: 100%">
-        <el-table-column prop="nickname" label="昵称" width="120">
+        <el-table-column prop="nickname" label="昵称" width="150">
           <template #default="{ row }">
             <div class="member-info">
+              <span class="online-dot" :class="{ online: isOnline(row.id) }"></span>
               <el-avatar :size="32">{{ row.nickname[0] }}</el-avatar>
               <span>{{ row.nickname }}</span>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="username" label="用户名" width="120" />
+        <el-table-column prop="student_id" label="学号" width="140" />
         <el-table-column prop="role" label="角色" width="100">
           <template #default="{ row }">
             <el-tag :type="row.role === 'captain' ? 'warning' : 'info'">
@@ -134,5 +152,17 @@ async function handleRemoveMember(id: number) {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+}
+
+.online-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.online-dot.online {
+  background: var(--success);
+  box-shadow: 0 0 6px var(--success);
 }
 </style>

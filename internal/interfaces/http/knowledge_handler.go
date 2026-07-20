@@ -2,7 +2,10 @@ package http
 
 import (
 	"SWPUCAT/internal/application/knowledge"
+	knowledgeDomain "SWPUCAT/internal/domain/knowledge"
 	"SWPUCAT/internal/domain/shared"
+	"SWPUCAT/internal/infrastructure/storage"
+	"fmt"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -10,10 +13,11 @@ import (
 
 type KnowledgeHandler struct {
 	knowledgeSvc *knowledge.KnowledgeService
+	storage      *storage.LocalStorage
 }
 
-func NewKnowledgeHandler(knowledgeSvc *knowledge.KnowledgeService) *KnowledgeHandler {
-	return &KnowledgeHandler{knowledgeSvc: knowledgeSvc}
+func NewKnowledgeHandler(knowledgeSvc *knowledge.KnowledgeService, storage *storage.LocalStorage) *KnowledgeHandler {
+	return &KnowledgeHandler{knowledgeSvc: knowledgeSvc, storage: storage}
 }
 
 func (h *KnowledgeHandler) CreateLink(c *gin.Context) {
@@ -36,18 +40,52 @@ func (h *KnowledgeHandler) CreateLink(c *gin.Context) {
 }
 
 func (h *KnowledgeHandler) UploadFile(c *gin.Context) {
-	var req knowledge.UploadFileRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "invalid request body")
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		BadRequest(c, "file is required")
 		return
 	}
+	defer file.Close()
+
+	// Validate file type
+	if !knowledgeDomain.IsAllowedFileType(header.Filename) {
+		BadRequest(c, "file type not allowed")
+		return
+	}
+
+	// Get category ID from form
+	categoryIDStr := c.PostForm("category_id")
+	categoryID, err := strconv.ParseInt(categoryIDStr, 10, 64)
+	if err != nil {
+		BadRequest(c, "invalid category_id")
+		return
+	}
+
+	// Save file to storage
+	fileKey, err := h.storage.Save(header.Filename, file)
+	if err != nil {
+		InternalError(c, "failed to save file")
+		return
+	}
+
+	// Format file size
+	fileSize := fmt.Sprintf("%.2f MB", float64(header.Size)/(1024*1024))
 
 	uploaderID := GetUserID(c)
 	uploaderName := GetUsername(c)
 	isCaptain := IsCaptain(c)
 
+	req := knowledge.UploadFileRequest{
+		FileName:   header.Filename,
+		FileSize:   fileSize,
+		FileKey:    fileKey,
+		CategoryID: categoryID,
+	}
+
 	dto, err := h.knowledgeSvc.UploadFile(c.Request.Context(), uploaderID, uploaderName, isCaptain, req)
 	if err != nil {
+		// Clean up saved file on error
+		h.storage.Delete(fileKey)
 		InternalError(c, "failed to upload file")
 		return
 	}
@@ -155,4 +193,35 @@ func (h *KnowledgeHandler) ListCategories(c *gin.Context) {
 	}
 
 	Success(c, cats)
+}
+
+func (h *KnowledgeHandler) DownloadFile(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		BadRequest(c, "invalid item id")
+		return
+	}
+
+	item, err := h.knowledgeSvc.GetItem(c.Request.Context(), id)
+	if err != nil {
+		NotFound(c, "item not found")
+		return
+	}
+
+	if item.Type != "file" {
+		BadRequest(c, "item is not a file")
+		return
+	}
+
+	// Get file path from storage using the file key
+	filePath, err := h.storage.Get(item.FileKey)
+	if err != nil {
+		NotFound(c, "file not found")
+		return
+	}
+
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", item.Name))
+	c.Header("Content-Type", "application/octet-stream")
+	c.File(filePath)
 }

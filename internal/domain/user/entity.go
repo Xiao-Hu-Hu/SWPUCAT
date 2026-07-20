@@ -8,6 +8,7 @@ import (
 var (
 	ErrUserNotFound         = errors.New("user not found")
 	ErrUsernameExists       = errors.New("username already exists")
+	ErrStudentIDExists      = errors.New("student ID already exists")
 	ErrInvalidPassword      = errors.New("invalid password")
 	ErrInvalidCredentials   = errors.New("invalid credentials")
 	ErrCannotRemoveCaptain  = errors.New("cannot remove captain")
@@ -18,6 +19,8 @@ var (
 type User struct {
 	ID           int64
 	Username     Username
+	StudentID    StudentID
+	Email        string
 	Nickname     Nickname
 	PasswordHash PasswordHash
 	Role         Role
@@ -31,6 +34,22 @@ func NewUser(username Username, nickname Nickname, passwordHash PasswordHash) *U
 	now := time.Now()
 	return &User{
 		Username:     username,
+		Nickname:     nickname,
+		PasswordHash: passwordHash,
+		Role:         RoleMember,
+		JoinedAt:     now,
+		CheckinCount: 0,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+}
+
+func NewUserWithStudentID(studentID StudentID, email string, nickname Nickname, passwordHash PasswordHash) *User {
+	now := time.Now()
+	return &User{
+		Username:     Username(studentID.String()),
+		StudentID:    studentID,
+		Email:        email,
 		Nickname:     nickname,
 		PasswordHash: passwordHash,
 		Role:         RoleMember,

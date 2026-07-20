@@ -3,6 +3,7 @@ package http
 import (
 	"SWPUCAT/internal/application/user"
 	"SWPUCAT/internal/domain/shared"
+	"fmt"
 
 	"github.com/gin-gonic/gin"
 )
@@ -67,4 +68,19 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	}
 
 	Success(c, resp)
+}
+
+func (h *AuthHandler) SendVerificationCode(c *gin.Context) {
+	var req user.SendCodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid request body")
+		return
+	}
+
+	if err := h.userSvc.SendVerificationCode(c.Request.Context(), req.Email); err != nil {
+		InternalError(c, fmt.Sprintf("failed to send verification code: %v", err))
+		return
+	}
+
+	Success(c, nil)
 }

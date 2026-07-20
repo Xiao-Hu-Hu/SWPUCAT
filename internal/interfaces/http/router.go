@@ -61,6 +61,7 @@ func (r *Router) Setup() *gin.Engine {
 			auth.POST("/register", r.authHandler.Register)
 			auth.POST("/login", r.authHandler.Login)
 			auth.POST("/refresh", r.authHandler.RefreshToken)
+			auth.POST("/send-code", r.authHandler.SendVerificationCode)
 		}
 
 		// Protected routes
@@ -87,6 +88,8 @@ func (r *Router) Setup() *gin.Engine {
 			protected.POST("/checkin/clock-out", r.checkinHandler.ClockOut)
 			protected.GET("/checkin/records", r.checkinHandler.GetRecords)
 			protected.GET("/checkin/status", r.checkinHandler.GetStatus)
+			protected.GET("/checkin/weekly-stats", r.checkinHandler.GetWeeklyStats)
+			protected.GET("/checkin/online", r.checkinHandler.GetOnlineMembers)
 
 			// Knowledge
 			protected.GET("/knowledge/items", r.knowledgeHandler.ListItems)
@@ -94,6 +97,7 @@ func (r *Router) Setup() *gin.Engine {
 			protected.POST("/knowledge/links", r.knowledgeHandler.CreateLink)
 			protected.POST("/knowledge/files", r.knowledgeHandler.UploadFile)
 			protected.DELETE("/knowledge/items/:id", r.knowledgeHandler.DeleteItem)
+			protected.GET("/knowledge/download/:id", r.knowledgeHandler.DownloadFile)
 			protected.GET("/knowledge/categories", r.knowledgeHandler.ListCategories)
 			protected.POST("/knowledge/categories", r.knowledgeHandler.CreateCategory)
 			protected.DELETE("/knowledge/categories/:id", r.knowledgeHandler.DeleteCategory)

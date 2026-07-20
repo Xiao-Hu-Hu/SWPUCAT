@@ -74,3 +74,23 @@ func (h *CheckinHandler) GetStatus(c *gin.Context) {
 
 	Success(c, status)
 }
+
+func (h *CheckinHandler) GetWeeklyStats(c *gin.Context) {
+	stats, err := h.checkinSvc.GetWeeklyStats(c.Request.Context())
+	if err != nil {
+		InternalError(c, "failed to get weekly stats")
+		return
+	}
+
+	Success(c, stats)
+}
+
+func (h *CheckinHandler) GetOnlineMembers(c *gin.Context) {
+	members, err := h.checkinSvc.GetOnlineMembers(c.Request.Context())
+	if err != nil {
+		InternalError(c, "failed to get online members")
+		return
+	}
+
+	Success(c, members)
+}

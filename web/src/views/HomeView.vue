@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { authApi } from '@/api/auth'
 import { ElMessage } from 'element-plus'
 
 const router = useRouter()
@@ -11,7 +12,59 @@ const showLogin = ref(false)
 const showRegister = ref(false)
 
 const loginForm = ref({ username: '', password: '' })
-const registerForm = ref({ username: '', password: '', nickname: '' })
+const registerForm = ref({ username: '', password: '', nickname: '', email: '', verificationCode: '' })
+
+// Captcha state
+const captchaPassed = ref(false)
+const captchaSliderValue = ref(0)
+const captchaTarget = ref(Math.floor(Math.random() * 200) + 50)
+
+// Verification code countdown
+const codeCountdown = ref(0)
+const canSendCode = computed(() => codeCountdown.value === 0 && registerForm.value.email)
+
+let countdownTimer: number | null = null
+
+function startCountdown() {
+  codeCountdown.value = 60
+  countdownTimer = window.setInterval(() => {
+    codeCountdown.value--
+    if (codeCountdown.value <= 0) {
+      codeCountdown.value = 0
+      if (countdownTimer) {
+        clearInterval(countdownTimer)
+        countdownTimer = null
+      }
+    }
+  }, 1000)
+}
+
+async function handleSendCode() {
+  if (!registerForm.value.email) {
+    ElMessage.warning('请输入邮箱')
+    return
+  }
+  try {
+    await authApi.sendVerificationCode(registerForm.value.email)
+    ElMessage.success('验证码已发送')
+    startCountdown()
+  } catch {
+    ElMessage.error('发送验证码失败')
+  }
+}
+
+function handleCaptchaChange(value: number) {
+  if (Math.abs(value - captchaTarget.value) < 10) {
+    captchaPassed.value = true
+    ElMessage.success('验证通过')
+  }
+}
+
+function resetCaptcha() {
+  captchaPassed.value = false
+  captchaSliderValue.value = 0
+  captchaTarget.value = Math.floor(Math.random() * 200) + 50
+}
 
 async function handleLogin() {
   try {
@@ -25,13 +78,23 @@ async function handleLogin() {
 }
 
 async function handleRegister() {
+  if (!captchaPassed.value) {
+    ElMessage.warning('请先完成滑块验证')
+    return
+  }
   try {
-    await authStore.register(registerForm.value.username, registerForm.value.password, registerForm.value.nickname)
+    await authStore.register(
+      registerForm.value.username,
+      registerForm.value.password,
+      registerForm.value.nickname,
+      registerForm.value.email,
+      registerForm.value.verificationCode
+    )
     showRegister.value = false
     ElMessage.success('注册成功')
     router.push('/app')
   } catch {
-    ElMessage.error('注册失败，用户名可能已存在')
+    ElMessage.error('注册失败，请检查输入信息')
   }
 }
 </script>
@@ -81,8 +144,8 @@ async function handleRegister() {
     <!-- Login Dialog -->
     <el-dialog v-model="showLogin" title="登录" width="400px">
       <el-form :model="loginForm" label-width="80px">
-        <el-form-item label="用户名">
-          <el-input v-model="loginForm.username" placeholder="请输入用户名" />
+        <el-form-item label="学号">
+          <el-input v-model="loginForm.username" placeholder="请输入12位学号" maxlength="12" />
         </el-form-item>
         <el-form-item label="密码">
           <el-input v-model="loginForm.password" type="password" placeholder="请输入密码" show-password />
@@ -97,8 +160,8 @@ async function handleRegister() {
     <!-- Register Dialog -->
     <el-dialog v-model="showRegister" title="注册" width="400px">
       <el-form :model="registerForm" label-width="80px">
-        <el-form-item label="用户名">
-          <el-input v-model="registerForm.username" placeholder="请输入用户名" />
+        <el-form-item label="学号">
+          <el-input v-model="registerForm.username" placeholder="请输入12位学号 (如: 202431060420)" maxlength="12" />
         </el-form-item>
         <el-form-item label="昵称">
           <el-input v-model="registerForm.nickname" placeholder="请输入昵称" />
@@ -106,9 +169,42 @@ async function handleRegister() {
         <el-form-item label="密码">
           <el-input v-model="registerForm.password" type="password" placeholder="请输入密码" show-password />
         </el-form-item>
+        <el-form-item label="邮箱">
+          <el-input v-model="registerForm.email" placeholder="请输入邮箱" />
+        </el-form-item>
+        <el-form-item label="验证码">
+          <div class="code-input">
+            <el-input v-model="registerForm.verificationCode" placeholder="请输入6位验证码" maxlength="6" />
+            <el-button
+              type="primary"
+              :disabled="!canSendCode"
+              @click="handleSendCode"
+            >
+              {{ codeCountdown > 0 ? `${codeCountdown}秒后重发` : '发送验证码' }}
+            </el-button>
+          </div>
+        </el-form-item>
+        <el-form-item label="验证">
+          <div class="captcha-container" v-if="!captchaPassed">
+            <div class="captcha-track">
+              <div class="captcha-slider" :style="{ left: captchaSliderValue + 'px' }"></div>
+              <div class="captcha-target" :style="{ left: captchaTarget + 'px' }"></div>
+            </div>
+            <el-slider
+              v-model="captchaSliderValue"
+              :max="300"
+              :show-tooltip="false"
+              @change="handleCaptchaChange"
+            />
+            <p class="captcha-hint">拖动滑块到目标位置完成验证</p>
+          </div>
+          <div v-else class="captcha-success">
+            <el-tag type="success">验证通过</el-tag>
+          </div>
+        </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showRegister = false">取消</el-button>
+        <el-button @click="showRegister = false; resetCaptcha()">取消</el-button>
         <el-button type="primary" @click="handleRegister">注册</el-button>
       </template>
     </el-dialog>
@@ -186,5 +282,60 @@ async function handleRegister() {
 
 .feature-card p {
   color: var(--text-muted);
+}
+
+.code-input {
+  display: flex;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.code-input .el-input {
+  flex: 1;
+}
+
+.captcha-container {
+  width: 100%;
+}
+
+.captcha-track {
+  position: relative;
+  height: 30px;
+  background: var(--bg-deep);
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+  overflow: hidden;
+}
+
+.captcha-slider {
+  position: absolute;
+  top: 0;
+  width: 30px;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+  transition: left 0.1s;
+}
+
+.captcha-target {
+  position: absolute;
+  top: 0;
+  width: 30px;
+  height: 100%;
+  background: var(--success);
+  border-radius: 4px;
+  opacity: 0.5;
+}
+
+.captcha-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+.captcha-success {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 </style>

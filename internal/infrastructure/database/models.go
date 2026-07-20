@@ -5,6 +5,8 @@ import "time"
 type UserModel struct {
 	ID              int64     `gorm:"primaryKey;autoIncrement"`
 	Username        string    `gorm:"uniqueIndex;size:32;not null"`
+	StudentID       string    `gorm:"uniqueIndex;size:12"`
+	Email           string    `gorm:"size:256"`
 	PasswordHash    string    `gorm:"size:256;not null"`
 	Nickname        string    `gorm:"size:32;not null"`
 	Role            string    `gorm:"size:16;not null;default:member"`
@@ -89,3 +91,14 @@ type SettingModel struct {
 }
 
 func (SettingModel) TableName() string { return "settings" }
+
+type VerificationCodeModel struct {
+	ID        int64     `gorm:"primaryKey;autoIncrement"`
+	Email     string    `gorm:"size:256;not null;index"`
+	Code      string    `gorm:"size:6;not null"`
+	Used      bool      `gorm:"not null;default:false"`
+	ExpiresAt time.Time `gorm:"not null"`
+	CreatedAt time.Time `gorm:"not null;default:current_timestamp"`
+}
+
+func (VerificationCodeModel) TableName() string { return "verification_codes" }

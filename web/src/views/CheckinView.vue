@@ -5,6 +5,8 @@ import { ElMessage } from 'element-plus'
 
 const status = ref({ status: 'idle', clock_in: '', clock_out: '' })
 const records = ref<Array<{ id: number; type: string; date: string; time: string }>>([])
+const weeklyStats = ref<Array<{ user_id: number; nickname: string; total_minutes: number; total_hours: number; days: number }>>([])
+const onlineMembers = ref<Array<{ user_id: number; nickname: string; online: boolean }>>([])
 const currentTime = ref(new Date().toLocaleTimeString('zh-CN'))
 
 setInterval(() => {
@@ -14,6 +16,8 @@ setInterval(() => {
 onMounted(async () => {
   await loadStatus()
   await loadRecords()
+  await loadWeeklyStats()
+  await loadOnlineMembers()
 })
 
 async function loadStatus() {
@@ -40,6 +44,7 @@ async function handleClockIn() {
     ElMessage.success('签到成功')
     await loadStatus()
     await loadRecords()
+    await loadOnlineMembers()
   } catch {
     ElMessage.error('签到失败')
   }
@@ -51,8 +56,27 @@ async function handleClockOut() {
     ElMessage.success('签退成功')
     await loadStatus()
     await loadRecords()
+    await loadOnlineMembers()
   } catch {
     ElMessage.error('签退失败')
+  }
+}
+
+async function loadWeeklyStats() {
+  try {
+    const res = await checkinApi.getWeeklyStats()
+    weeklyStats.value = res.data || []
+  } catch {
+    console.error('Failed to load weekly stats')
+  }
+}
+
+async function loadOnlineMembers() {
+  try {
+    const res = await checkinApi.getOnlineMembers()
+    onlineMembers.value = res.data || []
+  } catch {
+    console.error('Failed to load online members')
   }
 }
 </script>
@@ -89,6 +113,39 @@ async function handleClockOut() {
         <div class="clock-info" v-if="status.clock_in || status.clock_out">
           <span v-if="status.clock_in">签到时间: {{ status.clock_in }}</span>
           <span v-if="status.clock_out">签退时间: {{ status.clock_out }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="stats-section">
+      <div class="card">
+        <h3>本周签到统计</h3>
+        <el-table :data="weeklyStats" style="width: 100%">
+          <el-table-column prop="nickname" label="成员" width="120" />
+          <el-table-column label="本周累计时长" width="150">
+            <template #default="{ row }">
+              {{ row.total_hours.toFixed(1) }} 小时
+            </template>
+          </el-table-column>
+          <el-table-column prop="days" label="签到天数" width="100" />
+          <el-table-column label="在线状态" width="100">
+            <template #default="{ row }">
+              <span class="online-dot" :class="{ online: onlineMembers.find(m => m.user_id === row.user_id)?.online }"></span>
+              {{ onlineMembers.find(m => m.user_id === row.user_id)?.online ? '在线' : '离线' }}
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </div>
+
+    <div class="online-section">
+      <div class="card">
+        <h3>在线成员</h3>
+        <div class="online-list">
+          <div v-for="member in onlineMembers" :key="member.user_id" class="online-item">
+            <span class="online-dot" :class="{ online: member.online }"></span>
+            <span>{{ member.nickname }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -194,5 +251,40 @@ async function handleClockOut() {
   margin-bottom: 1rem;
   font-size: 1rem;
   font-weight: 600;
+}
+
+.stats-section {
+  margin-bottom: 2rem;
+}
+
+.online-section {
+  margin-bottom: 2rem;
+}
+
+.online-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.online-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: var(--bg-deep);
+  border-radius: 8px;
+}
+
+.online-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.online-dot.online {
+  background: var(--success);
+  box-shadow: 0 0 6px var(--success);
 }
 </style>

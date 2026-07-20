@@ -22,16 +22,19 @@ services:
       context: ..
       dockerfile: deployments/Dockerfile
     container_name: swpucat-server
+    env_file:
+      - ../.env
     environment:
       CSA_DATABASE_HOST: postgres
       CSA_DATABASE_PORT: 5432
       CSA_DATABASE_USER: csa
       CSA_DATABASE_PASSWORD: csa_password
       CSA_DATABASE_DBNAME: csa_db
-      CSA_JWT_ACCESS_SECRET: your-access-secret-change-in-production
-      CSA_JWT_REFRESH_SECRET: your-refresh-secret-change-in-production
+      CSA_STORAGE_UPLOAD_DIR: /app/uploads
     ports:
       - "8080:8080"
+    volumes:
+      - uploads_data:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -50,3 +53,4 @@ services:
 
 volumes:
   postgres_data:
+  uploads_data:

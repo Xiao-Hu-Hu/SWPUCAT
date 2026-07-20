@@ -29,6 +29,7 @@ type KnowledgeItemDTO struct {
 	Type         string `json:"type"`
 	Name         string `json:"name"`
 	URL          string `json:"url,omitempty"`
+	FileKey      string `json:"file_key,omitempty"`
 	FileSize     string `json:"file_size,omitempty"`
 	CategoryID   int64  `json:"category_id"`
 	CategoryName string `json:"category_name"`
@@ -161,6 +162,7 @@ func toItemDTO(item *knowledge.KnowledgeItem, catName string) *KnowledgeItemDTO 
 		Type:         string(item.Type),
 		Name:         item.Name,
 		URL:          item.URL,
+		FileKey:      item.FileKey,
 		FileSize:     item.FileSize,
 		CategoryID:   item.CategoryID,
 		CategoryName: catName,

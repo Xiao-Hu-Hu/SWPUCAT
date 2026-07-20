@@ -2,6 +2,12 @@ package user
 
 import (
 	"context"
+	"crypto/rand"
+	"fmt"
+	"log"
+	"math/big"
+	"time"
+
 	"SWPUCAT/internal/domain/shared"
 	"SWPUCAT/internal/domain/user"
 )
@@ -12,16 +18,27 @@ type PasswordHasher interface {
 }
 
 type JWTService interface {
-	GenerateAccessToken(userID int64, role string) (string, int64, error)
+	GenerateAccessToken(userID int64, role string, studentID string) (string, int64, error)
 	GenerateRefreshToken(userID int64) (string, error)
 	ParseRefreshToken(tokenString string) (int64, error)
 }
 
+type EmailService interface {
+	SendVerificationCode(to string, code string) error
+}
+
+type VerificationCodeRepository interface {
+	Create(ctx context.Context, email string, code string, expiresAt time.Time) error
+	FindValidCode(ctx context.Context, email string, code string) (bool, error)
+}
+
 type UserApplicationService struct {
-	userRepo  user.Repository
-	hasher    PasswordHasher
-	jwtSvc    JWTService
-	publisher shared.EventPublisher
+	userRepo    user.Repository
+	hasher      PasswordHasher
+	jwtSvc      JWTService
+	publisher   shared.EventPublisher
+	emailSvc    EmailService
+	codeRepo    VerificationCodeRepository
 }
 
 func NewUserApplicationService(
@@ -29,17 +46,45 @@ func NewUserApplicationService(
 	hasher PasswordHasher,
 	jwtSvc JWTService,
 	publisher shared.EventPublisher,
+	emailSvc EmailService,
+	codeRepo VerificationCodeRepository,
 ) *UserApplicationService {
 	return &UserApplicationService{
 		userRepo:  userRepo,
 		hasher:    hasher,
 		jwtSvc:    jwtSvc,
 		publisher: publisher,
+		emailSvc:  emailSvc,
+		codeRepo:  codeRepo,
 	}
 }
 
+func (s *UserApplicationService) SendVerificationCode(ctx context.Context, email string) error {
+	code := generateCode()
+	expiresAt := time.Now().Add(2 * time.Minute)
+
+	if err := s.codeRepo.Create(ctx, email, code, expiresAt); err != nil {
+		log.Printf("[ERROR] Failed to save verification code: %v", err)
+		return err
+	}
+
+	log.Printf("[INFO] Sending verification code %s to %s", code, email)
+	if err := s.emailSvc.SendVerificationCode(email, code); err != nil {
+		log.Printf("[ERROR] Failed to send email to %s: %v", email, err)
+		return err
+	}
+
+	log.Printf("[INFO] Verification code sent successfully to %s", email)
+	return nil
+}
+
+func generateCode() string {
+	n, _ := rand.Int(rand.Reader, big.NewInt(1000000))
+	return fmt.Sprintf("%06d", n.Int64())
+}
+
 func (s *UserApplicationService) Register(ctx context.Context, req RegisterRequest) (*LoginResponse, error) {
-	username, err := user.NewUsername(req.Username)
+	studentID, err := user.NewStudentID(req.Username)
 	if err != nil {
 		return nil, err
 	}
@@ -48,12 +93,18 @@ func (s *UserApplicationService) Register(ctx context.Context, req RegisterReque
 		return nil, err
 	}
 
-	exists, err := s.userRepo.ExistsByUsername(ctx, username)
+	// Verify email code
+	valid, err := s.codeRepo.FindValidCode(ctx, req.Email, req.VerificationCode)
+	if err != nil || !valid {
+		return nil, fmt.Errorf("invalid verification code")
+	}
+
+	exists, err := s.userRepo.ExistsByStudentID(ctx, studentID)
 	if err != nil {
 		return nil, err
 	}
 	if exists {
-		return nil, user.ErrUsernameExists
+		return nil, user.ErrStudentIDExists
 	}
 
 	hashedPassword, err := s.hasher.Hash(req.Password)
@@ -61,7 +112,7 @@ func (s *UserApplicationService) Register(ctx context.Context, req RegisterReque
 		return nil, err
 	}
 
-	u := user.NewUser(username, nickname, user.PasswordHash(hashedPassword))
+	u := user.NewUserWithStudentID(studentID, req.Email, nickname, user.PasswordHash(hashedPassword))
 	if err := s.userRepo.Create(ctx, u); err != nil {
 		return nil, err
 	}
@@ -72,7 +123,16 @@ func (s *UserApplicationService) Register(ctx context.Context, req RegisterReque
 }
 
 func (s *UserApplicationService) Login(ctx context.Context, req LoginRequest) (*LoginResponse, error) {
-	u, err := s.userRepo.FindByUsername(ctx, user.Username(req.Username))
+	// Try to find by student ID first, then by username
+	var u *user.User
+	var err error
+
+	if len(req.Username) == 12 && user.StudentID(req.Username) != "" {
+		u, err = s.userRepo.FindByStudentID(ctx, user.StudentID(req.Username))
+	}
+	if u == nil {
+		u, err = s.userRepo.FindByUsername(ctx, user.Username(req.Username))
+	}
 	if err != nil {
 		return nil, user.ErrInvalidCredentials
 	}
@@ -159,6 +219,7 @@ func (s *UserApplicationService) ListMembers(ctx context.Context) ([]MemberDTO, 
 			ID:           u.ID,
 			Nickname:     string(u.Nickname),
 			Username:     string(u.Username),
+			StudentID:    string(u.StudentID),
 			Role:         string(u.Role),
 			JoinedAt:     u.JoinedAt.Format("2006-01-02"),
 			CheckinCount: u.CheckinCount,
@@ -168,7 +229,7 @@ func (s *UserApplicationService) ListMembers(ctx context.Context) ([]MemberDTO, 
 }
 
 func (s *UserApplicationService) generateTokens(u *user.User) (*LoginResponse, error) {
-	accessToken, expiresIn, err := s.jwtSvc.GenerateAccessToken(u.ID, string(u.Role))
+	accessToken, expiresIn, err := s.jwtSvc.GenerateAccessToken(u.ID, string(u.Role), string(u.StudentID))
 	if err != nil {
 		return nil, err
 	}
@@ -188,6 +249,7 @@ func toUserDTO(u *user.User) *UserDTO {
 	return &UserDTO{
 		ID:           u.ID,
 		Username:     string(u.Username),
+		StudentID:    string(u.StudentID),
 		Nickname:     string(u.Nickname),
 		Role:         string(u.Role),
 		JoinedAt:     u.JoinedAt.Format("2006-01-02"),

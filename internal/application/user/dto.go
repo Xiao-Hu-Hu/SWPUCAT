@@ -1,14 +1,20 @@
 package user
 
 type RegisterRequest struct {
-	Username string `json:"username" validate:"required,min=3,max=32,alphanum"`
-	Nickname string `json:"nickname" validate:"required,min=1,max=64"`
-	Password string `json:"password" validate:"required,min=6,max=128"`
+	Username         string `json:"username" validate:"required,min=3,max=32,alphanum"`
+	Nickname         string `json:"nickname" validate:"required,min=1,max=64"`
+	Password         string `json:"password" validate:"required,min=6,max=128"`
+	Email            string `json:"email" validate:"required,email"`
+	VerificationCode string `json:"verification_code" validate:"required,len=6"`
 }
 
 type LoginRequest struct {
 	Username string `json:"username" validate:"required"`
 	Password string `json:"password" validate:"required"`
+}
+
+type SendCodeRequest struct {
+	Email string `json:"email" validate:"required,email"`
 }
 
 type LoginResponse struct {
@@ -25,6 +31,7 @@ type RefreshTokenRequest struct {
 type UserDTO struct {
 	ID           int64  `json:"id"`
 	Username     string `json:"username"`
+	StudentID    string `json:"student_id,omitempty"`
 	Nickname     string `json:"nickname"`
 	Role         string `json:"role"`
 	JoinedAt     string `json:"joined_at"`
@@ -39,6 +46,7 @@ type MemberDTO struct {
 	ID           int64  `json:"id"`
 	Nickname     string `json:"nickname"`
 	Username     string `json:"username"`
+	StudentID    string `json:"student_id,omitempty"`
 	Role         string `json:"role"`
 	JoinedAt     string `json:"joined_at"`
 	CheckinCount int64  `json:"checkin_count"`

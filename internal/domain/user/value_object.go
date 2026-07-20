@@ -40,6 +40,25 @@ func (u Username) String() string {
 	return string(u)
 }
 
+type StudentID string
+
+var studentIDRegex = regexp.MustCompile(`^\d{12}$`)
+
+func NewStudentID(raw string) (StudentID, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", errors.New("student ID cannot be empty")
+	}
+	if !studentIDRegex.MatchString(raw) {
+		return "", errors.New("student ID must be exactly 12 digits (e.g., 202431060420)")
+	}
+	return StudentID(raw), nil
+}
+
+func (s StudentID) String() string {
+	return string(s)
+}
+
 type Nickname string
 
 func NewNickname(raw string) (Nickname, error) {

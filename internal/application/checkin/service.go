@@ -132,3 +132,108 @@ func (s *CheckinService) GetStatus(ctx context.Context, userID int64) (*CheckinS
 	}
 	return &CheckinStatusDTO{Status: "clocked_out", ClockOut: last.Time}, nil
 }
+
+func (s *CheckinService) GetWeeklyStats(ctx context.Context) ([]WeeklyStatsDTO, error) {
+	now := time.Now()
+	weekday := now.Weekday()
+	if weekday == time.Sunday {
+		weekday = 7
+	}
+	weekStart := now.AddDate(0, 0, -int(weekday-1)).Format("2006-01-02")
+	weekEnd := now.Format("2006-01-02")
+
+	records, err := s.checkinRepo.FindByDateRange(ctx, weekStart, weekEnd)
+	if err != nil {
+		return nil, err
+	}
+
+	// Group records by user
+	type userRecords struct {
+		records []*checkin.CheckinRecord
+	}
+	userMap := make(map[int64]*userRecords)
+	for _, r := range records {
+		if _, ok := userMap[r.UserID]; !ok {
+			userMap[r.UserID] = &userRecords{}
+		}
+		userMap[r.UserID].records = append(userMap[r.UserID].records, r)
+	}
+
+	// Calculate total time per user
+	statsMap := make(map[int64]*WeeklyStatsDTO)
+	for userID, ur := range userMap {
+		var totalMinutes float64
+		days := make(map[string]bool)
+
+		// Group by date
+		dateRecords := make(map[string][]*checkin.CheckinRecord)
+		for _, r := range ur.records {
+			dateRecords[r.Date] = append(dateRecords[r.Date], r)
+		}
+
+		for date, dayRecords := range dateRecords {
+			days[date] = true
+			// Find in/out pairs
+			var lastIn *checkin.CheckinRecord
+			for _, dr := range dayRecords {
+				if dr.Type == checkin.CheckinTypeIn {
+					lastIn = dr
+				} else if dr.Type == checkin.CheckinTypeOut && lastIn != nil {
+					inTime, _ := time.Parse("15:04:05", lastIn.Time)
+					outTime, _ := time.Parse("15:04:05", dr.Time)
+					totalMinutes += outTime.Sub(inTime).Minutes()
+					lastIn = nil
+				}
+			}
+		}
+
+		statsMap[userID] = &WeeklyStatsDTO{
+			UserID:       userID,
+			TotalMinutes: totalMinutes,
+			TotalHours:   totalMinutes / 60,
+			Days:         len(days),
+		}
+	}
+
+	// Fetch user info
+	userIDs := make([]int64, 0, len(statsMap))
+	for uid := range statsMap {
+		userIDs = append(userIDs, uid)
+	}
+	users, err := s.userRepo.FindByIDs(ctx, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, u := range users {
+		if stat, ok := statsMap[u.ID]; ok {
+			stat.Nickname = u.DisplayName()
+		}
+	}
+
+	result := make([]WeeklyStatsDTO, 0, len(statsMap))
+	for _, stat := range statsMap {
+		result = append(result, *stat)
+	}
+	return result, nil
+}
+
+func (s *CheckinService) GetOnlineMembers(ctx context.Context) ([]OnlineMemberDTO, error) {
+	today := time.Now().Format("2006-01-02")
+
+	users, err := s.userRepo.FindAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]OnlineMemberDTO, 0, len(users))
+	for _, u := range users {
+		lastRecord, _ := s.checkinRepo.GetLastByUserAndDate(ctx, u.ID, today)
+		online := lastRecord != nil && lastRecord.Type == checkin.CheckinTypeIn
+		result = append(result, OnlineMemberDTO{
+			UserID:   u.ID,
+			Nickname: u.DisplayName(),
+			Online:   online,
+		})
+	}
+	return result, nil
+}

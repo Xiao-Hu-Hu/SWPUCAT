@@ -10,8 +10,10 @@ import (
 	"SWPUCAT/internal/infrastructure/auth"
 	"SWPUCAT/internal/infrastructure/config"
 	"SWPUCAT/internal/infrastructure/database"
+	"SWPUCAT/internal/infrastructure/email"
 	"SWPUCAT/internal/infrastructure/event"
 	"SWPUCAT/internal/infrastructure/repository"
+	"SWPUCAT/internal/infrastructure/storage"
 	httpInterface "SWPUCAT/internal/interfaces/http"
 	"fmt"
 	"log"
@@ -36,14 +38,20 @@ func main() {
 	checkinRepo := repository.NewCheckinRepo(db)
 	knowledgeRepo := repository.NewKnowledgeRepo(db)
 	approvalRepo := repository.NewApprovalRepo(db)
+	codeRepo := repository.NewVerificationCodeRepo(db)
 
 	// Initialize infrastructure services
 	jwtSvc := auth.NewJWTService(&cfg.JWT)
 	hasher := auth.NewBcryptHasher()
 	publisher := event.NewNoOpPublisher()
+	localStorage, err := storage.NewLocalStorage(cfg.Storage.UploadDir)
+	if err != nil {
+		log.Fatalf("Failed to initialize storage: %v", err)
+	}
+	emailSvc := email.NewSMTPService(&cfg.Email)
 
 	// Initialize application services
-	userSvc := user.NewUserApplicationService(userRepo, hasher, jwtSvc, publisher)
+	userSvc := user.NewUserApplicationService(userRepo, hasher, jwtSvc, publisher, emailSvc, codeRepo)
 	annSvc := announcement.NewAnnouncementService(annRepo, publisher)
 	checkinSvc := checkin.NewCheckinService(checkinRepo, userRepo, publisher)
 	knowledgeSvc := knowledge.NewKnowledgeService(knowledgeRepo, publisher)
@@ -56,7 +64,7 @@ func main() {
 	dashboardHandler := httpInterface.NewDashboardHandler(dashboardSvc)
 	annHandler := httpInterface.NewAnnouncementHandler(annSvc)
 	checkinHandler := httpInterface.NewCheckinHandler(checkinSvc)
-	knowledgeHandler := httpInterface.NewKnowledgeHandler(knowledgeSvc)
+	knowledgeHandler := httpInterface.NewKnowledgeHandler(knowledgeSvc, localStorage)
 	approvalHandler := httpInterface.NewApprovalHandler(approvalSvc)
 
 	// Initialize router

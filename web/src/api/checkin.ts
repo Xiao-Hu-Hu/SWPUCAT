@@ -12,5 +12,11 @@ export const checkinApi = {
   },
   getRecords(limit = 10) {
     return api.get('/checkin/records', { params: { limit } })
+  },
+  getWeeklyStats() {
+    return api.get('/checkin/weekly-stats')
+  },
+  getOnlineMembers() {
+    return api.get('/checkin/online')
   }
 }

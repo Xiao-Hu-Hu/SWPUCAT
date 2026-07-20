@@ -10,11 +10,19 @@ export const knowledgeApi = {
   createLink(name: string, url: string, categoryId: number) {
     return api.post('/knowledge/links', { name, url, category_id: categoryId })
   },
-  uploadFile(fileName: string, fileSize: string, fileKey: string, categoryId: number) {
-    return api.post('/knowledge/files', { file_name: fileName, file_size: fileSize, file_key: fileKey, category_id: categoryId })
+  uploadFile(file: File, categoryId: number) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('category_id', categoryId.toString())
+    return api.post('/knowledge/files', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
   },
   deleteItem(id: number) {
     return api.delete(`/knowledge/items/${id}`)
+  },
+  downloadFile(id: number) {
+    return api.get(`/knowledge/download/${id}`, { responseType: 'blob' })
   },
   listCategories() {
     return api.get('/knowledge/categories')

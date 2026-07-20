@@ -30,17 +30,19 @@ func NewJWTService(cfg *config.JWTConfig) *JWTService {
 }
 
 type Claims struct {
-	UserID   int64  `json:"user_id"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
+	UserID    int64  `json:"user_id"`
+	Username  string `json:"username"`
+	StudentID string `json:"student_id,omitempty"`
+	Role      string `json:"role"`
 	jwt.RegisteredClaims
 }
 
-func (s *JWTService) GenerateAccessToken(userID int64, role string) (string, int64, error) {
+func (s *JWTService) GenerateAccessToken(userID int64, role string, studentID string) (string, int64, error) {
 	expiresAt := time.Now().Add(s.accessExpiry)
 	claims := Claims{
-		UserID: userID,
-		Role:   role,
+		UserID:    userID,
+		StudentID: studentID,
+		Role:      role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
