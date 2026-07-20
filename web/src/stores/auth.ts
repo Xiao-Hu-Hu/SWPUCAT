@@ -21,7 +21,17 @@ interface LoginResponse {
 export const useAuthStore = defineStore('auth', () => {
   const accessToken = ref(localStorage.getItem('access_token') || '')
   const refreshToken = ref(localStorage.getItem('refresh_token') || '')
-  const user = ref<User | null>(JSON.parse(localStorage.getItem('user') || 'null'))
+
+  let storedUser = null
+  try {
+    const userStr = localStorage.getItem('user')
+    if (userStr && userStr !== 'undefined') {
+      storedUser = JSON.parse(userStr)
+    }
+  } catch {
+    storedUser = null
+  }
+  const user = ref<User | null>(storedUser)
 
   const isAuthenticated = computed(() => !!accessToken.value)
   const isCaptain = computed(() => user.value?.role === 'captain')
