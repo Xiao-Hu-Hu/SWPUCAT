@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -100,6 +101,10 @@ func Load() (*Config, error) {
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, err
 	}
+
+	// Debug: print environment variables
+	log.Printf("CSA_DATABASE_HOST=%s", os.Getenv("CSA_DATABASE_HOST"))
+	log.Printf("Config Database Host=%s", cfg.Database.Host)
 
 	// Override with environment variables if set
 	if host := os.Getenv("CSA_DATABASE_HOST"); host != "" {
