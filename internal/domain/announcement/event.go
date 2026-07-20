@@ -7,7 +7,7 @@ type AnnouncementPublished struct {
 	Title      string
 	AuthorID   int64
 	Pinned     bool
-	OccurredAt time.Time
+	occurredAt time.Time
 }
 
 func NewAnnouncementPublished(annID int64, title string, authorID int64, pinned bool) *AnnouncementPublished {
@@ -16,9 +16,10 @@ func NewAnnouncementPublished(annID int64, title string, authorID int64, pinned 
 		Title:      title,
 		AuthorID:   authorID,
 		Pinned:     pinned,
-		OccurredAt: time.Now(),
+		occurredAt: time.Now(),
 	}
 }
 
 func (e *AnnouncementPublished) Type() string        { return "announcement.published" }
+func (e *AnnouncementPublished) OccurredAt() time.Time { return e.occurredAt }
 func (e *AnnouncementPublished) AggregateID() int64   { return e.AnnID }
