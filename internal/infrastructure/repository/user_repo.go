@@ -36,9 +36,9 @@ func (r *UserRepo) FindByID(ctx context.Context, id int64) (*user.User, error) {
 	return toDomainUser(&model), nil
 }
 
-func (r *UserRepo) FindByUsername(ctx context.Context, username string) (*user.User, error) {
+func (r *UserRepo) FindByUsername(ctx context.Context, username user.Username) (*user.User, error) {
 	var model database.UserModel
-	if err := r.db.WithContext(ctx).Where("username = ?", username).First(&model).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("username = ?", string(username)).First(&model).Error; err != nil {
 		return nil, err
 	}
 	return toDomainUser(&model), nil
@@ -86,9 +86,9 @@ func (r *UserRepo) Count(ctx context.Context) (int64, error) {
 	return count, err
 }
 
-func (r *UserRepo) ExistsByUsername(ctx context.Context, username string) (bool, error) {
+func (r *UserRepo) ExistsByUsername(ctx context.Context, username user.Username) (bool, error) {
 	var count int64
-	err := r.db.WithContext(ctx).Model(&database.UserModel{}).Where("username = ?", username).Count(&count).Error
+	err := r.db.WithContext(ctx).Model(&database.UserModel{}).Where("username = ?", string(username)).Count(&count).Error
 	return count > 0, err
 }
 
