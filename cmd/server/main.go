@@ -30,19 +30,6 @@ func main() {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	// Auto migrate
-	if err := db.AutoMigrate(
-		&database.UserModel{},
-		&database.AnnouncementModel{},
-		&database.CheckinRecordModel{},
-		&database.KnowledgeCategoryModel{},
-		&database.KnowledgeItemModel{},
-		&database.ApprovalModel{},
-		&database.SettingModel{},
-	); err != nil {
-		log.Fatalf("Failed to migrate database: %v", err)
-	}
-
 	// Initialize repositories
 	userRepo := repository.NewUserRepo(db)
 	annRepo := repository.NewAnnouncementRepo(db)
