@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -98,5 +100,31 @@ func Load() (*Config, error) {
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, err
 	}
+
+	// Override with environment variables if set
+	if host := os.Getenv("CSA_DATABASE_HOST"); host != "" {
+		cfg.Database.Host = host
+	}
+	if port := os.Getenv("CSA_DATABASE_PORT"); port != "" {
+		if p, err := strconv.Atoi(port); err == nil {
+			cfg.Database.Port = p
+		}
+	}
+	if user := os.Getenv("CSA_DATABASE_USER"); user != "" {
+		cfg.Database.User = user
+	}
+	if password := os.Getenv("CSA_DATABASE_PASSWORD"); password != "" {
+		cfg.Database.Password = password
+	}
+	if dbname := os.Getenv("CSA_DATABASE_DBNAME"); dbname != "" {
+		cfg.Database.DBName = dbname
+	}
+	if secret := os.Getenv("CSA_JWT_ACCESS_SECRET"); secret != "" {
+		cfg.JWT.AccessSecret = secret
+	}
+	if secret := os.Getenv("CSA_JWT_REFRESH_SECRET"); secret != "" {
+		cfg.JWT.RefreshSecret = secret
+	}
+
 	return &cfg, nil
 }
