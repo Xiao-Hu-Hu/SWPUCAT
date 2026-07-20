@@ -23,12 +23,14 @@ type ServerConfig struct {
 }
 
 type DatabaseConfig struct {
-	Host     string `mapstructure:"host"`
-	Port     int    `mapstructure:"port"`
-	User     string `mapstructure:"user"`
-	Password string `mapstructure:"password"`
-	DBName   string `mapstructure:"dbname"`
-	SSLMode  string `mapstructure:"sslmode"`
+	Host         string `mapstructure:"host"`
+	Port         int    `mapstructure:"port"`
+	User         string `mapstructure:"user"`
+	Password     string `mapstructure:"password"`
+	DBName       string `mapstructure:"dbname"`
+	SSLMode      string `mapstructure:"sslmode"`
+	MaxOpenConns int    `mapstructure:"max_open_conns"`
+	MaxIdleConns int    `mapstructure:"max_idle_conns"`
 }
 
 func (d *DatabaseConfig) DSN() string {
@@ -73,6 +75,8 @@ func Load() (*Config, error) {
 	viper.SetDefault("database.password", "csa_password")
 	viper.SetDefault("database.dbname", "csa_db")
 	viper.SetDefault("database.sslmode", "disable")
+	viper.SetDefault("database.max_open_conns", 100)
+	viper.SetDefault("database.max_idle_conns", 10)
 	viper.SetDefault("redis.addr", "localhost:6379")
 	viper.SetDefault("redis.db", 0)
 	viper.SetDefault("jwt.access_expiry", 15*time.Minute)
