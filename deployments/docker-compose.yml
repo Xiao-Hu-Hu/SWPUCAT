@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: swpucat-db
+    environment:
+      POSTGRES_USER: csa
+      POSTGRES_PASSWORD: csa_password
+      POSTGRES_DB: csa_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U csa -d csa_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+    container_name: swpucat-server
+    environment:
+      CSA_DATABASE_HOST: postgres
+      CSA_DATABASE_PORT: 5432
+      CSA_DATABASE_USER: csa
+      CSA_DATABASE_PASSWORD: csa_password
+      CSA_DATABASE_DBNAME: csa_db
+      CSA_JWT_ACCESS_SECRET: your-access-secret-change-in-production
+      CSA_JWT_REFRESH_SECRET: your-refresh-secret-change-in-production
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    image: node:20-alpine
+    container_name: swpucat-web
+    working_dir: /app
+    volumes:
+      - ../web:/app
+    ports:
+      - "3000:3000"
+    command: sh -c "npm install && npm run dev"
+    environment:
+      - NODE_ENV=development
+
+volumes:
+  postgres_data:
