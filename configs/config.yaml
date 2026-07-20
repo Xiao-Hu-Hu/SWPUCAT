@@ -1,0 +1,28 @@
+server:
+  port: 8080
+  mode: debug
+  read_timeout: 10s
+  write_timeout: 10s
+
+database:
+  host: localhost
+  port: 5432
+  user: csa
+  password: csa_password
+  dbname: csa_db
+  sslmode: disable
+
+redis:
+  addr: localhost:6379
+  password: ""
+  db: 0
+
+jwt:
+  access_secret: dev-access-secret-change-in-production
+  refresh_secret: dev-refresh-secret-change-in-production
+  access_expiry: 15m
+  refresh_expiry: 168h
+
+log:
+  level: debug
+  format: console
