@@ -92,15 +92,10 @@ func (s *DashboardService) GetDashboard(ctx context.Context) (*DashboardDTO, err
 	if len(onlineIDs) > 0 {
 		onlineUsers, _ := s.userRepo.FindByIDs(ctx, onlineIDs)
 		for _, u := range onlineUsers {
-			nickname := string(u.Nickname)
-			avatar := ""
-			if len(nickname) > 0 {
-				avatar = string([]rune(nickname)[0])
-			}
 			onlineMembers = append(onlineMembers, OnlineMemberDTO{
 				ID:       u.ID,
-				Nickname: nickname,
-				Avatar:   avatar,
+				Nickname: string(u.Nickname),
+				Avatar:   u.Avatar,
 			})
 		}
 	}

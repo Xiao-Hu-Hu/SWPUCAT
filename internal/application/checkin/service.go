@@ -147,12 +147,15 @@ func (s *CheckinService) GetWeeklyStats(ctx context.Context) ([]WeeklyStatsDTO, 
 		return nil, err
 	}
 
-	// Group records by user
+	// Group records by user (skip invalid user_id 0)
 	type userRecords struct {
 		records []*checkin.CheckinRecord
 	}
 	userMap := make(map[int64]*userRecords)
 	for _, r := range records {
+		if r.UserID == 0 {
+			continue
+		}
 		if _, ok := userMap[r.UserID]; !ok {
 			userMap[r.UserID] = &userRecords{}
 		}

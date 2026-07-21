@@ -62,9 +62,10 @@ func (r *AnnouncementRepo) FindPinned(ctx context.Context) ([]*announcement.Anno
 
 func (r *AnnouncementRepo) Update(ctx context.Context, a *announcement.Announcement) error {
 	return r.db.WithContext(ctx).Model(&database.AnnouncementModel{}).Where("id = ?", a.ID).Updates(map[string]interface{}{
-		"title":   a.Title,
-		"content": a.Content,
-		"pinned":  a.Pinned,
+		"title":      a.Title,
+		"content":    a.Content,
+		"pinned":     a.Pinned,
+		"updated_at": a.UpdatedAt,
 	}).Error
 }
 

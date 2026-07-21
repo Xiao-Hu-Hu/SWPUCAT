@@ -47,7 +47,7 @@ function openEdit(ann: typeof announcements.value[0]) {
 async function handleSubmit() {
   try {
     if (editingId.value) {
-      await announcementApi.update(editingId.value, form.value.title, form.value.content)
+      await announcementApi.update(editingId.value, form.value.title, form.value.content, form.value.pinned)
       ElMessage.success('更新成功')
     } else {
       await announcementApi.create(form.value.title, form.value.content, form.value.pinned)
@@ -112,7 +112,7 @@ async function handleDelete(id: number) {
         <el-form-item label="内容">
           <el-input v-model="form.content" type="textarea" :rows="6" placeholder="请输入公告内容" />
         </el-form-item>
-        <el-form-item v-if="!editingId" label="置顶">
+        <el-form-item label="置顶">
           <el-switch v-model="form.pinned" />
         </el-form-item>
       </el-form>

@@ -186,7 +186,7 @@ async function handleChangePassword() {
       </div>
 
       <el-form label-width="100px" style="max-width: 500px">
-        <el-form-item label="用户名">
+        <el-form-item label="学号">
           <el-input :value="authStore.user?.username" disabled />
         </el-form-item>
         <el-form-item label="昵称">

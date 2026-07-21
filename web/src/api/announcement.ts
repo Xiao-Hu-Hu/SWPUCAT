@@ -7,8 +7,8 @@ export const announcementApi = {
   create(title: string, content: string, pinned = false) {
     return api.post('/announcements', { title, content, pinned })
   },
-  update(id: number, title: string, content: string) {
-    return api.put(`/announcements/${id}`, { title, content })
+  update(id: number, title: string, content: string, pinned?: boolean) {
+    return api.put(`/announcements/${id}`, { title, content, pinned })
   },
   delete(id: number) {
     return api.delete(`/announcements/${id}`)

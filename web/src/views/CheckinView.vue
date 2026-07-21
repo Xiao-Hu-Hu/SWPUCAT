@@ -16,8 +16,20 @@ const onlineMembers = ref<Array<{ user_id: number; nickname: string; online: boo
 const currentTime = ref(new Date().toLocaleTimeString('zh-CN'))
 
 const filteredStats = computed(() => {
-  return weeklyStats.value.filter(s => s.nickname !== '超级管理员')
+  return weeklyStats.value
+    .filter(s => s.nickname !== '超级管理员' && s.user_id > 0)
+    .sort((a, b) => b.total_minutes - a.total_minutes)
 })
+
+function formatMinutes(totalMinutes: number): string {
+  const m = Math.round(totalMinutes)
+  if (m < 1) return '0分钟'
+  const hours = Math.floor(m / 60)
+  const mins = m % 60
+  if (hours === 0) return `${mins}分钟`
+  if (mins === 0) return `${hours}小时`
+  return `${hours}小时${mins}分钟`
+}
 
 setInterval(() => {
   currentTime.value = new Date().toLocaleTimeString('zh-CN')
@@ -48,7 +60,7 @@ function updateChart() {
       axisPointer: { type: 'shadow' },
       formatter: (params: any) => {
         const d = params[0]
-        return `${d.name}<br/>本周累计: ${d.value} 小时`
+        return `${d.name}<br/>本周累计: ${formatMinutes(d.value)}`
       }
     },
     grid: {
@@ -68,13 +80,13 @@ function updateChart() {
     },
     yAxis: {
       type: 'value',
-      name: '小时',
+      name: '分钟',
       axisLabel: { color: '#909399' }
     },
     series: [{
       type: 'bar',
       data: data.map(d => ({
-        value: d.total_hours,
+        value: Math.round(d.total_minutes),
         itemStyle: {
           color: d.user_id === authStore.user?.id
             ? new echarts.graphic.LinearGradient(0, 0, 0, 1, [
@@ -91,7 +103,7 @@ function updateChart() {
       label: {
         show: true,
         position: 'top',
-        formatter: '{c}h',
+        formatter: (params: any) => formatMinutes(params.value),
         color: '#909399'
       }
     }]
@@ -135,6 +147,7 @@ async function handleClockOut() {
     ElMessage.success('签退成功')
     await loadStatus()
     await loadRecords()
+    await loadWeeklyStats()
     await loadOnlineMembers()
   } catch {
     ElMessage.error('签退失败')
@@ -207,11 +220,11 @@ async function loadOnlineMembers() {
     <div class="stats-section">
       <div class="card">
         <h3>本周签到统计</h3>
-        <el-table :data="filteredStats" style="width: 100%">
+        <el-table :data="filteredStats" style="width: 100%" :row-class-name="({ row }: any) => row.user_id === authStore.user?.id ? 'current-user-row' : ''">
           <el-table-column prop="nickname" label="成员" width="120" />
-          <el-table-column label="本周累计时长" width="150">
+          <el-table-column label="本周累计时长" width="180">
             <template #default="{ row }">
-              {{ row.total_hours.toFixed(1) }} 小时
+              {{ formatMinutes(row.total_minutes) }}
             </template>
           </el-table-column>
           <el-table-column prop="days" label="签到天数" width="100" />
@@ -382,5 +395,17 @@ async function loadOnlineMembers() {
 .chart-container {
   width: 100%;
   height: 300px;
+}
+
+:deep(.current-user-row) {
+  background: rgba(64, 158, 255, 0.1) !important;
+}
+
+:deep(.current-user-row:hover > td) {
+  background: rgba(64, 158, 255, 0.15) !important;
+}
+
+:deep(.current-user-row .cell) {
+  font-weight: 600;
 }
 </style>

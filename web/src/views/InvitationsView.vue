@@ -73,11 +73,11 @@ function copyCode(code: string) {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="used" label="状态" width="100">
+        <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="row.used ? 'success' : 'danger'">
-              {{ row.used ? '已使用' : '未使用' }}
-            </el-tag>
+            <el-tag v-if="row.used" type="success">已使用</el-tag>
+            <el-tag v-else-if="new Date(row.expires_at) < new Date()" type="info">已过期</el-tag>
+            <el-tag v-else type="warning">未使用</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="expires_at" label="过期时间" width="180" />

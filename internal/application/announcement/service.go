@@ -4,6 +4,7 @@ import (
 	"context"
 	"SWPUCAT/internal/domain/announcement"
 	"SWPUCAT/internal/domain/shared"
+	"SWPUCAT/internal/domain/user"
 	"time"
 )
 
@@ -16,6 +17,7 @@ type CreateRequest struct {
 type UpdateRequest struct {
 	Title   string `json:"title" validate:"required,max=256"`
 	Content string `json:"content" validate:"required"`
+	Pinned  *bool  `json:"pinned,omitempty"`
 }
 
 type AnnouncementDTO struct {
@@ -32,10 +34,11 @@ type AnnouncementDTO struct {
 type AnnouncementService struct {
 	annRepo   announcement.Repository
 	publisher shared.EventPublisher
+	userRepo  user.Repository
 }
 
-func NewAnnouncementService(annRepo announcement.Repository, publisher shared.EventPublisher) *AnnouncementService {
-	return &AnnouncementService{annRepo: annRepo, publisher: publisher}
+func NewAnnouncementService(annRepo announcement.Repository, publisher shared.EventPublisher, userRepo user.Repository) *AnnouncementService {
+	return &AnnouncementService{annRepo: annRepo, publisher: publisher, userRepo: userRepo}
 }
 
 func (s *AnnouncementService) Create(ctx context.Context, operatorID int64, operatorName string, req CreateRequest) (*AnnouncementDTO, error) {
@@ -58,6 +61,13 @@ func (s *AnnouncementService) Update(ctx context.Context, annID int64, req Updat
 	if err := ann.Update(req.Title, req.Content); err != nil {
 		return err
 	}
+	if req.Pinned != nil {
+		if *req.Pinned {
+			ann.Pin()
+		} else {
+			ann.Unpin()
+		}
+	}
 	return s.annRepo.Update(ctx, ann)
 }
 
@@ -70,9 +80,37 @@ func (s *AnnouncementService) List(ctx context.Context) ([]AnnouncementDTO, erro
 	if err != nil {
 		return nil, err
 	}
+
+	// Collect author IDs that need name resolution
+	authorIDs := make(map[int64]bool)
+	for _, a := range anns {
+		if a.AuthorName == "" {
+			authorIDs[a.AuthorID] = true
+		}
+	}
+
+	// Batch fetch authors
+	authorNames := make(map[int64]string)
+	if len(authorIDs) > 0 {
+		ids := make([]int64, 0, len(authorIDs))
+		for id := range authorIDs {
+			ids = append(ids, id)
+		}
+		users, _ := s.userRepo.FindByIDs(ctx, ids)
+		for _, u := range users {
+			authorNames[u.ID] = u.DisplayName()
+		}
+	}
+
 	result := make([]AnnouncementDTO, 0, len(anns))
 	for _, a := range anns {
-		result = append(result, *toDTO(a))
+		dto := toDTO(a)
+		if dto.AuthorName == "" {
+			if name, ok := authorNames[a.AuthorID]; ok {
+				dto.AuthorName = name
+			}
+		}
+		result = append(result, *dto)
 	}
 	return result, nil
 }

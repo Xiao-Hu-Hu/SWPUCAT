@@ -14,7 +14,11 @@ const dashboard = ref({
 onMounted(async () => {
   try {
     const res = await dashboardApi.getDashboard()
-    dashboard.value = res.data
+    const data = res.data
+    // Ensure arrays are not null
+    if (!data.recent_activities) data.recent_activities = []
+    if (!data.online_members) data.online_members = []
+    dashboard.value = data
   } catch {
     console.error('Failed to load dashboard')
   }
@@ -81,7 +85,7 @@ onMounted(async () => {
         <h3>在线成员</h3>
         <div class="online-list">
           <div v-for="member in dashboard.online_members" :key="member.id" class="online-member">
-            <el-avatar :size="36">{{ member.avatar }}</el-avatar>
+            <el-avatar :size="36" :src="member.avatar ? `/api/avatar/${member.avatar}` : undefined">{{ member.nickname?.[0] || 'U' }}</el-avatar>
             <span class="member-name">{{ member.nickname }}</span>
           </div>
           <el-empty v-if="dashboard.online_members.length === 0" description="暂无在线成员" />
