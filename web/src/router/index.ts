@@ -45,6 +45,11 @@ const router = createRouter({
           component: () => import('@/views/ApprovalsView.vue')
         },
         {
+          path: 'invitations',
+          name: 'invitations',
+          component: () => import('@/views/InvitationsView.vue')
+        },
+        {
           path: 'settings',
           name: 'settings',
           component: () => import('@/views/SettingsView.vue')

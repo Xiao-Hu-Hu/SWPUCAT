@@ -9,16 +9,25 @@ import (
 type Role string
 
 const (
-	RoleCaptain Role = "captain"
-	RoleMember  Role = "member"
+	RoleSuperAdmin Role = "super_admin"
+	RoleCaptain    Role = "captain"
+	RoleMember     Role = "member"
 )
 
 func (r Role) IsValid() bool {
-	return r == RoleCaptain || r == RoleMember
+	return r == RoleSuperAdmin || r == RoleCaptain || r == RoleMember
+}
+
+func (r Role) IsSuperAdmin() bool {
+	return r == RoleSuperAdmin
 }
 
 func (r Role) IsCaptain() bool {
 	return r == RoleCaptain
+}
+
+func (r Role) IsMember() bool {
+	return r == RoleMember
 }
 
 type Username string

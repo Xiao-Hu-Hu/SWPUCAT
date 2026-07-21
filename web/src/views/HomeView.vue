@@ -12,7 +12,7 @@ const showLogin = ref(false)
 const showRegister = ref(false)
 
 const loginForm = ref({ username: '', password: '' })
-const registerForm = ref({ username: '', password: '', nickname: '', email: '', verificationCode: '' })
+const registerForm = ref({ username: '', password: '', nickname: '', email: '', verificationCode: '', invitationCode: '' })
 
 // Captcha state
 const captchaPassed = ref(false)
@@ -88,7 +88,8 @@ async function handleRegister() {
       registerForm.value.password,
       registerForm.value.nickname,
       registerForm.value.email,
-      registerForm.value.verificationCode
+      registerForm.value.verificationCode,
+      registerForm.value.invitationCode
     )
     showRegister.value = false
     ElMessage.success('注册成功')
@@ -160,6 +161,9 @@ async function handleRegister() {
     <!-- Register Dialog -->
     <el-dialog v-model="showRegister" title="注册" width="400px">
       <el-form :model="registerForm" label-width="80px">
+        <el-form-item label="邀请码">
+          <el-input v-model="registerForm.invitationCode" placeholder="请输入6位邀请码" maxlength="6" />
+        </el-form-item>
         <el-form-item label="学号">
           <el-input v-model="registerForm.username" placeholder="请输入12位学号 (如: 202431060420)" maxlength="12" />
         </el-form-item>

@@ -8,15 +8,16 @@ import (
 )
 
 type Router struct {
-	engine          *gin.Engine
-	jwtSvc          *auth.JWTService
-	authHandler     *AuthHandler
-	userHandler     *UserHandler
-	dashboardHandler *DashboardHandler
-	annHandler      *AnnouncementHandler
-	checkinHandler  *CheckinHandler
-	knowledgeHandler *KnowledgeHandler
-	approvalHandler *ApprovalHandler
+	engine            *gin.Engine
+	jwtSvc            *auth.JWTService
+	authHandler       *AuthHandler
+	userHandler       *UserHandler
+	dashboardHandler  *DashboardHandler
+	annHandler        *AnnouncementHandler
+	checkinHandler    *CheckinHandler
+	knowledgeHandler  *KnowledgeHandler
+	approvalHandler   *ApprovalHandler
+	invitationHandler *InvitationHandler
 }
 
 func NewRouter(
@@ -28,6 +29,7 @@ func NewRouter(
 	checkinHandler *CheckinHandler,
 	knowledgeHandler *KnowledgeHandler,
 	approvalHandler *ApprovalHandler,
+	invitationHandler *InvitationHandler,
 ) *Router {
 	engine := gin.Default()
 
@@ -40,15 +42,16 @@ func NewRouter(
 	}))
 
 	return &Router{
-		engine:           engine,
-		jwtSvc:           jwtSvc,
-		authHandler:      authHandler,
-		userHandler:      userHandler,
-		dashboardHandler: dashboardHandler,
-		annHandler:       annHandler,
-		checkinHandler:   checkinHandler,
-		knowledgeHandler: knowledgeHandler,
-		approvalHandler:  approvalHandler,
+		engine:            engine,
+		jwtSvc:            jwtSvc,
+		authHandler:       authHandler,
+		userHandler:       userHandler,
+		dashboardHandler:  dashboardHandler,
+		annHandler:        annHandler,
+		checkinHandler:    checkinHandler,
+		knowledgeHandler:  knowledgeHandler,
+		approvalHandler:   approvalHandler,
+		invitationHandler: invitationHandler,
 	}
 }
 
@@ -107,6 +110,10 @@ func (r *Router) Setup() *gin.Engine {
 			protected.POST("/approvals", r.approvalHandler.Submit)
 			protected.POST("/approvals/:id/approve", r.approvalHandler.Approve)
 			protected.POST("/approvals/:id/reject", r.approvalHandler.Reject)
+
+			// Invitation codes (super_admin and captain only)
+			protected.POST("/invitations/generate", r.invitationHandler.GenerateCode)
+			protected.GET("/invitations/my", r.invitationHandler.GetMyCodes)
 		}
 	}
 

@@ -5,6 +5,7 @@ import (
 	"SWPUCAT/internal/application/approval"
 	"SWPUCAT/internal/application/checkin"
 	"SWPUCAT/internal/application/dashboard"
+	"SWPUCAT/internal/application/invitation"
 	"SWPUCAT/internal/application/knowledge"
 	"SWPUCAT/internal/application/user"
 	"SWPUCAT/internal/infrastructure/auth"
@@ -39,6 +40,7 @@ func main() {
 	knowledgeRepo := repository.NewKnowledgeRepo(db)
 	approvalRepo := repository.NewApprovalRepo(db)
 	codeRepo := repository.NewVerificationCodeRepo(db)
+	invitationRepo := repository.NewInvitationRepo(db)
 
 	// Initialize infrastructure services
 	jwtSvc := auth.NewJWTService(&cfg.JWT)
@@ -51,8 +53,9 @@ func main() {
 	emailSvc := email.NewSMTPService(&cfg.Email)
 
 	// Initialize application services
-	userSvc := user.NewUserApplicationService(userRepo, hasher, jwtSvc, publisher, emailSvc, codeRepo)
+	userSvc := user.NewUserApplicationService(userRepo, hasher, jwtSvc, publisher, emailSvc, codeRepo, invitationRepo)
 	annSvc := announcement.NewAnnouncementService(annRepo, publisher)
+	invitationSvc := invitation.NewInvitationService(invitationRepo, userRepo)
 	checkinSvc := checkin.NewCheckinService(checkinRepo, userRepo, publisher)
 	knowledgeSvc := knowledge.NewKnowledgeService(knowledgeRepo, publisher)
 	approvalSvc := approval.NewApprovalService(approvalRepo, knowledgeRepo, publisher)
@@ -66,6 +69,7 @@ func main() {
 	checkinHandler := httpInterface.NewCheckinHandler(checkinSvc)
 	knowledgeHandler := httpInterface.NewKnowledgeHandler(knowledgeSvc, localStorage)
 	approvalHandler := httpInterface.NewApprovalHandler(approvalSvc)
+	invitationHandler := httpInterface.NewInvitationHandler(invitationSvc)
 
 	// Initialize router
 	router := httpInterface.NewRouter(
@@ -77,6 +81,7 @@ func main() {
 		checkinHandler,
 		knowledgeHandler,
 		approvalHandler,
+		invitationHandler,
 	)
 
 	// Setup routes

@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"time"
 
+	"SWPUCAT/internal/domain/invitation"
 	"SWPUCAT/internal/domain/shared"
 	"SWPUCAT/internal/domain/user"
 )
@@ -32,13 +33,19 @@ type VerificationCodeRepository interface {
 	FindValidCode(ctx context.Context, email string, code string) (bool, error)
 }
 
+type InvitationCodeRepository interface {
+	FindByCode(ctx context.Context, code string) (*invitation.InvitationCode, error)
+	Update(ctx context.Context, code *invitation.InvitationCode) error
+}
+
 type UserApplicationService struct {
-	userRepo    user.Repository
-	hasher      PasswordHasher
-	jwtSvc      JWTService
-	publisher   shared.EventPublisher
-	emailSvc    EmailService
-	codeRepo    VerificationCodeRepository
+	userRepo     user.Repository
+	hasher       PasswordHasher
+	jwtSvc       JWTService
+	publisher    shared.EventPublisher
+	emailSvc     EmailService
+	codeRepo     VerificationCodeRepository
+	invitationRepo InvitationCodeRepository
 }
 
 func NewUserApplicationService(
@@ -48,14 +55,16 @@ func NewUserApplicationService(
 	publisher shared.EventPublisher,
 	emailSvc EmailService,
 	codeRepo VerificationCodeRepository,
+	invitationRepo InvitationCodeRepository,
 ) *UserApplicationService {
 	return &UserApplicationService{
-		userRepo:  userRepo,
-		hasher:    hasher,
-		jwtSvc:    jwtSvc,
-		publisher: publisher,
-		emailSvc:  emailSvc,
-		codeRepo:  codeRepo,
+		userRepo:       userRepo,
+		hasher:         hasher,
+		jwtSvc:         jwtSvc,
+		publisher:      publisher,
+		emailSvc:       emailSvc,
+		codeRepo:       codeRepo,
+		invitationRepo: invitationRepo,
 	}
 }
 
@@ -99,6 +108,29 @@ func (s *UserApplicationService) Register(ctx context.Context, req RegisterReque
 		return nil, fmt.Errorf("invalid verification code")
 	}
 
+	// Validate invitation code
+	invCode, err := s.invitationRepo.FindByCode(ctx, req.InvitationCode)
+	if err != nil {
+		return nil, fmt.Errorf("invalid invitation code")
+	}
+	if !invCode.IsValid() {
+		if invCode.Used {
+			return nil, invitation.ErrCodeAlreadyUsed
+		}
+		return nil, invitation.ErrCodeExpired
+	}
+
+	// Determine role based on invitation type
+	var role user.Role
+	switch invCode.Type {
+	case invitation.TypeCaptain:
+		role = user.RoleCaptain
+	case invitation.TypeMember:
+		role = user.RoleMember
+	default:
+		return nil, fmt.Errorf("invalid invitation type")
+	}
+
 	exists, err := s.userRepo.ExistsByStudentID(ctx, studentID)
 	if err != nil {
 		return nil, err
@@ -113,7 +145,17 @@ func (s *UserApplicationService) Register(ctx context.Context, req RegisterReque
 	}
 
 	u := user.NewUserWithStudentID(studentID, req.Email, nickname, user.PasswordHash(hashedPassword))
+	u.Role = role
+
 	if err := s.userRepo.Create(ctx, u); err != nil {
+		return nil, err
+	}
+
+	// Mark invitation code as used
+	if err := invCode.Use(u.ID); err != nil {
+		return nil, err
+	}
+	if err := s.invitationRepo.Update(ctx, invCode); err != nil {
 		return nil, err
 	}
 

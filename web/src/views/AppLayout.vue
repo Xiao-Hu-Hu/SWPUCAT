@@ -15,6 +15,7 @@ const menuItems = [
   { path: '/app/knowledge', icon: 'Folder', title: '知识库' },
   { path: '/app/members', icon: 'User', title: '成员管理' },
   { path: '/app/approvals', icon: 'Check', title: '审批管理' },
+  { path: '/app/invitations', icon: 'Link', title: '邀请码管理', show: authStore.isSuperAdmin || authStore.isCaptain },
   { path: '/app/settings', icon: 'Setting', title: '设置' }
 ]
 
@@ -39,7 +40,7 @@ function handleLogout() {
         text-color="var(--text)"
         active-text-color="var(--accent)"
       >
-        <el-menu-item v-for="item in menuItems" :key="item.path" :index="item.path">
+        <el-menu-item v-for="item in menuItems" :key="item.path" :index="item.path" v-show="item.show !== false">
           <el-icon><component :is="item.icon" /></el-icon>
           <template #title>{{ item.title }}</template>
         </el-menu-item>

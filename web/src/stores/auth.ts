@@ -35,6 +35,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isAuthenticated = computed(() => !!accessToken.value)
   const isCaptain = computed(() => user.value?.role === 'captain')
+  const isSuperAdmin = computed(() => user.value?.role === 'super_admin')
 
   function setTokens(data: LoginResponse) {
     accessToken.value = data.access_token
@@ -63,8 +64,8 @@ export const useAuthStore = defineStore('auth', () => {
     return data
   }
 
-  async function register(username: string, password: string, nickname: string, email: string, verificationCode: string) {
-    const res = await authApi.register(username, password, nickname, email, verificationCode)
+  async function register(username: string, password: string, nickname: string, email: string, verificationCode: string, invitationCode: string) {
+    const res = await authApi.register(username, password, nickname, email, verificationCode, invitationCode)
     const data = res.data || res
     setTokens(data)
     return data
@@ -80,6 +81,7 @@ export const useAuthStore = defineStore('auth', () => {
     user,
     isAuthenticated,
     isCaptain,
+    isSuperAdmin,
     login,
     register,
     logout

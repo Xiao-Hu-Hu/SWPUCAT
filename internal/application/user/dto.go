@@ -6,6 +6,7 @@ type RegisterRequest struct {
 	Password         string `json:"password" validate:"required,min=6,max=128"`
 	Email            string `json:"email" validate:"required,email"`
 	VerificationCode string `json:"verification_code" validate:"required,len=6"`
+	InvitationCode   string `json:"invitation_code" validate:"required,len=6"`
 }
 
 type LoginRequest struct {

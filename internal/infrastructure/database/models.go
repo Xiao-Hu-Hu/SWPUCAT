@@ -102,3 +102,16 @@ type VerificationCodeModel struct {
 }
 
 func (VerificationCodeModel) TableName() string { return "verification_codes" }
+
+type InvitationCodeModel struct {
+	ID        int64     `gorm:"primaryKey;autoIncrement"`
+	Code      string    `gorm:"uniqueIndex;size:6;not null"`
+	Type      string    `gorm:"size:16;not null"`
+	CreatorID int64     `gorm:"not null;index"`
+	UsedBy    *int64    `gorm:"index"`
+	Used      bool      `gorm:"not null;default:false"`
+	ExpiresAt time.Time `gorm:"not null"`
+	CreatedAt time.Time `gorm:"not null;default:current_timestamp"`
+}
+
+func (InvitationCodeModel) TableName() string { return "invitation_codes" }
