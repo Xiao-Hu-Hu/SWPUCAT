@@ -6,6 +6,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 
 const authStore = useAuthStore()
 const uploading = ref(false)
+const downloading = ref<Record<number, number>>({})
 const categories = ref<Array<{ id: number; name: string; is_system: boolean; count: number }>>([])
 const items = ref<Array<{
   id: number
@@ -136,8 +137,12 @@ async function handleUploadFile() {
 }
 
 async function handleDownloadFile(id: number, name: string) {
+  if (downloading.value[id] !== undefined) return
+  downloading.value[id] = 0
   try {
-    const res = await knowledgeApi.downloadFile(id)
+    const res = await knowledgeApi.downloadFile(id, (percent) => {
+      downloading.value[id] = percent
+    })
     const url = window.URL.createObjectURL(new Blob([res.data]))
     const link = document.createElement('a')
     link.href = url
@@ -146,8 +151,13 @@ async function handleDownloadFile(id: number, name: string) {
     link.click()
     link.remove()
     window.URL.revokeObjectURL(url)
+    downloading.value[id] = 100
+    setTimeout(() => {
+      delete downloading.value[id]
+    }, 1000)
   } catch {
     ElMessage.error('下载失败')
+    delete downloading.value[id]
   }
 }
 </script>
@@ -241,9 +251,11 @@ async function handleDownloadFile(id: number, name: string) {
                 v-if="item.type === 'file'"
                 size="small"
                 type="primary"
+                :loading="downloading[item.id] !== undefined && downloading[item.id] < 100"
+                :disabled="downloading[item.id] !== undefined"
                 @click="handleDownloadFile(item.id, item.name)"
               >
-                下载
+                {{ downloading[item.id] !== undefined ? (downloading[item.id] < 100 ? `${downloading[item.id]}%` : '完成') : '下载' }}
               </el-button>
               <el-button
                 v-if="authStore.isCaptain || authStore.user?.id === item.uploader_id"

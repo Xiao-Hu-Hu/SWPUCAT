@@ -21,8 +21,16 @@ export const knowledgeApi = {
   deleteItem(id: number) {
     return api.delete(`/knowledge/items/${id}`)
   },
-  downloadFile(id: number) {
-    return api.get(`/knowledge/download/${id}`, { responseType: 'blob' })
+  downloadFile(id: number, onProgress?: (percent: number) => void) {
+    return api.get(`/knowledge/download/${id}`, {
+      responseType: 'blob',
+      onDownloadProgress: (progressEvent) => {
+        if (onProgress && progressEvent.total) {
+          const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+          onProgress(percent)
+        }
+      }
+    })
   },
   listCategories() {
     return api.get('/knowledge/categories')
