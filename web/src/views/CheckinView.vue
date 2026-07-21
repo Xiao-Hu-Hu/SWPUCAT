@@ -1,13 +1,23 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { checkinApi } from '@/api/checkin'
+import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
+import * as echarts from 'echarts'
+
+const authStore = useAuthStore()
+const chartRef = ref<HTMLElement | null>(null)
+let chart: echarts.ECharts | null = null
 
 const status = ref({ status: 'idle', clock_in: '', clock_out: '' })
 const records = ref<Array<{ id: number; type: string; date: string; time: string }>>([])
 const weeklyStats = ref<Array<{ user_id: number; nickname: string; total_minutes: number; total_hours: number; days: number }>>([])
 const onlineMembers = ref<Array<{ user_id: number; nickname: string; online: boolean }>>([])
 const currentTime = ref(new Date().toLocaleTimeString('zh-CN'))
+
+const filteredStats = computed(() => {
+  return weeklyStats.value.filter(s => s.nickname !== '超级管理员')
+})
 
 setInterval(() => {
   currentTime.value = new Date().toLocaleTimeString('zh-CN')
@@ -18,7 +28,76 @@ onMounted(async () => {
   await loadRecords()
   await loadWeeklyStats()
   await loadOnlineMembers()
+  await nextTick()
+  initChart()
 })
+
+function initChart() {
+  if (!chartRef.value) return
+  chart = echarts.init(chartRef.value)
+  updateChart()
+  window.addEventListener('resize', () => chart?.resize())
+}
+
+function updateChart() {
+  if (!chart) return
+  const data = filteredStats.value
+  const option = {
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params: any) => {
+        const d = params[0]
+        return `${d.name}<br/>本周累计: ${d.value} 小时`
+      }
+    },
+    grid: {
+      left: '3%',
+      right: '4%',
+      bottom: '3%',
+      top: '15%',
+      containLabel: true
+    },
+    xAxis: {
+      type: 'category',
+      data: data.map(d => d.nickname),
+      axisLabel: {
+        color: '#909399',
+        rotate: data.length > 5 ? 30 : 0
+      }
+    },
+    yAxis: {
+      type: 'value',
+      name: '小时',
+      axisLabel: { color: '#909399' }
+    },
+    series: [{
+      type: 'bar',
+      data: data.map(d => ({
+        value: d.total_hours,
+        itemStyle: {
+          color: d.user_id === authStore.user?.id
+            ? new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                { offset: 0, color: '#67c23a' },
+                { offset: 1, color: '#409eff' }
+              ])
+            : new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                { offset: 0, color: '#409eff' },
+                { offset: 1, color: '#909399' }
+              ])
+        }
+      })),
+      barMaxWidth: 40,
+      label: {
+        show: true,
+        position: 'top',
+        formatter: '{c}h',
+        color: '#909399'
+      }
+    }]
+  }
+  chart.setOption(option)
+}
 
 async function loadStatus() {
   try {
@@ -66,6 +145,7 @@ async function loadWeeklyStats() {
   try {
     const res = await checkinApi.getWeeklyStats()
     weeklyStats.value = res.data || []
+    updateChart()
   } catch {
     console.error('Failed to load weekly stats')
   }
@@ -117,10 +197,17 @@ async function loadOnlineMembers() {
       </div>
     </div>
 
+    <div class="chart-section">
+      <div class="card">
+        <h3>本周签到时长统计</h3>
+        <div ref="chartRef" class="chart-container"></div>
+      </div>
+    </div>
+
     <div class="stats-section">
       <div class="card">
         <h3>本周签到统计</h3>
-        <el-table :data="weeklyStats" style="width: 100%">
+        <el-table :data="filteredStats" style="width: 100%">
           <el-table-column prop="nickname" label="成员" width="120" />
           <el-table-column label="本周累计时长" width="150">
             <template #default="{ row }">
@@ -286,5 +373,14 @@ async function loadOnlineMembers() {
 .online-dot.online {
   background: var(--success);
   box-shadow: 0 0 6px var(--success);
+}
+
+.chart-section {
+  margin-bottom: 2rem;
+}
+
+.chart-container {
+  width: 100%;
+  height: 300px;
 }
 </style>
