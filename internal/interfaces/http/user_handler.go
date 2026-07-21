@@ -28,6 +28,42 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 	Success(c, dto)
 }
 
+func (h *UserHandler) ChangePassword(c *gin.Context) {
+	userID := GetUserID(c)
+
+	var req user.ChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid request body")
+		return
+	}
+
+	if err := h.userSvc.ChangePassword(c.Request.Context(), userID, req); err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+
+	Success(c, nil)
+}
+
+func (h *UserHandler) UpdateProfile(c *gin.Context) {
+	userID := GetUserID(c)
+
+	var req struct {
+		Nickname string `json:"nickname" validate:"required,max=32"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Nickname == "" {
+		BadRequest(c, "invalid request body")
+		return
+	}
+
+	if err := h.userSvc.UpdateNickname(c.Request.Context(), userID, req.Nickname); err != nil {
+		InternalError(c, "failed to update profile")
+		return
+	}
+
+	Success(c, nil)
+}
+
 func (h *UserHandler) ListMembers(c *gin.Context) {
 	members, err := h.userSvc.ListMembers(c.Request.Context())
 	if err != nil {

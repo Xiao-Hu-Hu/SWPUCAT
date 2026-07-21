@@ -73,6 +73,8 @@ func (r *Router) Setup() *gin.Engine {
 		{
 			// User
 			protected.GET("/profile", r.userHandler.GetProfile)
+			protected.PUT("/profile", r.userHandler.UpdateProfile)
+			protected.PUT("/profile/password", r.userHandler.ChangePassword)
 			protected.GET("/members", r.userHandler.ListMembers)
 			protected.POST("/members/:id/transfer-captain", r.userHandler.TransferCaptain)
 			protected.DELETE("/members/:id", r.userHandler.RemoveMember)

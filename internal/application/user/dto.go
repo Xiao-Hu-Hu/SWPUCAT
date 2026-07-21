@@ -33,10 +33,17 @@ type UserDTO struct {
 	ID           int64  `json:"id"`
 	Username     string `json:"username"`
 	StudentID    string `json:"student_id,omitempty"`
+	Email        string `json:"email,omitempty"`
 	Nickname     string `json:"nickname"`
 	Role         string `json:"role"`
 	JoinedAt     string `json:"joined_at"`
 	CheckinCount int64  `json:"checkin_count"`
+}
+
+type ChangePasswordRequest struct {
+	OldPassword      string `json:"old_password" validate:"required"`
+	NewPassword      string `json:"new_password" validate:"required,min=6,max=128"`
+	VerificationCode string `json:"verification_code" validate:"required,len=6"`
 }
 
 type TransferCaptainRequest struct {

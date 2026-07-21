@@ -81,6 +81,7 @@ func (r *UserRepo) FindByIDs(ctx context.Context, ids []int64) ([]*user.User, er
 func (r *UserRepo) Update(ctx context.Context, u *user.User) error {
 	return r.db.WithContext(ctx).Model(&database.UserModel{}).Where("id = ?", u.ID).Updates(map[string]interface{}{
 		"nickname":      string(u.Nickname),
+		"password_hash": string(u.PasswordHash),
 		"role":          string(u.Role),
 		"checkin_count": u.CheckinCount,
 	}).Error

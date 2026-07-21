@@ -3,6 +3,7 @@ package user
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
@@ -11,6 +12,8 @@ import (
 	"SWPUCAT/internal/domain/invitation"
 	"SWPUCAT/internal/domain/shared"
 	"SWPUCAT/internal/domain/user"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 type PasswordHasher interface {
@@ -90,6 +93,14 @@ func (s *UserApplicationService) SendVerificationCode(ctx context.Context, email
 func generateCode() string {
 	n, _ := rand.Int(rand.Reader, big.NewInt(1000000))
 	return fmt.Sprintf("%06d", n.Int64())
+}
+
+func (s *UserApplicationService) verifyCode(ctx context.Context, email, code string) error {
+	valid, err := s.codeRepo.FindValidCode(ctx, email, code)
+	if err != nil || !valid {
+		return fmt.Errorf("验证码无效或已过期")
+	}
+	return nil
 }
 
 func (s *UserApplicationService) Register(ctx context.Context, req RegisterRequest) (*LoginResponse, error) {
@@ -250,6 +261,46 @@ func (s *UserApplicationService) GetUser(ctx context.Context, userID int64) (*Us
 	return toUserDTO(u), nil
 }
 
+func (s *UserApplicationService) UpdateNickname(ctx context.Context, userID int64, nickname string) error {
+	u, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	u.Nickname = user.Nickname(nickname)
+	return s.userRepo.Update(ctx, u)
+}
+
+func (s *UserApplicationService) ChangePassword(ctx context.Context, userID int64, req ChangePasswordRequest) error {
+	u, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	// Verify old password
+	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.OldPassword)); err != nil {
+		return errors.New("旧密码不正确")
+	}
+
+	// Check if old and new password are the same
+	if req.OldPassword == req.NewPassword {
+		return errors.New("新密码不能与旧密码相同")
+	}
+
+	// Verify email code
+	if err := s.verifyCode(ctx, string(u.Email), req.VerificationCode); err != nil {
+		return err
+	}
+
+	// Hash new password
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	u.PasswordHash = user.PasswordHash(string(hash))
+	return s.userRepo.Update(ctx, u)
+}
+
 func (s *UserApplicationService) ListMembers(ctx context.Context) ([]MemberDTO, error) {
 	users, err := s.userRepo.FindAll(ctx)
 	if err != nil {
@@ -292,6 +343,7 @@ func toUserDTO(u *user.User) *UserDTO {
 		ID:           u.ID,
 		Username:     string(u.Username),
 		StudentID:    string(u.StudentID),
+		Email:        string(u.Email),
 		Nickname:     string(u.Nickname),
 		Role:         string(u.Role),
 		JoinedAt:     u.JoinedAt.Format("2006-01-02"),
