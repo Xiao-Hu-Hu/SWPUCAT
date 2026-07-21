@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const authStore = useAuthStore()
+const uploading = ref(false)
 const categories = ref<Array<{ id: number; name: string; is_system: boolean; count: number }>>([])
 const items = ref<Array<{
   id: number
@@ -110,18 +111,27 @@ function handleFileChange(file: any) {
 }
 
 async function handleUploadFile() {
+  if (uploading.value) return
   if (!selectedFile.value) {
     ElMessage.warning('请选择文件')
     return
   }
+  if (!uploadForm.value.category_id) {
+    ElMessage.warning('请选择分类')
+    return
+  }
+  uploading.value = true
   try {
     await knowledgeApi.uploadFile(selectedFile.value, uploadForm.value.category_id)
     ElMessage.success('上传成功')
     showUploadDialog.value = false
     selectedFile.value = null
     await loadItems()
+    await loadCategories()
   } catch {
     ElMessage.error('上传失败')
+  } finally {
+    uploading.value = false
   }
 }
 
@@ -201,7 +211,7 @@ async function handleDownloadFile(id: number, name: string) {
             <el-button type="primary" @click="showLinkDialog = true">
               <el-icon><Link /></el-icon> 添加链接
             </el-button>
-            <el-button type="success" @click="showUploadDialog = true">
+            <el-button type="success" @click="showUploadDialog = true" :disabled="uploading">
               <el-icon><Upload /></el-icon> 上传文件
             </el-button>
           </div>
@@ -304,8 +314,10 @@ async function handleDownloadFile(id: number, name: string) {
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showUploadDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleUploadFile">上传</el-button>
+        <el-button @click="showUploadDialog = false" :disabled="uploading">取消</el-button>
+        <el-button type="primary" @click="handleUploadFile" :loading="uploading">
+          {{ uploading ? '上传中...' : '上传' }}
+        </el-button>
       </template>
     </el-dialog>
   </div>
