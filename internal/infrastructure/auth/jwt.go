@@ -37,10 +37,11 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-func (s *JWTService) GenerateAccessToken(userID int64, role string, studentID string) (string, int64, error) {
+func (s *JWTService) GenerateAccessToken(userID int64, username, role, studentID string) (string, int64, error) {
 	expiresAt := time.Now().Add(s.accessExpiry)
 	claims := Claims{
 		UserID:    userID,
+		Username:  username,
 		StudentID: studentID,
 		Role:      role,
 		RegisteredClaims: jwt.RegisteredClaims{

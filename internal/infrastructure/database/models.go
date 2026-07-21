@@ -63,6 +63,10 @@ type KnowledgeItemModel struct {
 	UploaderID   int64     `gorm:"not null"`
 	UploaderName string    `gorm:"size:32;not null"`
 	Approved     bool      `gorm:"not null;default:false"`
+	Rejected     bool      `gorm:"not null;default:false"`
+	RejectReason string    `gorm:"size:512"`
+	ReviewerID   int64     `gorm:"index"`
+	ReviewerName string    `gorm:"size:32"`
 	CreatedAt    time.Time `gorm:"not null;default:current_timestamp"`
 }
 

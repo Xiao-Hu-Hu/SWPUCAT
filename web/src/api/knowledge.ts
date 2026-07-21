@@ -40,5 +40,17 @@ export const knowledgeApi = {
   },
   deleteCategory(id: number) {
     return api.delete(`/knowledge/categories/${id}`)
+  },
+  listPendingItems() {
+    return api.get('/knowledge/items/pending')
+  },
+  approveItem(id: number) {
+    return api.put(`/knowledge/items/${id}/approve`)
+  },
+  rejectItem(id: number, reason: string) {
+    return api.put(`/knowledge/items/${id}/reject`, { reason })
+  },
+  listUserItems() {
+    return api.get('/knowledge/items/my')
   }
 }

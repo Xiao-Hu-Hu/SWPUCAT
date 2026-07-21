@@ -28,6 +28,10 @@ func (r *KnowledgeRepo) CreateItem(ctx context.Context, item *knowledge.Knowledg
 		UploaderID:   item.UploaderID,
 		UploaderName: item.UploaderName,
 		Approved:     item.Approved,
+		Rejected:     item.Rejected,
+		RejectReason: item.RejectReason,
+		ReviewerID:   item.ReviewerID,
+		ReviewerName: item.ReviewerName,
 	}
 	return r.db.WithContext(ctx).Create(model).Error
 }
@@ -63,13 +67,29 @@ func (r *KnowledgeRepo) FindItems(ctx context.Context, filter knowledge.ItemFilt
 	return items, nil
 }
 
+func (r *KnowledgeRepo) FindItemsByUploader(ctx context.Context, uploaderID int64) ([]*knowledge.KnowledgeItem, error) {
+	var models []database.KnowledgeItemModel
+	if err := r.db.WithContext(ctx).Where("uploader_id = ?", uploaderID).Order("created_at DESC").Find(&models).Error; err != nil {
+		return nil, err
+	}
+	items := make([]*knowledge.KnowledgeItem, len(models))
+	for i, m := range models {
+		items[i] = toDomainKnowledgeItem(&m)
+	}
+	return items, nil
+}
+
 func (r *KnowledgeRepo) UpdateItem(ctx context.Context, item *knowledge.KnowledgeItem) error {
 	return r.db.WithContext(ctx).Model(&database.KnowledgeItemModel{}).Where("id = ?", item.ID).Updates(map[string]interface{}{
-		"name":        item.Name,
-		"url":         item.URL,
-		"file_size":   item.FileSize,
-		"category_id": item.CategoryID,
-		"approved":    item.Approved,
+		"name":          item.Name,
+		"url":           item.URL,
+		"file_size":     item.FileSize,
+		"category_id":   item.CategoryID,
+		"approved":      item.Approved,
+		"rejected":      item.Rejected,
+		"reject_reason": item.RejectReason,
+		"reviewer_id":   item.ReviewerID,
+		"reviewer_name": item.ReviewerName,
 	}).Error
 }
 
@@ -85,7 +105,7 @@ func (r *KnowledgeRepo) CountItems(ctx context.Context) (int64, error) {
 
 func (r *KnowledgeRepo) CountItemsByCategory(ctx context.Context, categoryID int64) (int64, error) {
 	var count int64
-	err := r.db.WithContext(ctx).Model(&database.KnowledgeItemModel{}).Where("category_id = ?", categoryID).Count(&count).Error
+	err := r.db.WithContext(ctx).Model(&database.KnowledgeItemModel{}).Where("category_id = ? AND approved = ?", categoryID, true).Count(&count).Error
 	return count, err
 }
 
@@ -134,6 +154,10 @@ func toDomainKnowledgeItem(m *database.KnowledgeItemModel) *knowledge.KnowledgeI
 		UploaderID:   m.UploaderID,
 		UploaderName: m.UploaderName,
 		Approved:     m.Approved,
+		Rejected:     m.Rejected,
+		RejectReason: m.RejectReason,
+		ReviewerID:   m.ReviewerID,
+		ReviewerName: m.ReviewerName,
 		CreatedAt:    m.CreatedAt,
 	}
 }

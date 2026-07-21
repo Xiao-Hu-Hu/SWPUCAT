@@ -20,6 +20,10 @@ type KnowledgeItem struct {
 	UploaderID   int64
 	UploaderName string
 	Approved     bool
+	Rejected     bool
+	RejectReason string
+	ReviewerID   int64
+	ReviewerName string
 	CreatedAt    time.Time
 }
 

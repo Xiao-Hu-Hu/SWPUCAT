@@ -19,7 +19,7 @@ type PasswordHasher interface {
 }
 
 type JWTService interface {
-	GenerateAccessToken(userID int64, role string, studentID string) (string, int64, error)
+	GenerateAccessToken(userID int64, username, role, studentID string) (string, int64, error)
 	GenerateRefreshToken(userID int64) (string, error)
 	ParseRefreshToken(tokenString string) (int64, error)
 }
@@ -271,7 +271,7 @@ func (s *UserApplicationService) ListMembers(ctx context.Context) ([]MemberDTO, 
 }
 
 func (s *UserApplicationService) generateTokens(u *user.User) (*LoginResponse, error) {
-	accessToken, expiresIn, err := s.jwtSvc.GenerateAccessToken(u.ID, string(u.Role), string(u.StudentID))
+	accessToken, expiresIn, err := s.jwtSvc.GenerateAccessToken(u.ID, string(u.Nickname), string(u.Role), string(u.StudentID))
 	if err != nil {
 		return nil, err
 	}

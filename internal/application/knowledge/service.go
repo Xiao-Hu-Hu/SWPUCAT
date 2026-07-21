@@ -36,6 +36,10 @@ type KnowledgeItemDTO struct {
 	UploaderID   int64  `json:"uploader_id"`
 	UploaderName string `json:"uploader_name"`
 	Approved     bool   `json:"approved"`
+	Rejected     bool   `json:"rejected"`
+	RejectReason string `json:"reject_reason,omitempty"`
+	ReviewerID   int64  `json:"reviewer_id,omitempty"`
+	ReviewerName string `json:"reviewer_name,omitempty"`
 	CreatedAt    string `json:"created_at"`
 }
 
@@ -55,11 +59,12 @@ func NewKnowledgeService(repo knowledge.Repository, publisher shared.EventPublis
 	return &KnowledgeService{repo: repo, publisher: publisher}
 }
 
-func (s *KnowledgeService) CreateLink(ctx context.Context, uploaderID int64, uploaderName string, req CreateLinkRequest) (*KnowledgeItemDTO, error) {
+func (s *KnowledgeService) CreateLink(ctx context.Context, uploaderID int64, uploaderName string, isCaptain bool, req CreateLinkRequest) (*KnowledgeItemDTO, error) {
 	item, err := knowledge.NewLink(req.Name, req.URL, req.CategoryID, uploaderID, uploaderName)
 	if err != nil {
 		return nil, err
 	}
+	item.Approved = isCaptain
 	if err := s.repo.CreateItem(ctx, item); err != nil {
 		return nil, err
 	}
@@ -67,15 +72,14 @@ func (s *KnowledgeService) CreateLink(ctx context.Context, uploaderID int64, upl
 }
 
 func (s *KnowledgeService) UploadFile(ctx context.Context, uploaderID int64, uploaderName string, isCaptain bool, req UploadFileRequest) (*KnowledgeItemDTO, error) {
-	approved := isCaptain
-	item, err := knowledge.NewFile(req.FileName, req.FileSize, req.FileKey, req.CategoryID, uploaderID, uploaderName, approved)
+	item, err := knowledge.NewFile(req.FileName, req.FileSize, req.FileKey, req.CategoryID, uploaderID, uploaderName, isCaptain)
 	if err != nil {
 		return nil, err
 	}
 	if err := s.repo.CreateItem(ctx, item); err != nil {
 		return nil, err
 	}
-	s.publisher.Publish(knowledge.NewFileUploaded(item.ID, item.Name, item.UploaderID, !approved))
+	s.publisher.Publish(knowledge.NewFileUploaded(item.ID, item.Name, item.UploaderID, !isCaptain))
 	return toItemDTO(item, ""), nil
 }
 
@@ -105,6 +109,65 @@ func (s *KnowledgeService) ListItems(ctx context.Context, categoryID *int64, sea
 		result = append(result, *toItemDTO(item, ""))
 	}
 	return result, nil
+}
+
+func (s *KnowledgeService) ListPendingItems(ctx context.Context) ([]KnowledgeItemDTO, error) {
+	falseVal := false
+	items, err := s.repo.FindItems(ctx, knowledge.ItemFilter{
+		Approved: &falseVal,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]KnowledgeItemDTO, 0, len(items))
+	for _, item := range items {
+		if !item.Rejected {
+			result = append(result, *toItemDTO(item, ""))
+		}
+	}
+	return result, nil
+}
+
+func (s *KnowledgeService) ListUserItems(ctx context.Context, userID int64) ([]KnowledgeItemDTO, error) {
+	items, err := s.repo.FindItemsByUploader(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]KnowledgeItemDTO, 0, len(items))
+	for _, item := range items {
+		result = append(result, *toItemDTO(item, ""))
+	}
+	return result, nil
+}
+
+func (s *KnowledgeService) ApproveItem(ctx context.Context, itemID, reviewerID int64, reviewerName string) error {
+	item, err := s.repo.FindItemByID(ctx, itemID)
+	if err != nil {
+		return err
+	}
+	item.Approved = true
+	item.ReviewerID = reviewerID
+	item.ReviewerName = reviewerName
+	return s.repo.UpdateItem(ctx, item)
+}
+
+func (s *KnowledgeService) RejectItem(ctx context.Context, itemID, reviewerID int64, reviewerName, reason string) (string, error) {
+	item, err := s.repo.FindItemByID(ctx, itemID)
+	if err != nil {
+		return "", err
+	}
+	item.Rejected = true
+	item.RejectReason = reason
+	item.ReviewerID = reviewerID
+	item.ReviewerName = reviewerName
+	if err := s.repo.UpdateItem(ctx, item); err != nil {
+		return "", err
+	}
+	// Return file key for cleanup if it's a file
+	if item.Type == knowledge.ItemTypeFile && item.FileKey != "" {
+		return item.FileKey, nil
+	}
+	return "", nil
 }
 
 func (s *KnowledgeService) CreateCategory(ctx context.Context, name string) (*CategoryDTO, error) {
@@ -169,6 +232,10 @@ func toItemDTO(item *knowledge.KnowledgeItem, catName string) *KnowledgeItemDTO 
 		UploaderID:   item.UploaderID,
 		UploaderName: item.UploaderName,
 		Approved:     item.Approved,
+		Rejected:     item.Rejected,
+		RejectReason: item.RejectReason,
+		ReviewerID:   item.ReviewerID,
+		ReviewerName: item.ReviewerName,
 		CreatedAt:    item.CreatedAt.Format("2006-01-02"),
 	}
 }

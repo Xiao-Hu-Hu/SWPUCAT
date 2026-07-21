@@ -96,10 +96,14 @@ func (r *Router) Setup() *gin.Engine {
 
 			// Knowledge
 			protected.GET("/knowledge/items", r.knowledgeHandler.ListItems)
+			protected.GET("/knowledge/items/pending", r.knowledgeHandler.ListPendingItems)
+			protected.GET("/knowledge/items/my", r.knowledgeHandler.ListUserItems)
 			protected.GET("/knowledge/items/:id", r.knowledgeHandler.GetItem)
 			protected.POST("/knowledge/links", r.knowledgeHandler.CreateLink)
 			protected.POST("/knowledge/files", r.knowledgeHandler.UploadFile)
 			protected.DELETE("/knowledge/items/:id", r.knowledgeHandler.DeleteItem)
+			protected.PUT("/knowledge/items/:id/approve", r.knowledgeHandler.ApproveItem)
+			protected.PUT("/knowledge/items/:id/reject", r.knowledgeHandler.RejectItem)
 			protected.GET("/knowledge/download/:id", r.knowledgeHandler.DownloadFile)
 			protected.GET("/knowledge/categories", r.knowledgeHandler.ListCategories)
 			protected.POST("/knowledge/categories", r.knowledgeHandler.CreateCategory)

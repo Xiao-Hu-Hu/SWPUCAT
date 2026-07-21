@@ -6,6 +6,7 @@ type Repository interface {
 	CreateItem(ctx context.Context, item *KnowledgeItem) error
 	FindItemByID(ctx context.Context, id int64) (*KnowledgeItem, error)
 	FindItems(ctx context.Context, filter ItemFilter) ([]*KnowledgeItem, error)
+	FindItemsByUploader(ctx context.Context, uploaderID int64) ([]*KnowledgeItem, error)
 	UpdateItem(ctx context.Context, item *KnowledgeItem) error
 	DeleteItem(ctx context.Context, id int64) error
 	CountItems(ctx context.Context) (int64, error)

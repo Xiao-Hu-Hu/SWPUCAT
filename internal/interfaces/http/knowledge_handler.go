@@ -29,8 +29,9 @@ func (h *KnowledgeHandler) CreateLink(c *gin.Context) {
 
 	uploaderID := GetUserID(c)
 	uploaderName := GetUsername(c)
+	isCaptain := IsCaptain(c)
 
-	dto, err := h.knowledgeSvc.CreateLink(c.Request.Context(), uploaderID, uploaderName, req)
+	dto, err := h.knowledgeSvc.CreateLink(c.Request.Context(), uploaderID, uploaderName, isCaptain, req)
 	if err != nil {
 		InternalError(c, "failed to create link")
 		return
@@ -193,6 +194,89 @@ func (h *KnowledgeHandler) ListCategories(c *gin.Context) {
 	}
 
 	Success(c, cats)
+}
+
+func (h *KnowledgeHandler) ListPendingItems(c *gin.Context) {
+	items, err := h.knowledgeSvc.ListPendingItems(c.Request.Context())
+	if err != nil {
+		InternalError(c, "failed to list pending items")
+		return
+	}
+
+	Success(c, items)
+}
+
+func (h *KnowledgeHandler) ListUserItems(c *gin.Context) {
+	userID := GetUserID(c)
+	items, err := h.knowledgeSvc.ListUserItems(c.Request.Context(), userID)
+	if err != nil {
+		InternalError(c, "failed to list user items")
+		return
+	}
+
+	Success(c, items)
+}
+
+func (h *KnowledgeHandler) ApproveItem(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		BadRequest(c, "invalid item id")
+		return
+	}
+
+	if !IsCaptain(c) {
+		Forbidden(c, "only captain or super admin can approve items")
+		return
+	}
+
+	reviewerID := GetUserID(c)
+	reviewerName := GetUsername(c)
+
+	if err := h.knowledgeSvc.ApproveItem(c.Request.Context(), id, reviewerID, reviewerName); err != nil {
+		InternalError(c, "failed to approve item")
+		return
+	}
+
+	Success(c, nil)
+}
+
+func (h *KnowledgeHandler) RejectItem(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		BadRequest(c, "invalid item id")
+		return
+	}
+
+	if !IsCaptain(c) {
+		Forbidden(c, "only captain or super admin can reject items")
+		return
+	}
+
+	var req struct {
+		Reason string `json:"reason" validate:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Reason == "" {
+		BadRequest(c, "reject reason is required")
+		return
+	}
+
+	reviewerID := GetUserID(c)
+	reviewerName := GetUsername(c)
+
+	fileKey, err := h.knowledgeSvc.RejectItem(c.Request.Context(), id, reviewerID, reviewerName, req.Reason)
+	if err != nil {
+		InternalError(c, "failed to reject item")
+		return
+	}
+
+	// Delete file from storage if it exists
+	if fileKey != "" {
+		h.storage.Delete(fileKey)
+	}
+
+	Success(c, nil)
 }
 
 func (h *KnowledgeHandler) DownloadFile(c *gin.Context) {

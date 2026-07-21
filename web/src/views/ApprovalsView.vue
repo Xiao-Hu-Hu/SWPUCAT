@@ -1,49 +1,111 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { approvalApi } from '@/api/approval'
+import { ref, onMounted, computed } from 'vue'
+import { knowledgeApi } from '@/api/knowledge'
+import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
 
-const approvals = ref<Array<{
+const authStore = useAuthStore()
+const items = ref<Array<{
   id: number
-  file_name: string
+  type: string
+  name: string
+  url: string
+  file_key: string
   file_size: string
   category_id: number
   uploader_name: string
-  status: string
+  approved: boolean
+  rejected: boolean
+  reject_reason: string
+  reviewer_id: number
+  reviewer_name: string
   created_at: string
 }>>([])
+const downloading = ref<Record<number, number>>({})
+const showRejectDialog = ref(false)
+const rejectItemId = ref<number | null>(null)
+const rejectReason = ref('')
+
+const isManager = computed(() => authStore.isCaptain || authStore.isSuperAdmin)
 
 onMounted(async () => {
-  await loadApprovals()
+  await loadItems()
 })
 
-async function loadApprovals() {
+async function loadItems() {
   try {
-    const res = await approvalApi.listPending()
-    approvals.value = res.data
+    if (isManager.value) {
+      const res = await knowledgeApi.listPendingItems()
+      items.value = res.data
+    } else {
+      const res = await knowledgeApi.listUserItems()
+      items.value = res.data
+    }
   } catch {
-    console.error('Failed to load approvals')
+    console.error('Failed to load items')
   }
 }
 
 async function handleApprove(id: number) {
   try {
-    await approvalApi.approve(id)
+    await knowledgeApi.approveItem(id)
     ElMessage.success('已批准')
-    await loadApprovals()
+    await loadItems()
   } catch {
     ElMessage.error('操作失败')
   }
 }
 
-async function handleReject(id: number) {
+function openRejectDialog(id: number) {
+  rejectItemId.value = id
+  rejectReason.value = ''
+  showRejectDialog.value = true
+}
+
+async function handleReject() {
+  if (!rejectItemId.value || !rejectReason.value.trim()) {
+    ElMessage.warning('请输入拒绝理由')
+    return
+  }
   try {
-    await approvalApi.reject(id)
+    await knowledgeApi.rejectItem(rejectItemId.value, rejectReason.value.trim())
     ElMessage.success('已拒绝')
-    await loadApprovals()
+    showRejectDialog.value = false
+    await loadItems()
   } catch {
     ElMessage.error('操作失败')
   }
+}
+
+async function handleDownloadFile(id: number, name: string) {
+  if (downloading.value[id] !== undefined) return
+  downloading.value[id] = 0
+  try {
+    const res = await knowledgeApi.downloadFile(id, (percent) => {
+      downloading.value[id] = percent
+    })
+    const url = window.URL.createObjectURL(new Blob([res.data]))
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', name)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+    downloading.value[id] = 100
+    setTimeout(() => {
+      delete downloading.value[id]
+    }, 1000)
+  } catch {
+    ElMessage.error('下载失败')
+    delete downloading.value[id]
+  }
+}
+
+function getStatusTag(item: any) {
+  if (item.approved) return { type: 'success', text: '已通过' }
+  if (item.rejected) return { type: 'danger', text: '已拒绝' }
+  return { type: 'warning', text: '待审核' }
 }
 </script>
 
@@ -51,29 +113,79 @@ async function handleReject(id: number) {
   <div class="approvals">
     <div class="card">
       <div class="card-header">
-        <h3>审批管理</h3>
-        <span class="pending-count">{{ approvals.length }} 条待审批</span>
+        <h3>{{ isManager ? '审批管理' : '我的申请' }}</h3>
+        <span class="pending-count" v-if="isManager">{{ items.filter(i => !i.approved && !i.rejected).length }} 条待审批</span>
       </div>
 
-      <el-table :data="approvals" style="width: 100%">
-        <el-table-column prop="file_name" label="文件名" min-width="200" />
-        <el-table-column prop="file_size" label="大小" width="100" />
-        <el-table-column prop="uploader_name" label="上传者" width="120" />
-        <el-table-column prop="created_at" label="上传时间" width="120" />
-        <el-table-column label="操作" width="200">
-          <template #default="{ row }">
-            <el-button size="small" type="success" @click="handleApprove(row.id)">
-              批准
+      <div class="approval-list">
+        <div v-for="item in items" :key="item.id" class="approval-card">
+          <div class="item-icon">
+            <el-icon :size="24">
+              <Link v-if="item.type === 'link'" />
+              <Document v-else />
+            </el-icon>
+          </div>
+          <div class="item-info">
+            <div class="item-name">
+              <a v-if="item.type === 'link'" :href="item.url" target="_blank">{{ item.name }}</a>
+              <span v-else>{{ item.name }}</span>
+            </div>
+            <div class="item-meta">
+              <span v-if="isManager">{{ item.uploader_name }}</span>
+              <span>{{ item.created_at }}</span>
+              <span v-if="item.file_size">{{ item.file_size }}</span>
+            </div>
+            <div v-if="item.rejected && item.reject_reason" class="reject-reason">
+              拒绝理由：{{ item.reject_reason }}
+            </div>
+            <div v-if="(item.approved || item.rejected) && item.reviewer_name" class="reviewer-info">
+              审批人：{{ item.reviewer_name }}
+            </div>
+          </div>
+          <div class="item-actions">
+            <el-tag :type="getStatusTag(item).type" size="small">
+              {{ getStatusTag(item).text }}
+            </el-tag>
+            <el-button
+              v-if="item.type === 'file' && !item.rejected"
+              size="small"
+              type="primary"
+              :loading="downloading[item.id] !== undefined && downloading[item.id] < 100"
+              :disabled="downloading[item.id] !== undefined"
+              @click="handleDownloadFile(item.id, item.name)"
+            >
+              {{ downloading[item.id] !== undefined ? (downloading[item.id] < 100 ? `${downloading[item.id]}%` : '完成') : '下载' }}
             </el-button>
-            <el-button size="small" type="danger" @click="handleReject(row.id)">
-              拒绝
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <el-empty v-if="approvals.length === 0" description="暂无待审批项目" />
+            <template v-if="isManager && !item.approved && !item.rejected">
+              <el-button size="small" type="success" @click="handleApprove(item.id)">
+                通过
+              </el-button>
+              <el-button size="small" type="danger" @click="openRejectDialog(item.id)">
+                拒绝
+              </el-button>
+            </template>
+          </div>
+        </div>
+        <el-empty v-if="items.length === 0" :description="isManager ? '暂无待审批项目' : '暂无申请记录'" />
+      </div>
     </div>
+
+    <el-dialog v-model="showRejectDialog" title="拒绝理由" width="500px">
+      <el-form label-width="80px">
+        <el-form-item label="拒绝理由">
+          <el-input
+            v-model="rejectReason"
+            type="textarea"
+            :rows="3"
+            placeholder="请输入拒绝理由，将通知给上传者"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showRejectDialog = false">取消</el-button>
+        <el-button type="danger" @click="handleReject">确认拒绝</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -104,5 +216,82 @@ async function handleReject(id: number) {
 .pending-count {
   color: var(--text-muted);
   font-size: 0.875rem;
+}
+
+.approval-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.approval-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1rem;
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.item-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-hover);
+  border-radius: 8px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.item-name {
+  display: block;
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+}
+
+.item-name a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.item-name a:hover {
+  text-decoration: underline;
+}
+
+.item-meta {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.reject-reason {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background: rgba(245, 108, 108, 0.1);
+  border-radius: 4px;
+  font-size: 0.8rem;
+  color: #f56c6c;
+}
+
+.reviewer-info {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.item-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-shrink: 0;
 }
 </style>

@@ -65,7 +65,11 @@ function handleSearch() {
 async function handleCreateLink() {
   try {
     await knowledgeApi.createLink(linkForm.value.name, linkForm.value.url, linkForm.value.category_id)
-    ElMessage.success('创建成功')
+    if (authStore.isCaptain || authStore.isSuperAdmin) {
+      ElMessage.success('创建成功')
+    } else {
+      ElMessage.success('创建成功，等待队长审核')
+    }
     showLinkDialog.value = false
     await loadItems()
   } catch {
@@ -124,7 +128,11 @@ async function handleUploadFile() {
   uploading.value = true
   try {
     await knowledgeApi.uploadFile(selectedFile.value, uploadForm.value.category_id)
-    ElMessage.success('上传成功')
+    if (authStore.isCaptain || authStore.isSuperAdmin) {
+      ElMessage.success('上传成功')
+    } else {
+      ElMessage.success('上传成功，等待队长审核')
+    }
     showUploadDialog.value = false
     selectedFile.value = null
     await loadItems()
