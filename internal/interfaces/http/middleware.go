@@ -88,5 +88,6 @@ func GetRole(c *gin.Context) string {
 }
 
 func IsCaptain(c *gin.Context) bool {
-	return GetRole(c) == "captain"
+	role := GetRole(c)
+	return role == "captain" || role == "super_admin"
 }
