@@ -19,8 +19,8 @@ CREATE INDEX IF NOT EXISTS idx_invitation_codes_used_by ON invitation_codes(used
 -- Password hash is bcrypt of 'admin123'
 INSERT INTO users (username, student_id, email, password_hash, nickname, role, checkin_count, created_at, updated_at)
 VALUES (
-    'admin',
-    '000000000000',
+    '202400000001',
+    '202400000001',
     'admin@swpucat.com',
     '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
     '超级管理员',
