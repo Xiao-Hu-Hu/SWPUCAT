@@ -22,7 +22,7 @@ VALUES (
     '202400000001',
     '202400000001',
     'admin@swpucat.com',
-    '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+    '$2a$10$dCJaRMepJDvKAMl2s3hq3.rVzwzGogYw.UEW3Pcb6zc5fXoa3e5hi',
     '超级管理员',
     'super_admin',
     0,
