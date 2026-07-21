@@ -63,7 +63,7 @@ func main() {
 
 	// Initialize handlers
 	authHandler := httpInterface.NewAuthHandler(userSvc)
-	userHandler := httpInterface.NewUserHandler(userSvc)
+	userHandler := httpInterface.NewUserHandler(userSvc, localStorage)
 	dashboardHandler := httpInterface.NewDashboardHandler(dashboardSvc)
 	annHandler := httpInterface.NewAnnouncementHandler(annSvc)
 	checkinHandler := httpInterface.NewCheckinHandler(checkinSvc)

@@ -6,6 +6,7 @@ interface User {
   id: number
   username: string
   nickname: string
+  avatar: string
   role: string
   joined_at: string
   checkin_count: number

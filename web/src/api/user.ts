@@ -16,5 +16,10 @@ export const userApi = {
   },
   sendVerificationCode(email: string) {
     return api.post('/auth/send-code', { email })
+  },
+  uploadAvatar(formData: FormData) {
+    return api.post('/profile/avatar', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
   }
 }

@@ -11,6 +11,7 @@ const members = ref<Array<{
   nickname: string
   username: string
   student_id: string
+  avatar: string
   role: string
   joined_at: string
   checkin_count: number
@@ -80,7 +81,7 @@ async function handleRemoveMember(id: number) {
           <template #default="{ row }">
             <div class="member-info">
               <span class="online-dot" :class="{ online: isOnline(row.id) }"></span>
-              <el-avatar :size="32">{{ row.nickname[0] }}</el-avatar>
+              <el-avatar :size="32" :src="row.avatar ? `/api/avatar/${row.avatar}` : undefined">{{ row.nickname[0] }}</el-avatar>
               <span>{{ row.nickname }}</span>
             </div>
           </template>

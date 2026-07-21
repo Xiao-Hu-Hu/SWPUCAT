@@ -3,17 +3,20 @@ package http
 import (
 	"SWPUCAT/internal/application/user"
 	"SWPUCAT/internal/domain/shared"
+	"SWPUCAT/internal/infrastructure/storage"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
 
 type UserHandler struct {
 	userSvc *user.UserApplicationService
+	storage *storage.LocalStorage
 }
 
-func NewUserHandler(userSvc *user.UserApplicationService) *UserHandler {
-	return &UserHandler{userSvc: userSvc}
+func NewUserHandler(userSvc *user.UserApplicationService, storage *storage.LocalStorage) *UserHandler {
+	return &UserHandler{userSvc: userSvc, storage: storage}
 }
 
 func (h *UserHandler) GetProfile(c *gin.Context) {
@@ -62,6 +65,50 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	}
 
 	Success(c, nil)
+}
+
+func (h *UserHandler) UploadAvatar(c *gin.Context) {
+	userID := GetUserID(c)
+
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		BadRequest(c, "file is required")
+		return
+	}
+	defer file.Close()
+
+	// Validate file type
+	name := strings.ToLower(header.Filename)
+	if !strings.HasSuffix(name, ".jpg") && !strings.HasSuffix(name, ".png") && !strings.HasSuffix(name, ".jpeg") && !strings.HasSuffix(name, ".gif") && !strings.HasSuffix(name, ".webp") {
+		BadRequest(c, "only jpg, png, gif, webp are allowed")
+		return
+	}
+
+	// Save file
+	fileKey, err := h.storage.Save("avatar_"+header.Filename, file)
+	if err != nil {
+		InternalError(c, "failed to save avatar")
+		return
+	}
+
+	if err := h.userSvc.UpdateAvatar(c.Request.Context(), userID, fileKey); err != nil {
+		h.storage.Delete(fileKey)
+		InternalError(c, "failed to update avatar")
+		return
+	}
+
+	Success(c, gin.H{"avatar": fileKey})
+}
+
+func (h *UserHandler) GetAvatar(c *gin.Context) {
+	fileKey := strings.TrimPrefix(c.Param("path"), "/")
+	filePath, err := h.storage.Get(fileKey)
+	if err != nil {
+		NotFound(c, "avatar not found")
+		return
+	}
+	c.Header("Cache-Control", "max-age=86400")
+	c.File(filePath)
 }
 
 func (h *UserHandler) ListMembers(c *gin.Context) {

@@ -22,6 +22,7 @@ type User struct {
 	StudentID    StudentID
 	Email        string
 	Nickname     Nickname
+	Avatar       string
 	PasswordHash PasswordHash
 	Role         Role
 	JoinedAt     time.Time

@@ -58,7 +58,9 @@ function handleLogout() {
         <div class="header-right">
           <el-dropdown>
             <span class="user-info">
-              <el-avatar :size="32">{{ authStore.user?.nickname?.[0] || 'U' }}</el-avatar>
+              <el-avatar :size="32" :src="authStore.user?.avatar ? `/api/avatar/${authStore.user.avatar}` : undefined">
+                {{ authStore.user?.nickname?.[0] || 'U' }}
+              </el-avatar>
               <span class="username">{{ authStore.user?.nickname || '用户' }}</span>
             </span>
             <template #dropdown>

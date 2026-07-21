@@ -8,6 +8,8 @@ import { useRouter } from 'vue-router'
 const authStore = useAuthStore()
 const router = useRouter()
 const email = ref('')
+const nickname = ref(authStore.user?.nickname || '')
+const avatar = ref(authStore.user?.avatar || '')
 const showPasswordDialog = ref(false)
 
 const passwordForm = ref({
@@ -21,7 +23,6 @@ const countdown = ref(0)
 let timer: ReturnType<typeof setInterval> | null = null
 
 const passwordSame = ref(false)
-const nickname = ref(authStore.user?.nickname || '')
 
 function checkPasswordSame() {
   passwordSame.value = passwordForm.value.oldPassword.length > 0 &&
@@ -33,10 +34,35 @@ onMounted(async () => {
   try {
     const res = await userApi.getProfile()
     email.value = res.data.email || ''
+    nickname.value = res.data.nickname || ''
+    avatar.value = res.data.avatar || ''
   } catch {
     console.error('Failed to load profile')
   }
 })
+
+function getAvatarUrl(path: string) {
+  if (!path) return ''
+  return `/api/avatar/${path}`
+}
+
+async function handleAvatarChange(file: any) {
+  const formData = new FormData()
+  formData.append('file', file.raw)
+
+  try {
+    const res = await userApi.uploadAvatar(formData)
+    avatar.value = res.data.avatar
+    if (authStore.user) {
+      authStore.user.avatar = res.data.avatar
+      localStorage.setItem('user', JSON.stringify(authStore.user))
+    }
+    ElMessage.success('头像上传成功')
+  } catch {
+    ElMessage.error('头像上传失败')
+  }
+  return false
+}
 
 async function handleSaveProfile() {
   try {
@@ -138,6 +164,27 @@ async function handleChangePassword() {
   <div class="settings">
     <div class="card">
       <h3>个人信息</h3>
+      <div class="avatar-section">
+        <el-upload
+          class="avatar-uploader"
+          :auto-upload="false"
+          :show-file-list="false"
+          :on-change="handleAvatarChange"
+          accept="image/*"
+        >
+          <div class="avatar-wrapper">
+            <img v-if="avatar" :src="getAvatarUrl(avatar)" class="avatar-img" />
+            <div v-else class="avatar-placeholder">
+              <el-icon :size="32"><Plus /></el-icon>
+            </div>
+            <div class="avatar-overlay">
+              <el-icon :size="20"><Camera /></el-icon>
+              <span>修改头像</span>
+            </div>
+          </div>
+        </el-upload>
+      </div>
+
       <el-form label-width="100px" style="max-width: 500px">
         <el-form-item label="用户名">
           <el-input :value="authStore.user?.username" disabled />
@@ -236,6 +283,62 @@ async function handleChangePassword() {
   font-size: 1rem;
   font-weight: 600;
   margin-bottom: 1.5rem;
+}
+
+.avatar-section {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1.5rem;
+}
+
+.avatar-wrapper {
+  position: relative;
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-placeholder {
+  width: 100%;
+  height: 100%;
+  background: var(--bg-hover);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.avatar-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.avatar-wrapper:hover .avatar-overlay {
+  opacity: 1;
+}
+
+.avatar-overlay span {
+  font-size: 12px;
+  margin-top: 4px;
 }
 
 .code-input {

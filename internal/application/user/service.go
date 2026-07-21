@@ -270,6 +270,15 @@ func (s *UserApplicationService) UpdateNickname(ctx context.Context, userID int6
 	return s.userRepo.Update(ctx, u)
 }
 
+func (s *UserApplicationService) UpdateAvatar(ctx context.Context, userID int64, avatarPath string) error {
+	u, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	u.Avatar = avatarPath
+	return s.userRepo.Update(ctx, u)
+}
+
 func (s *UserApplicationService) ChangePassword(ctx context.Context, userID int64, req ChangePasswordRequest) error {
 	u, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
@@ -313,6 +322,7 @@ func (s *UserApplicationService) ListMembers(ctx context.Context) ([]MemberDTO, 
 			Nickname:     string(u.Nickname),
 			Username:     string(u.Username),
 			StudentID:    string(u.StudentID),
+			Avatar:       u.Avatar,
 			Role:         string(u.Role),
 			JoinedAt:     u.JoinedAt.Format("2006-01-02"),
 			CheckinCount: u.CheckinCount,
@@ -345,6 +355,7 @@ func toUserDTO(u *user.User) *UserDTO {
 		StudentID:    string(u.StudentID),
 		Email:        string(u.Email),
 		Nickname:     string(u.Nickname),
+		Avatar:       u.Avatar,
 		Role:         string(u.Role),
 		JoinedAt:     u.JoinedAt.Format("2006-01-02"),
 		CheckinCount: u.CheckinCount,

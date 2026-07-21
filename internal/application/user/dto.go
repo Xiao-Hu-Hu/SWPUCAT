@@ -35,6 +35,7 @@ type UserDTO struct {
 	StudentID    string `json:"student_id,omitempty"`
 	Email        string `json:"email,omitempty"`
 	Nickname     string `json:"nickname"`
+	Avatar       string `json:"avatar,omitempty"`
 	Role         string `json:"role"`
 	JoinedAt     string `json:"joined_at"`
 	CheckinCount int64  `json:"checkin_count"`
@@ -55,6 +56,7 @@ type MemberDTO struct {
 	Nickname     string `json:"nickname"`
 	Username     string `json:"username"`
 	StudentID    string `json:"student_id,omitempty"`
+	Avatar       string `json:"avatar,omitempty"`
 	Role         string `json:"role"`
 	JoinedAt     string `json:"joined_at"`
 	CheckinCount int64  `json:"checkin_count"`

@@ -24,6 +24,7 @@ func (r *UserRepo) Create(ctx context.Context, u *user.User) error {
 		Email:        u.Email,
 		PasswordHash: string(u.PasswordHash),
 		Nickname:     string(u.Nickname),
+		Avatar:       u.Avatar,
 		Role:         string(u.Role),
 		CheckinCount: u.CheckinCount,
 	}
@@ -81,6 +82,7 @@ func (r *UserRepo) FindByIDs(ctx context.Context, ids []int64) ([]*user.User, er
 func (r *UserRepo) Update(ctx context.Context, u *user.User) error {
 	return r.db.WithContext(ctx).Model(&database.UserModel{}).Where("id = ?", u.ID).Updates(map[string]interface{}{
 		"nickname":      string(u.Nickname),
+		"avatar":        u.Avatar,
 		"password_hash": string(u.PasswordHash),
 		"role":          string(u.Role),
 		"checkin_count": u.CheckinCount,
@@ -117,6 +119,7 @@ func toDomainUser(m *database.UserModel) *user.User {
 		Email:        m.Email,
 		PasswordHash: user.PasswordHash(m.PasswordHash),
 		Nickname:     user.Nickname(m.Nickname),
+		Avatar:       m.Avatar,
 		Role:         user.Role(m.Role),
 		CheckinCount: m.CheckinCount,
 		CreatedAt:    m.CreatedAt,
