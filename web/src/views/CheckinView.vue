@@ -19,6 +19,13 @@ const statsData = ref<Array<{ user_id: number; nickname: string; total_minutes: 
 const onlineMembers = ref<Array<{ user_id: number; nickname: string; online: boolean }>>([])
 const chartFilter = ref('week')
 const todayBaseMinutes = ref(0)
+const recordPage = ref(1)
+const recordPageSize = 10
+
+const paginatedRecords = computed(() => {
+  const start = (recordPage.value - 1) * recordPageSize
+  return records.value.slice(start, start + recordPageSize)
+})
 
 const filteredStats = statsData
 
@@ -362,7 +369,7 @@ async function loadOnlineMembers() {
         <div class="section-header">
           <h3>今日打卡记录</h3>
         </div>
-        <el-table :data="records" style="width: 100%">
+        <el-table :data="paginatedRecords" style="width: 100%">
           <el-table-column label="成员" min-width="200">
             <template #default="{ row }">
               <div class="member-cell">
@@ -399,6 +406,15 @@ async function loadOnlineMembers() {
             </template>
           </el-table-column>
         </el-table>
+        <div class="pagination-wrap" v-if="records.length > recordPageSize">
+          <el-pagination
+            v-model:current-page="recordPage"
+            :page-size="recordPageSize"
+            :total="records.length"
+            layout="prev, pager, next"
+            small
+          />
+        </div>
       </div>
     </div>
   </div>
@@ -680,6 +696,12 @@ async function loadOnlineMembers() {
 .mono-text.bold {
   font-weight: 600;
   color: var(--text);
+}
+
+.pagination-wrap {
+  display: flex;
+  justify-content: center;
+  padding-top: 0.75rem;
 }
 
 /* Responsive */
