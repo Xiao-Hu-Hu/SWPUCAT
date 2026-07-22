@@ -132,33 +132,41 @@ async function handleDelete(id: number) {
 .card {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.5rem;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 1.25rem;
 }
 
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.25rem;
 }
 
 .card-header h3 {
-  font-size: 1rem;
+  font-size: 0.9375rem;
   font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
 }
 
 .announcements-list {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 .announcement-item {
-  background: var(--bg-deep);
+  background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 1rem;
+  transition: border-color 0.15s ease;
+}
+
+.announcement-item:hover {
+  border-color: var(--accent);
 }
 
 .ann-header {
@@ -172,7 +180,10 @@ async function handleDelete(id: number) {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  font-size: 0.9375rem;
   font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
 }
 
 .ann-meta {
@@ -184,7 +195,7 @@ async function handleDelete(id: number) {
 
 .ann-content {
   font-size: 0.875rem;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   margin-bottom: 0.75rem;
   line-height: 1.5;
 }

@@ -26,130 +26,206 @@ function handleLogout() {
 </script>
 
 <template>
-  <el-container class="app-layout">
-    <el-aside :width="isCollapse ? '64px' : '240px'" class="sidebar">
-      <div class="logo" @click="router.push('/app')">
-        <span v-if="!isCollapse">SWPUCAT</span>
-        <span v-else>S</span>
+  <div class="app-layout">
+    <aside class="sidebar" :class="{ collapsed: isCollapse }">
+      <div class="sidebar-header">
+        <span class="logo-text" v-if="!isCollapse">SWPUCAT</span>
+        <span class="logo-text" v-else>S</span>
       </div>
-      <el-menu
-        :default-active="route.path"
-        :collapse="isCollapse"
-        router
-        background-color="var(--bg-card)"
-        text-color="var(--text)"
-        active-text-color="var(--accent)"
-      >
-        <el-menu-item v-for="item in menuItems" :key="item.path" :index="item.path" v-show="item.show !== false">
-          <el-icon><component :is="item.icon" /></el-icon>
-          <template #title>{{ item.title }}</template>
-        </el-menu-item>
-      </el-menu>
-      <div class="collapse-btn" @click="isCollapse = !isCollapse">
-        <el-icon><Fold v-if="!isCollapse" /><Expand v-else /></el-icon>
+      <nav class="sidebar-nav">
+        <a
+          v-for="item in menuItems"
+          :key="item.path"
+          v-show="item.show !== false"
+          class="nav-item"
+          :class="{ active: route.path === item.path }"
+          @click="router.push(item.path)"
+        >
+          <el-icon :size="18"><component :is="item.icon" /></el-icon>
+          <span v-if="!isCollapse" class="nav-label">{{ item.title }}</span>
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="collapse-btn" @click="isCollapse = !isCollapse">
+          <el-icon :size="16"><Fold v-if="!isCollapse" /><Expand v-else /></el-icon>
+          <span v-if="!isCollapse" class="nav-label">收起</span>
+        </div>
       </div>
-    </el-aside>
+    </aside>
 
-    <el-container>
-      <el-header class="header">
-        <div class="header-left">
-          <h2>{{ menuItems.find(m => m.path === route.path)?.title || '仪表盘' }}</h2>
-        </div>
-        <div class="header-right">
-          <el-dropdown>
-            <span class="user-info">
-              <el-avatar :size="32" :src="authStore.user?.avatar ? `/api/avatar/${authStore.user.avatar}` : undefined">
-                {{ authStore.user?.nickname?.[0] || 'U' }}
-              </el-avatar>
-              <span class="username">{{ authStore.user?.nickname || '用户' }}</span>
-            </span>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item @click="router.push('/app/settings')">设置</el-dropdown-item>
-                <el-dropdown-item divided @click="handleLogout">退出登录</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-        </div>
-      </el-header>
-
-      <el-main class="main">
+    <div class="main-area">
+      <header class="topbar">
+        <h2 class="page-title">{{ menuItems.find(m => m.path === route.path)?.title || '仪表盘' }}</h2>
+        <el-dropdown>
+          <span class="user-info">
+            <el-avatar :size="32" :src="authStore.user?.avatar ? `/api/avatar/${authStore.user.avatar}` : undefined">
+              {{ authStore.user?.nickname?.[0] || 'U' }}
+            </el-avatar>
+            <span class="username">{{ authStore.user?.nickname || '用户' }}</span>
+          </span>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item @click="router.push('/app/settings')">设置</el-dropdown-item>
+              <el-dropdown-item divided @click="handleLogout">退出登录</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+      </header>
+      <main class="content">
         <router-view />
-      </el-main>
-    </el-container>
-  </el-container>
+      </main>
+    </div>
+  </div>
 </template>
 
 <style scoped>
 .app-layout {
+  display: flex;
   min-height: 100vh;
 }
 
+/* Sidebar */
 .sidebar {
+  width: 240px;
   background: var(--bg-card);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  transition: width 0.3s;
+  transition: width 0.2s ease;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
 }
 
-.logo {
-  height: 60px;
+.sidebar.collapsed {
+  width: 64px;
+}
+
+.sidebar-header {
+  height: 56px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.5rem;
-  font-weight: 800;
-  background: linear-gradient(135deg, var(--accent), var(--violet));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.logo-text {
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--accent);
   cursor: pointer;
 }
 
-.el-menu {
-  border-right: none;
+.sidebar-nav {
   flex: 1;
+  padding: 0.5rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.collapse-btn {
-  padding: 1rem;
-  text-align: center;
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  font-weight: 500;
   cursor: pointer;
-  color: var(--text-muted);
-  border-top: 1px solid var(--border);
+  transition: color 0.2s, background 0.2s;
+  text-decoration: none;
+  white-space: nowrap;
 }
 
-.collapse-btn:hover {
+.nav-item:hover {
+  background: var(--bg-hover);
   color: var(--text);
 }
 
-.header {
+.nav-item.active {
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.sidebar-footer {
+  padding: 0.5rem;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.collapse-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+
+.collapse-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.nav-label {
+  flex: 1;
+}
+
+/* Main area */
+.main-area {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  height: 56px;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 2rem;
+  padding: 0 1.5rem;
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
-.header-left h2 {
-  font-size: 1.25rem;
+.page-title {
+  font-size: 1rem;
   font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
 }
 
 .user-info {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.625rem;
   cursor: pointer;
+  padding: 0.25rem 0;
 }
 
 .username {
   font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
 }
 
-.main {
+.content {
+  flex: 1;
+  padding: 1.5rem;
   background: var(--bg-deep);
-  padding: 2rem;
 }
 </style>

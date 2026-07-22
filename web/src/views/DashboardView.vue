@@ -29,8 +29,8 @@ onMounted(async () => {
   <div class="dashboard">
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="stat-icon" style="background: linear-gradient(135deg, #06b6d4, #0891b2)">
-          <el-icon :size="24"><User /></el-icon>
+        <div class="stat-icon icon-blue">
+          <el-icon :size="20"><User /></el-icon>
         </div>
         <div class="stat-info">
           <span class="stat-value">{{ dashboard.member_count }}</span>
@@ -38,8 +38,8 @@ onMounted(async () => {
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon" style="background: linear-gradient(135deg, #22c55e, #16a34a)">
-          <el-icon :size="24"><Clock /></el-icon>
+        <div class="stat-icon icon-green">
+          <el-icon :size="20"><Clock /></el-icon>
         </div>
         <div class="stat-info">
           <span class="stat-value">{{ dashboard.today_checkins }}</span>
@@ -47,8 +47,8 @@ onMounted(async () => {
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon" style="background: linear-gradient(135deg, #f59e0b, #d97706)">
-          <el-icon :size="24"><Bell /></el-icon>
+        <div class="stat-icon icon-amber">
+          <el-icon :size="20"><Bell /></el-icon>
         </div>
         <div class="stat-info">
           <span class="stat-value">{{ dashboard.announcement_count }}</span>
@@ -56,8 +56,8 @@ onMounted(async () => {
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon" style="background: linear-gradient(135deg, #8b5cf6, #7c3aed)">
-          <el-icon :size="24"><Folder /></el-icon>
+        <div class="stat-icon icon-violet">
+          <el-icon :size="20"><Folder /></el-icon>
         </div>
         <div class="stat-info">
           <span class="stat-value">{{ dashboard.knowledge_count }}</span>
@@ -67,8 +67,8 @@ onMounted(async () => {
     </div>
 
     <div class="content-grid">
-      <div class="card activities-card">
-        <h3>最近动态</h3>
+      <div class="card">
+        <h3 class="card-title">最近动态</h3>
         <div class="activities-list">
           <div v-for="(activity, index) in dashboard.recent_activities" :key="index" class="activity-item">
             <div class="activity-dot" :class="activity.color"></div>
@@ -81,11 +81,11 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div class="card online-card">
-        <h3>在线成员</h3>
+      <div class="card">
+        <h3 class="card-title">在线成员</h3>
         <div class="online-list">
           <div v-for="member in dashboard.online_members" :key="member.id" class="online-member">
-            <el-avatar :size="36" :src="member.avatar ? `/api/avatar/${member.avatar}` : undefined">{{ member.nickname?.[0] || 'U' }}</el-avatar>
+            <el-avatar :size="32" :src="member.avatar ? `/api/avatar/${member.avatar}` : undefined">{{ member.nickname?.[0] || 'U' }}</el-avatar>
             <span class="member-name">{{ member.nickname }}</span>
           </div>
           <el-empty v-if="dashboard.online_members.length === 0" description="暂无在线成员" />
@@ -102,30 +102,41 @@ onMounted(async () => {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 1.5rem;
-  margin-bottom: 2rem;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
 }
 
 .stat-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.5rem;
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
   display: flex;
   align-items: center;
   gap: 1rem;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.2s;
+}
+
+.stat-card:hover {
+  box-shadow: var(--shadow-md);
 }
 
 .stat-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  flex-shrink: 0;
 }
+
+.icon-blue { background: var(--accent-bg); color: var(--accent); }
+.icon-green { background: var(--success-bg); color: var(--success); }
+.icon-amber { background: var(--warning-bg); color: var(--warning); }
+.icon-violet { background: #f3e8ff; color: #7c3aed; }
 
 .stat-info {
   display: flex;
@@ -133,51 +144,60 @@ onMounted(async () => {
 }
 
 .stat-value {
-  font-size: 1.75rem;
+  font-size: 1.5rem;
   font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
 }
 
 .stat-label {
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   color: var(--text-muted);
+  margin-top: 0.125rem;
 }
 
 .content-grid {
   display: grid;
   grid-template-columns: 2fr 1fr;
-  gap: 1.5rem;
+  gap: 1rem;
 }
 
 .card {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.5rem;
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+  box-shadow: var(--shadow-sm);
 }
 
-.card h3 {
-  margin-bottom: 1rem;
-  font-size: 1rem;
+.card-title {
+  font-size: 0.9375rem;
   font-weight: 600;
+  letter-spacing: -0.01em;
+  margin-bottom: 1rem;
+  color: var(--text);
 }
 
 .activities-list {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 .activity-item {
   display: flex;
   align-items: flex-start;
-  gap: 0.75rem;
+  gap: 0.625rem;
+  padding: 0.5rem 0;
 }
 
 .activity-dot {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   margin-top: 6px;
+  flex-shrink: 0;
 }
 
 .activity-dot.warning { background: var(--warning); }
@@ -191,26 +211,30 @@ onMounted(async () => {
 
 .activity-text {
   font-size: 0.875rem;
+  color: var(--text-secondary);
 }
 
 .activity-time {
   font-size: 0.75rem;
   color: var(--text-muted);
+  margin-top: 0.125rem;
 }
 
 .online-list {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.5rem;
 }
 
 .online-member {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.625rem;
+  padding: 0.375rem 0;
 }
 
 .member-name {
   font-size: 0.875rem;
+  color: var(--text-secondary);
 }
 </style>

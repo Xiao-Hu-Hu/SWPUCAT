@@ -362,8 +362,9 @@ async function handleDownloadFile(id: number, name: string) {
 .card {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.5rem;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 1.25rem;
 }
 
 .card-header {
@@ -374,8 +375,10 @@ async function handleDownloadFile(id: number, name: string) {
 }
 
 .card-header h3 {
-  font-size: 1rem;
+  font-size: 0.9375rem;
   font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
 }
 
 .actions {
@@ -394,9 +397,10 @@ async function handleDownloadFile(id: number, name: string) {
   align-items: center;
   justify-content: space-between;
   padding: 0.75rem;
-  border-radius: 8px;
+  border-radius: var(--radius);
   cursor: pointer;
   transition: background 0.2s;
+  color: var(--text-secondary);
 }
 
 .category-item:hover {
@@ -405,7 +409,7 @@ async function handleDownloadFile(id: number, name: string) {
 
 .category-item.active {
   background: var(--accent);
-  color: white;
+  color: #ffffff;
 }
 
 .count {
@@ -426,7 +430,12 @@ async function handleDownloadFile(id: number, name: string) {
   padding: 1rem;
   background: var(--bg-deep);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
+  transition: box-shadow 0.2s;
+}
+
+.item-card:hover {
+  box-shadow: var(--shadow-md);
 }
 
 .item-icon {
@@ -435,8 +444,8 @@ async function handleDownloadFile(id: number, name: string) {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-hover);
-  border-radius: 8px;
+  background: var(--accent-bg);
+  border-radius: var(--radius);
   color: var(--accent);
 }
 
@@ -447,6 +456,7 @@ async function handleDownloadFile(id: number, name: string) {
 .item-name {
   display: block;
   font-weight: 500;
+  color: var(--text);
   margin-bottom: 0.25rem;
 }
 

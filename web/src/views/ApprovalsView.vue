@@ -197,8 +197,9 @@ function getStatusTag(item: any) {
 .card {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.5rem;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 1.25rem;
 }
 
 .card-header {
@@ -209,8 +210,10 @@ function getStatusTag(item: any) {
 }
 
 .card-header h3 {
-  font-size: 1rem;
+  font-size: 0.9375rem;
   font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
 }
 
 .pending-count {
@@ -229,9 +232,14 @@ function getStatusTag(item: any) {
   align-items: flex-start;
   gap: 1rem;
   padding: 1rem;
-  background: var(--bg-deep);
+  background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
+  transition: border-color 0.2s;
+}
+
+.approval-card:hover {
+  border-color: var(--accent);
 }
 
 .item-icon {
@@ -240,8 +248,8 @@ function getStatusTag(item: any) {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-hover);
-  border-radius: 8px;
+  background: var(--accent-bg);
+  border-radius: var(--radius);
   color: var(--accent);
   flex-shrink: 0;
 }
@@ -276,10 +284,10 @@ function getStatusTag(item: any) {
 .reject-reason {
   margin-top: 0.5rem;
   padding: 0.5rem;
-  background: rgba(245, 108, 108, 0.1);
+  background: var(--danger-bg);
   border-radius: 4px;
   font-size: 0.8rem;
-  color: #f56c6c;
+  color: var(--danger);
 }
 
 .reviewer-info {

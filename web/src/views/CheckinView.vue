@@ -57,6 +57,9 @@ function updateChart() {
   const option = {
     tooltip: {
       trigger: 'axis',
+      backgroundColor: '#ffffff',
+      borderColor: '#e4e4e7',
+      textStyle: { color: '#18181b' },
       axisPointer: { type: 'shadow' },
       formatter: (params: any) => {
         const d = params[0]
@@ -74,14 +77,14 @@ function updateChart() {
       type: 'category',
       data: data.map(d => d.nickname),
       axisLabel: {
-        color: '#909399',
+        color: '#71717a',
         rotate: data.length > 5 ? 30 : 0
       }
     },
     yAxis: {
       type: 'value',
       name: '分钟',
-      axisLabel: { color: '#909399' }
+      axisLabel: { color: '#71717a' }
     },
     series: [{
       type: 'bar',
@@ -90,12 +93,12 @@ function updateChart() {
         itemStyle: {
           color: d.user_id === authStore.user?.id
             ? new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                { offset: 0, color: '#67c23a' },
-                { offset: 1, color: '#409eff' }
+                { offset: 0, color: '#2563eb' },
+                { offset: 1, color: '#60a5fa' }
               ])
             : new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                { offset: 0, color: '#409eff' },
-                { offset: 1, color: '#909399' }
+                { offset: 0, color: '#60a5fa' },
+                { offset: 1, color: '#93c5fd' }
               ])
         }
       })),
@@ -104,7 +107,7 @@ function updateChart() {
         show: true,
         position: 'top',
         formatter: (params: any) => formatMinutes(params.value),
-        color: '#909399'
+        color: '#71717a'
       }
     }]
   }
@@ -281,8 +284,9 @@ async function loadOnlineMembers() {
 .clock-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 2rem;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 1.25rem;
   text-align: center;
 }
 
@@ -292,36 +296,41 @@ async function loadOnlineMembers() {
 
 .time {
   display: block;
-  font-size: 3rem;
+  font-size: 2rem;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
   font-family: 'Courier New', monospace;
+  color: var(--text);
 }
 
 .date {
-  font-size: 1rem;
+  font-size: 0.875rem;
   color: var(--text-muted);
 }
 
 .status-badge {
   display: inline-block;
-  padding: 0.5rem 1rem;
-  border-radius: 20px;
-  font-size: 0.875rem;
+  padding: 0.375rem 0.875rem;
+  border-radius: var(--radius);
+  font-size: 0.8125rem;
+  font-weight: 500;
   margin-bottom: 1.5rem;
+  transition: all 0.2s;
 }
 
 .status-badge.idle {
-  background: rgba(148, 163, 184, 0.2);
+  background: var(--bg-deep);
   color: var(--text-muted);
 }
 
 .status-badge.clocked_in {
-  background: rgba(34, 197, 94, 0.2);
+  background: var(--success-bg);
   color: var(--success);
 }
 
 .status-badge.clocked_out {
-  background: rgba(239, 68, 68, 0.2);
+  background: var(--danger-bg);
   color: var(--danger);
 }
 
@@ -337,20 +346,23 @@ async function loadOnlineMembers() {
   gap: 2rem;
   justify-content: center;
   color: var(--text-muted);
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
 }
 
 .card {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.5rem;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 1.25rem;
 }
 
 .card h3 {
   margin-bottom: 1rem;
-  font-size: 1rem;
+  font-size: 0.9375rem;
   font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
 }
 
 .stats-section {
@@ -364,16 +376,23 @@ async function loadOnlineMembers() {
 .online-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 .online-item {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 1rem;
+  padding: 0.5rem 0.875rem;
   background: var(--bg-deep);
-  border-radius: 8px;
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  transition: all 0.2s;
+}
+
+.online-item:hover {
+  background: var(--bg-hover);
 }
 
 .online-dot {
@@ -381,6 +400,7 @@ async function loadOnlineMembers() {
   height: 8px;
   border-radius: 50%;
   background: var(--text-muted);
+  flex-shrink: 0;
 }
 
 .online-dot.online {
@@ -398,14 +418,15 @@ async function loadOnlineMembers() {
 }
 
 :deep(.current-user-row) {
-  background: rgba(64, 158, 255, 0.1) !important;
+  background: var(--accent-bg) !important;
 }
 
 :deep(.current-user-row:hover > td) {
-  background: rgba(64, 158, 255, 0.15) !important;
+  background: var(--accent-bg) !important;
 }
 
 :deep(.current-user-row .cell) {
   font-weight: 600;
+  color: var(--text);
 }
 </style>

@@ -275,13 +275,16 @@ async function handleChangePassword() {
 .card {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.5rem;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 1.25rem;
 }
 
 .card h3 {
-  font-size: 1rem;
+  font-size: 0.9375rem;
   font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
   margin-bottom: 1.5rem;
 }
 
@@ -309,7 +312,7 @@ async function handleChangePassword() {
 .avatar-placeholder {
   width: 100%;
   height: 100%;
-  background: var(--bg-hover);
+  background: var(--bg-deep);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -352,7 +355,7 @@ async function handleChangePassword() {
 }
 
 .warning-text {
-  color: #e6a23c;
+  color: var(--warning);
   font-size: 12px;
   margin-top: 4px;
 }

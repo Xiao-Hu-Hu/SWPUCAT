@@ -225,7 +225,7 @@ async function handleRegister() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, var(--bg-deep) 0%, #0f172a 100%);
+  background: var(--bg-card);
 }
 
 .hero-content {
@@ -233,17 +233,15 @@ async function handleRegister() {
 }
 
 .title {
-  font-size: 4rem;
-  font-weight: 800;
-  background: linear-gradient(135deg, var(--accent), var(--violet));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  font-size: 3.5rem;
+  font-weight: 700;
+  color: var(--accent);
   margin-bottom: 1rem;
 }
 
 .subtitle {
   font-size: 1.5rem;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   margin-bottom: 2rem;
 }
 
@@ -267,21 +265,23 @@ async function handleRegister() {
 }
 
 .feature-card {
-  background: var(--bg-deep);
+  background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 2rem;
   text-align: center;
-  transition: transform 0.2s;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.2s;
 }
 
 .feature-card:hover {
-  transform: translateY(-4px);
+  border-color: var(--accent);
 }
 
 .feature-card h3 {
   margin: 1rem 0 0.5rem;
-  font-size: 1.25rem;
+  font-size: 1rem;
+  color: var(--text);
 }
 
 .feature-card p {
