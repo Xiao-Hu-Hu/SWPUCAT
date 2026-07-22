@@ -335,7 +335,9 @@ async function loadOnlineMembers() {
       </div>
       <div class="stat-card">
         <div class="stat-label">我的今日工时</div>
-        <div class="stat-value violet">{{ todayTotalHours }}</div>
+        <Transition name="tick" mode="out-in">
+          <div class="stat-value violet" :key="todayTotalHours">{{ todayTotalHours }}</div>
+        </Transition>
         <div class="stat-sub">{{ status.status === 'clocked_in' ? '计时中' : status.status === 'clocked_out' ? '已完成' : '尚未签到' }}</div>
       </div>
     </div>
@@ -668,6 +670,22 @@ async function loadOnlineMembers() {
 .mono-text.bold {
   font-weight: 600;
   color: var(--text);
+}
+
+/* Number tick animation */
+.tick-enter-active,
+.tick-leave-active {
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.tick-enter-from {
+  opacity: 0;
+  transform: translateY(8px) scale(0.95);
+}
+
+.tick-leave-to {
+  opacity: 0;
+  transform: translateY(-8px) scale(0.95);
 }
 
 /* Responsive */
