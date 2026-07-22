@@ -15,6 +15,7 @@ const records = ref<Array<{ id: number; type: string; date: string; time: string
 const statsData = ref<Array<{ user_id: number; nickname: string; total_minutes: number; total_hours: number; days: number }>>([])
 const onlineMembers = ref<Array<{ user_id: number; nickname: string; online: boolean }>>([])
 const chartFilter = ref('week')
+const todayBaseMinutes = ref(0)
 
 const filteredStats = statsData
 
@@ -38,16 +39,23 @@ function formatDate(): string {
 }
 
 function calcTotalHours(): string {
-  if (!status.value.clock_in) return '0分钟'
-  const now = new Date()
-  const [sh, sm] = status.value.clock_in.split(':').map(Number)
-  let endH = now.getHours(), endM = now.getMinutes()
-  if (status.value.clock_out) {
-    endH = parseInt(status.value.clock_out.split(':')[0])
-    endM = parseInt(status.value.clock_out.split(':')[1])
+  let total = todayBaseMinutes.value
+  if (status.value.status === 'clocked_in' && status.value.clock_in) {
+    const now = new Date()
+    const [sh, sm] = status.value.clock_in.split(':').map(Number)
+    total += Math.max(0, (now.getHours() * 60 + now.getMinutes()) - (sh * 60 + sm))
   }
-  const mins = Math.max(0, (endH * 60 + endM) - (sh * 60 + sm))
-  return formatMinutes(mins)
+  return formatMinutes(total)
+}
+
+async function loadTodayHours() {
+  try {
+    const res = await checkinApi.getStats('today')
+    const stats: any[] = (res.data || []).filter((s: any) => s.user_id === authStore.user?.id)
+    todayBaseMinutes.value = stats.length > 0 ? stats[0].total_minutes : 0
+  } catch {
+    console.error('Failed to load today hours')
+  }
 }
 
 function calcDuration(signin: string, signout: string): string {
@@ -104,6 +112,7 @@ function scheduleMidnightRefresh() {
     await loadStatus()
     await loadRecords()
     await loadStats()
+    await loadTodayHours()
     await loadOnlineMembers()
     scheduleMidnightRefresh()
   }, msUntilMidnight)
@@ -113,6 +122,7 @@ onMounted(async () => {
   await loadStatus()
   await loadRecords()
   await loadStats()
+  await loadTodayHours()
   await loadOnlineMembers()
   await nextTick()
   initChart()
@@ -216,6 +226,7 @@ async function handleClockIn() {
     ElMessage.success('签到成功')
     await loadStatus()
     await loadRecords()
+    await loadTodayHours()
     await loadOnlineMembers()
   } catch {
     ElMessage.error('签到失败')
@@ -229,6 +240,7 @@ async function handleClockOut() {
     await loadStatus()
     await loadRecords()
     await loadStats()
+    await loadTodayHours()
     await loadOnlineMembers()
   } catch {
     ElMessage.error('签退失败')
