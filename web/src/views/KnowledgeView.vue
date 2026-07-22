@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { knowledgeApi } from '@/api/knowledge'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { marked } from 'marked'
 
 const authStore = useAuthStore()
 const uploading = ref(false)
@@ -12,6 +13,7 @@ const items = ref<Array<{
   id: number
   type: string
   name: string
+  description: string
   url: string
   file_size: string
   category_id: number
@@ -34,9 +36,11 @@ const paginatedItems = computed(() => {
 const showLinkDialog = ref(false)
 const showCategoryDialog = ref(false)
 const showUploadDialog = ref(false)
-const linkForm = ref({ name: '', url: '', category_id: 0 })
+const showPreviewDialog = ref(false)
+const previewItem = ref<{ name: string; description: string } | null>(null)
+const linkForm = ref({ name: '', url: '', description: '', category_id: 0 })
 const categoryForm = ref({ name: '' })
-const uploadForm = ref({ category_id: 0 })
+const uploadForm = ref({ description: '', category_id: 0 })
 const selectedFile = ref<File | null>(null)
 
 onMounted(async () => {
@@ -72,13 +76,14 @@ function handleSearch() {
 
 async function handleCreateLink() {
   try {
-    await knowledgeApi.createLink(linkForm.value.name, linkForm.value.url, linkForm.value.category_id)
+    await knowledgeApi.createLink(linkForm.value.name, linkForm.value.url, linkForm.value.category_id, linkForm.value.description)
     if (authStore.isCaptain || authStore.isSuperAdmin) {
       ElMessage.success('创建成功')
     } else {
       ElMessage.success('创建成功，等待队长审核')
     }
     showLinkDialog.value = false
+    linkForm.value = { name: '', url: '', description: '', category_id: 0 }
     await loadItems()
   } catch {
     ElMessage.error('创建失败')
@@ -135,7 +140,7 @@ async function handleUploadFile() {
   }
   uploading.value = true
   try {
-    await knowledgeApi.uploadFile(selectedFile.value, uploadForm.value.category_id)
+    await knowledgeApi.uploadFile(selectedFile.value, uploadForm.value.category_id, uploadForm.value.description)
     if (authStore.isCaptain || authStore.isSuperAdmin) {
       ElMessage.success('上传成功')
     } else {
@@ -143,6 +148,7 @@ async function handleUploadFile() {
     }
     showUploadDialog.value = false
     selectedFile.value = null
+    uploadForm.value = { description: '', category_id: 0 }
     await loadItems()
     await loadCategories()
   } catch {
@@ -150,6 +156,15 @@ async function handleUploadFile() {
   } finally {
     uploading.value = false
   }
+}
+
+function openPreview(item: { name: string; description: string }) {
+  previewItem.value = item
+  showPreviewDialog.value = true
+}
+
+function renderMarkdown(md: string): string {
+  return marked.parse(md) as string
 }
 
 async function handleDownloadFile(id: number, name: string) {
@@ -262,6 +277,11 @@ async function handleDownloadFile(id: number, name: string) {
                 <span v-if="item.file_size">{{ item.file_size }}</span>
               </div>
             </div>
+            <div class="item-actions" v-if="item.description">
+              <el-button size="small" @click="openPreview(item)">
+                查看说明
+              </el-button>
+            </div>
             <div class="item-actions">
               <el-button
                 v-if="item.type === 'file'"
@@ -312,6 +332,16 @@ async function handleDownloadFile(id: number, name: string) {
             <el-option v-for="cat in categories" :key="cat.id" :label="cat.name" :value="cat.id" />
           </el-select>
         </el-form-item>
+        <el-form-item label="描述">
+          <el-input
+            v-model="linkForm.description"
+            type="textarea"
+            :rows="4"
+            placeholder="请输入描述（支持Markdown格式，0-1000字）"
+            maxlength="1000"
+            show-word-limit
+          />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showLinkDialog = false">取消</el-button>
@@ -351,12 +381,29 @@ async function handleDownloadFile(id: number, name: string) {
             <el-option v-for="cat in categories" :key="cat.id" :label="cat.name" :value="cat.id" />
           </el-select>
         </el-form-item>
+        <el-form-item label="描述">
+          <el-input
+            v-model="uploadForm.description"
+            type="textarea"
+            :rows="4"
+            placeholder="请输入描述（支持Markdown格式，0-1000字）"
+            maxlength="1000"
+            show-word-limit
+          />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showUploadDialog = false" :disabled="uploading">取消</el-button>
         <el-button type="primary" @click="handleUploadFile" :loading="uploading">
           {{ uploading ? '上传中...' : '上传' }}
         </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="showPreviewDialog" :title="previewItem?.name || '资源说明'" width="600px">
+      <div v-if="previewItem" class="markdown-preview" v-html="renderMarkdown(previewItem.description)"></div>
+      <template #footer>
+        <el-button @click="showPreviewDialog = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>
@@ -506,5 +553,83 @@ async function handleDownloadFile(id: number, name: string) {
   margin-top: 1.25rem;
   padding-top: 1rem;
   border-top: 1px solid var(--border);
+}
+
+.markdown-preview {
+  line-height: 1.7;
+  color: var(--text);
+}
+
+.markdown-preview :deep(h1),
+.markdown-preview :deep(h2),
+.markdown-preview :deep(h3) {
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+}
+
+.markdown-preview :deep(p) {
+  margin-bottom: 0.75em;
+}
+
+.markdown-preview :deep(code) {
+  background: var(--bg-deep);
+  padding: 0.125em 0.375em;
+  border-radius: 0.25rem;
+  font-size: 0.875em;
+  font-family: 'Courier New', monospace;
+}
+
+.markdown-preview :deep(pre) {
+  background: var(--bg-deep);
+  padding: 1rem;
+  border-radius: var(--radius);
+  overflow-x: auto;
+  margin-bottom: 1em;
+}
+
+.markdown-preview :deep(pre code) {
+  background: none;
+  padding: 0;
+}
+
+.markdown-preview :deep(ul),
+.markdown-preview :deep(ol) {
+  padding-left: 1.5em;
+  margin-bottom: 0.75em;
+}
+
+.markdown-preview :deep(blockquote) {
+  border-left: 3px solid var(--accent);
+  padding-left: 1em;
+  color: var(--text-secondary);
+  margin-bottom: 0.75em;
+}
+
+.markdown-preview :deep(a) {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.markdown-preview :deep(a:hover) {
+  text-decoration: underline;
+}
+
+.markdown-preview :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1em;
+}
+
+.markdown-preview :deep(th),
+.markdown-preview :deep(td) {
+  border: 1px solid var(--border);
+  padding: 0.5rem;
+  text-align: left;
+}
+
+.markdown-preview :deep(th) {
+  background: var(--bg-deep);
+  font-weight: 600;
 }
 </style>

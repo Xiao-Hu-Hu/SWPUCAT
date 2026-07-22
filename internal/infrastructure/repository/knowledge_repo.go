@@ -21,6 +21,7 @@ func (r *KnowledgeRepo) CreateItem(ctx context.Context, item *knowledge.Knowledg
 		ID:           item.ID,
 		Type:         string(item.Type),
 		Name:         item.Name,
+		Description:  item.Description,
 		URL:          item.URL,
 		FileSize:     item.FileSize,
 		FileKey:      item.FileKey,
@@ -82,6 +83,7 @@ func (r *KnowledgeRepo) FindItemsByUploader(ctx context.Context, uploaderID int6
 func (r *KnowledgeRepo) UpdateItem(ctx context.Context, item *knowledge.KnowledgeItem) error {
 	return r.db.WithContext(ctx).Model(&database.KnowledgeItemModel{}).Where("id = ?", item.ID).Updates(map[string]interface{}{
 		"name":          item.Name,
+		"description":   item.Description,
 		"url":           item.URL,
 		"file_size":     item.FileSize,
 		"category_id":   item.CategoryID,
@@ -147,6 +149,7 @@ func toDomainKnowledgeItem(m *database.KnowledgeItemModel) *knowledge.KnowledgeI
 		ID:           m.ID,
 		Type:         knowledge.ItemType(m.Type),
 		Name:         m.Name,
+		Description:  m.Description,
 		URL:          m.URL,
 		FileSize:     m.FileSize,
 		FileKey:      m.FileKey,

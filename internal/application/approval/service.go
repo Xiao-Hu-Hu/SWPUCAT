@@ -55,7 +55,7 @@ func (s *ApprovalService) Approve(ctx context.Context, approvalID, reviewerID in
 	}
 
 	item, _ := knowledge.NewFile(
-		a.FileName, a.FileSize, a.FileKey,
+		a.FileName, "", a.FileSize, a.FileKey,
 		a.CategoryID, a.UploaderID, a.UploaderName, true,
 	)
 	if err := s.knowledgeRepo.CreateItem(ctx, item); err != nil {

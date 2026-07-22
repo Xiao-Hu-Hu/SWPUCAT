@@ -72,15 +72,19 @@ func (h *KnowledgeHandler) UploadFile(c *gin.Context) {
 	// Format file size
 	fileSize := fmt.Sprintf("%.2f MB", float64(header.Size)/(1024*1024))
 
+	// Get description from form
+	description := c.PostForm("description")
+
 	uploaderID := GetUserID(c)
 	uploaderName := GetUsername(c)
 	isCaptain := IsCaptain(c)
 
 	req := knowledge.UploadFileRequest{
-		FileName:   header.Filename,
-		FileSize:   fileSize,
-		FileKey:    fileKey,
-		CategoryID: categoryID,
+		FileName:    header.Filename,
+		Description: description,
+		FileSize:    fileSize,
+		FileKey:     fileKey,
+		CategoryID:  categoryID,
 	}
 
 	dto, err := h.knowledgeSvc.UploadFile(c.Request.Context(), uploaderID, uploaderName, isCaptain, req)

@@ -7,13 +7,16 @@ export const knowledgeApi = {
   getItem(id: number) {
     return api.get(`/knowledge/items/${id}`)
   },
-  createLink(name: string, url: string, categoryId: number) {
-    return api.post('/knowledge/links', { name, url, category_id: categoryId })
+  createLink(name: string, url: string, categoryId: number, description?: string) {
+    return api.post('/knowledge/links', { name, url, category_id: categoryId, description: description || '' })
   },
-  uploadFile(file: File, categoryId: number) {
+  uploadFile(file: File, categoryId: number, description?: string) {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('category_id', categoryId.toString())
+    if (description) {
+      formData.append('description', description)
+    }
     return api.post('/knowledge/files', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     })

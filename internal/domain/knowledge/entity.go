@@ -13,6 +13,7 @@ type KnowledgeItem struct {
 	ID           int64
 	Type         ItemType
 	Name         string
+	Description  string
 	URL          string
 	FileKey      string
 	FileSize     string
@@ -27,7 +28,7 @@ type KnowledgeItem struct {
 	CreatedAt    time.Time
 }
 
-func NewLink(name, url string, categoryID, uploaderID int64, uploaderName string) (*KnowledgeItem, error) {
+func NewLink(name, url, description string, categoryID, uploaderID int64, uploaderName string) (*KnowledgeItem, error) {
 	if name == "" {
 		return nil, ErrEmptyItemName
 	}
@@ -37,6 +38,7 @@ func NewLink(name, url string, categoryID, uploaderID int64, uploaderName string
 	return &KnowledgeItem{
 		Type:         ItemTypeLink,
 		Name:         name,
+		Description:  description,
 		URL:          url,
 		CategoryID:   categoryID,
 		UploaderID:   uploaderID,
@@ -46,13 +48,14 @@ func NewLink(name, url string, categoryID, uploaderID int64, uploaderName string
 	}, nil
 }
 
-func NewFile(name, fileSize, fileKey string, categoryID, uploaderID int64, uploaderName string, approved bool) (*KnowledgeItem, error) {
+func NewFile(name, description, fileSize, fileKey string, categoryID, uploaderID int64, uploaderName string, approved bool) (*KnowledgeItem, error) {
 	if name == "" {
 		return nil, ErrEmptyItemName
 	}
 	return &KnowledgeItem{
 		Type:         ItemTypeFile,
 		Name:         name,
+		Description:  description,
 		FileKey:      fileKey,
 		FileSize:     fileSize,
 		CategoryID:   categoryID,

@@ -56,6 +56,7 @@ type KnowledgeItemModel struct {
 	ID           int64     `gorm:"primaryKey;autoIncrement"`
 	Type         string    `gorm:"size:8;not null"`
 	Name         string    `gorm:"size:256;not null"`
+	Description  string    `gorm:"type:text"`
 	URL          string    `gorm:"size:512"`
 	FileSize     string    `gorm:"size:32"`
 	FileKey      string    `gorm:"size:256"`

@@ -3,12 +3,14 @@ import { ref, onMounted, computed } from 'vue'
 import { knowledgeApi } from '@/api/knowledge'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
+import { marked } from 'marked'
 
 const authStore = useAuthStore()
 const items = ref<Array<{
   id: number
   type: string
   name: string
+  description: string
   url: string
   file_key: string
   file_size: string
@@ -23,6 +25,8 @@ const items = ref<Array<{
 }>>([])
 const downloading = ref<Record<number, number>>({})
 const showRejectDialog = ref(false)
+const showPreviewDialog = ref(false)
+const previewItem = ref<{ name: string; description: string } | null>(null)
 const rejectItemId = ref<number | null>(null)
 const rejectReason = ref('')
 
@@ -115,6 +119,15 @@ function getStatusTag(item: any) {
   if (item.rejected) return { type: 'danger', text: '已拒绝' }
   return { type: 'warning', text: '待审核' }
 }
+
+function openPreview(item: { name: string; description: string }) {
+  previewItem.value = item
+  showPreviewDialog.value = true
+}
+
+function renderMarkdown(md: string): string {
+  return marked.parse(md) as string
+}
 </script>
 
 <template>
@@ -154,6 +167,9 @@ function getStatusTag(item: any) {
             <el-tag :type="getStatusTag(item).type" size="small">
               {{ getStatusTag(item).text }}
             </el-tag>
+            <el-button v-if="item.description" size="small" @click="openPreview(item)">
+              查看说明
+            </el-button>
             <el-button
               v-if="item.type === 'file' && !item.rejected"
               size="small"
@@ -203,6 +219,13 @@ function getStatusTag(item: any) {
       <template #footer>
         <el-button @click="showRejectDialog = false">取消</el-button>
         <el-button type="danger" @click="handleReject">确认拒绝</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="showPreviewDialog" :title="previewItem?.name || '资源说明'" width="600px">
+      <div v-if="previewItem" class="markdown-preview" v-html="renderMarkdown(previewItem.description)"></div>
+      <template #footer>
+        <el-button @click="showPreviewDialog = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>
@@ -328,5 +351,83 @@ function getStatusTag(item: any) {
   margin-top: 1.25rem;
   padding-top: 1rem;
   border-top: 1px solid var(--border);
+}
+
+.markdown-preview {
+  line-height: 1.7;
+  color: var(--text);
+}
+
+.markdown-preview :deep(h1),
+.markdown-preview :deep(h2),
+.markdown-preview :deep(h3) {
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+}
+
+.markdown-preview :deep(p) {
+  margin-bottom: 0.75em;
+}
+
+.markdown-preview :deep(code) {
+  background: var(--bg-deep);
+  padding: 0.125em 0.375em;
+  border-radius: 0.25rem;
+  font-size: 0.875em;
+  font-family: 'Courier New', monospace;
+}
+
+.markdown-preview :deep(pre) {
+  background: var(--bg-deep);
+  padding: 1rem;
+  border-radius: var(--radius);
+  overflow-x: auto;
+  margin-bottom: 1em;
+}
+
+.markdown-preview :deep(pre code) {
+  background: none;
+  padding: 0;
+}
+
+.markdown-preview :deep(ul),
+.markdown-preview :deep(ol) {
+  padding-left: 1.5em;
+  margin-bottom: 0.75em;
+}
+
+.markdown-preview :deep(blockquote) {
+  border-left: 3px solid var(--accent);
+  padding-left: 1em;
+  color: var(--text-secondary);
+  margin-bottom: 0.75em;
+}
+
+.markdown-preview :deep(a) {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.markdown-preview :deep(a:hover) {
+  text-decoration: underline;
+}
+
+.markdown-preview :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1em;
+}
+
+.markdown-preview :deep(th),
+.markdown-preview :deep(td) {
+  border: 1px solid var(--border);
+  padding: 0.5rem;
+  text-align: left;
+}
+
+.markdown-preview :deep(th) {
+  background: var(--bg-deep);
+  font-weight: 600;
 }
 </style>

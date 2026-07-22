@@ -8,16 +8,18 @@ import (
 )
 
 type CreateLinkRequest struct {
-	Name       string `json:"name" validate:"required,max=256"`
-	URL        string `json:"url" validate:"required,url"`
-	CategoryID int64  `json:"category_id" validate:"required"`
+	Name        string `json:"name" validate:"required,max=256"`
+	URL         string `json:"url" validate:"required,url"`
+	Description string `json:"description" validate:"max=1000"`
+	CategoryID  int64  `json:"category_id" validate:"required"`
 }
 
 type UploadFileRequest struct {
-	FileName   string `json:"file_name" validate:"required,max=256"`
-	FileSize   string `json:"file_size"`
-	FileKey    string `json:"file_key"`
-	CategoryID int64  `json:"category_id" validate:"required"`
+	FileName    string `json:"file_name" validate:"required,max=256"`
+	Description string `json:"description" validate:"max=1000"`
+	FileSize    string `json:"file_size"`
+	FileKey     string `json:"file_key"`
+	CategoryID  int64  `json:"category_id" validate:"required"`
 }
 
 type CreateCategoryRequest struct {
@@ -28,6 +30,7 @@ type KnowledgeItemDTO struct {
 	ID           int64  `json:"id"`
 	Type         string `json:"type"`
 	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
 	URL          string `json:"url,omitempty"`
 	FileKey      string `json:"file_key,omitempty"`
 	FileSize     string `json:"file_size,omitempty"`
@@ -60,7 +63,7 @@ func NewKnowledgeService(repo knowledge.Repository, publisher shared.EventPublis
 }
 
 func (s *KnowledgeService) CreateLink(ctx context.Context, uploaderID int64, uploaderName string, isCaptain bool, req CreateLinkRequest) (*KnowledgeItemDTO, error) {
-	item, err := knowledge.NewLink(req.Name, req.URL, req.CategoryID, uploaderID, uploaderName)
+	item, err := knowledge.NewLink(req.Name, req.URL, req.Description, req.CategoryID, uploaderID, uploaderName)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +75,7 @@ func (s *KnowledgeService) CreateLink(ctx context.Context, uploaderID int64, upl
 }
 
 func (s *KnowledgeService) UploadFile(ctx context.Context, uploaderID int64, uploaderName string, isCaptain bool, req UploadFileRequest) (*KnowledgeItemDTO, error) {
-	item, err := knowledge.NewFile(req.FileName, req.FileSize, req.FileKey, req.CategoryID, uploaderID, uploaderName, isCaptain)
+	item, err := knowledge.NewFile(req.FileName, req.Description, req.FileSize, req.FileKey, req.CategoryID, uploaderID, uploaderName, isCaptain)
 	if err != nil {
 		return nil, err
 	}
@@ -224,6 +227,7 @@ func toItemDTO(item *knowledge.KnowledgeItem, catName string) *KnowledgeItemDTO 
 		ID:           item.ID,
 		Type:         string(item.Type),
 		Name:         item.Name,
+		Description:  item.Description,
 		URL:          item.URL,
 		FileKey:      item.FileKey,
 		FileSize:     item.FileSize,
