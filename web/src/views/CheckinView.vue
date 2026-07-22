@@ -9,6 +9,8 @@ const authStore = useAuthStore()
 const chartRef = ref<HTMLElement | null>(null)
 let chart: echarts.ECharts | null = null
 let midnightTimer: ReturnType<typeof setTimeout> | null = null
+let tickTimer: ReturnType<typeof setInterval> | null = null
+const now = ref(new Date())
 
 const status = ref({ status: 'idle', clock_in: '', clock_out: '' })
 const records = ref<Array<{ id: number; type: string; date: string; time: string }>>([])
@@ -41,9 +43,9 @@ function formatDate(): string {
 function calcTotalHours(): string {
   let total = todayBaseMinutes.value
   if (status.value.status === 'clocked_in' && status.value.clock_in) {
-    const now = new Date()
+    const cur = now.value
     const [sh, sm] = status.value.clock_in.split(':').map(Number)
-    total += Math.max(0, (now.getHours() * 60 + now.getMinutes()) - (sh * 60 + sm))
+    total += Math.max(0, (cur.getHours() * 60 + cur.getMinutes()) - (sh * 60 + sm))
   }
   return formatMinutes(total)
 }
@@ -127,10 +129,12 @@ onMounted(async () => {
   await nextTick()
   initChart()
   scheduleMidnightRefresh()
+  tickTimer = setInterval(() => { now.value = new Date() }, 60000)
 })
 
 onUnmounted(() => {
   if (midnightTimer) clearTimeout(midnightTimer)
+  if (tickTimer) clearInterval(tickTimer)
 })
 
 function initChart() {
