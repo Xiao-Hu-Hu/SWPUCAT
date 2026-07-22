@@ -18,5 +18,8 @@ export const checkinApi = {
   },
   getOnlineMembers() {
     return api.get('/checkin/online')
+  },
+  getTodayRecords() {
+    return api.get('/checkin/today-records')
   }
 }

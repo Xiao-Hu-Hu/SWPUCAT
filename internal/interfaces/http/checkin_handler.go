@@ -95,3 +95,13 @@ func (h *CheckinHandler) GetOnlineMembers(c *gin.Context) {
 
 	Success(c, members)
 }
+
+func (h *CheckinHandler) GetAllTodayRecords(c *gin.Context) {
+	records, err := h.checkinSvc.GetAllTodayRecords(c.Request.Context())
+	if err != nil {
+		InternalError(c, "failed to get today records")
+		return
+	}
+
+	Success(c, records)
+}

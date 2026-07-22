@@ -99,6 +99,7 @@ func (r *Router) Setup() *gin.Engine {
 			protected.GET("/checkin/status", r.checkinHandler.GetStatus)
 			protected.GET("/checkin/stats", r.checkinHandler.GetStats)
 			protected.GET("/checkin/online", r.checkinHandler.GetOnlineMembers)
+				protected.GET("/checkin/today-records", r.checkinHandler.GetAllTodayRecords)
 
 			// Knowledge
 			protected.GET("/knowledge/items", r.knowledgeHandler.ListItems)

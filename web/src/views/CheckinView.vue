@@ -14,7 +14,7 @@ let tickTimer: ReturnType<typeof setInterval> | null = null
 const now = ref(new Date())
 
 const status = ref({ status: 'idle', clock_in: '', clock_out: '' })
-const records = ref<Array<{ id: number; type: string; date: string; time: string }>>([])
+const records = ref<Array<{ id: number; user_id: number; type: string; date: string; time: string; nickname: string; student_id: string; avatar: string }>>([])
 const statsData = ref<Array<{ user_id: number; nickname: string; total_minutes: number; total_hours: number; days: number }>>([])
 const onlineMembers = ref<Array<{ user_id: number; nickname: string; online: boolean }>>([])
 const chartFilter = ref('week')
@@ -27,8 +27,6 @@ function formatMinutes(totalMinutes: number): string {
   if (m < 1) return '0分钟'
   const hours = Math.floor(m / 60)
   const mins = m % 60
-  if (hours === 0) return `${mins}分钟`
-  if (mins === 0) return `${hours}小时`
   return `${hours}小时${mins}分钟`
 }
 
@@ -218,7 +216,7 @@ async function loadStatus() {
 
 async function loadRecords() {
   try {
-    const res = await checkinApi.getRecords(20)
+    const res = await checkinApi.getTodayRecords()
     records.value = res.data
   } catch {
     console.error('Failed to load records')
@@ -365,11 +363,16 @@ async function loadOnlineMembers() {
           <h3>今日打卡记录</h3>
         </div>
         <el-table :data="records" style="width: 100%">
-          <el-table-column label="成员" min-width="140">
+          <el-table-column label="成员" min-width="200">
             <template #default="{ row }">
               <div class="member-cell">
-                <span class="online-dot-sm" :class="{ online: onlineMembers.find(m => m.user_id === row.user_id)?.online }"></span>
-                <span>{{ row.nickname || '--' }}</span>
+                <el-avatar :size="28" :src="row.avatar ? `/api/avatar/${row.avatar}` : undefined">
+                  {{ row.nickname?.[0] || 'U' }}
+                </el-avatar>
+                <div class="member-info">
+                  <span class="member-name">{{ row.nickname || '--' }}</span>
+                  <span class="member-id" v-if="row.student_id">{{ row.student_id }}</span>
+                </div>
               </div>
             </template>
           </el-table-column>
@@ -629,19 +632,25 @@ async function loadOnlineMembers() {
 .member-cell {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.625rem;
 }
 
-.online-dot-sm {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--text-muted);
-  flex-shrink: 0;
+.member-info {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
 }
 
-.online-dot-sm.online {
-  background: var(--success);
+.member-name {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.member-id {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .tag {

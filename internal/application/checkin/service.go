@@ -290,3 +290,50 @@ func (s *CheckinService) GetOnlineMembers(ctx context.Context) ([]OnlineMemberDT
 	}
 	return result, nil
 }
+
+func (s *CheckinService) GetAllTodayRecords(ctx context.Context) ([]TodayRecordDTO, error) {
+	today := time.Now().Format("2006-01-02")
+
+	records, err := s.checkinRepo.FindByDate(ctx, today)
+	if err != nil {
+		return nil, err
+	}
+
+	userIDSet := make(map[int64]bool)
+	for _, r := range records {
+		if r.UserID > 0 {
+			userIDSet[r.UserID] = true
+		}
+	}
+	userIDs := make([]int64, 0, len(userIDSet))
+	for uid := range userIDSet {
+		userIDs = append(userIDs, uid)
+	}
+
+	users, err := s.userRepo.FindByIDs(ctx, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	userMap := make(map[int64]*user.User)
+	for _, u := range users {
+		userMap[u.ID] = u
+	}
+
+	result := make([]TodayRecordDTO, 0, len(records))
+	for _, r := range records {
+		dto := TodayRecordDTO{
+			ID:     r.ID,
+			UserID: r.UserID,
+			Type:   string(r.Type),
+			Date:   r.Date,
+			Time:   r.Time,
+		}
+		if u, ok := userMap[r.UserID]; ok {
+			dto.Nickname = u.DisplayName()
+			dto.StudentID = string(u.StudentID)
+			dto.Avatar = u.Avatar
+		}
+		result = append(result, dto)
+	}
+	return result, nil
+}
