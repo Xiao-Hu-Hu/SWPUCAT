@@ -9,8 +9,7 @@ const authStore = useAuthStore()
 const isCollapse = ref(false)
 
 const menuItems = [
-  { path: '/app', icon: 'DataBoard', title: '仪表盘' },
-  { path: '/app/checkin', icon: 'Clock', title: '签到打卡' },
+  { path: '/app', icon: 'Clock', title: '签到打卡' },
   { path: '/app/announcements', icon: 'Bell', title: '公告管理' },
   { path: '/app/knowledge', icon: 'Folder', title: '知识库' },
   { path: '/app/members', icon: 'User', title: '成员管理' },
@@ -55,7 +54,7 @@ function handleLogout() {
 
     <div class="main-area">
       <header class="topbar">
-        <h2 class="page-title">{{ menuItems.find(m => m.path === route.path)?.title || '仪表盘' }}</h2>
+        <h2 class="page-title">{{ menuItems.find(m => m.path === route.path)?.title || '签到打卡' }}</h2>
         <el-dropdown>
           <span class="user-info">
             <el-avatar :size="32" :src="authStore.user?.avatar ? `/api/avatar/${authStore.user.avatar}` : undefined">
