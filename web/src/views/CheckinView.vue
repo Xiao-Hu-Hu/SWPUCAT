@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { checkinApi } from '@/api/checkin'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
@@ -40,7 +40,7 @@ function formatDate(): string {
   return new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short' })
 }
 
-function calcTotalHours(): string {
+const todayTotalHours = computed(() => {
   let total = todayBaseMinutes.value
   if (status.value.status === 'clocked_in' && status.value.clock_in) {
     const cur = now.value
@@ -48,7 +48,7 @@ function calcTotalHours(): string {
     total += Math.max(0, (cur.getHours() * 60 + cur.getMinutes()) - (sh * 60 + sm))
   }
   return formatMinutes(total)
-}
+})
 
 async function loadTodayHours() {
   try {
@@ -335,7 +335,7 @@ async function loadOnlineMembers() {
       </div>
       <div class="stat-card">
         <div class="stat-label">我的今日工时</div>
-        <div class="stat-value violet">{{ calcTotalHours() }}</div>
+        <div class="stat-value violet">{{ todayTotalHours }}</div>
         <div class="stat-sub">{{ status.status === 'clocked_in' ? '计时中' : status.status === 'clocked_out' ? '已完成' : '尚未签到' }}</div>
       </div>
     </div>
