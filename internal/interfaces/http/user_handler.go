@@ -131,12 +131,20 @@ func (h *UserHandler) TransferCaptain(c *gin.Context) {
 		return
 	}
 
-	if err := h.userSvc.TransferCaptain(c.Request.Context(), operatorID, targetID); err != nil {
+	var req struct {
+		VerificationCode string `json:"verification_code" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "verification_code is required")
+		return
+	}
+
+	if err := h.userSvc.TransferCaptain(c.Request.Context(), operatorID, targetID, req.VerificationCode); err != nil {
 		if err == shared.ErrForbidden {
 			Forbidden(c, "only captain can transfer role")
 			return
 		}
-		InternalError(c, "transfer failed")
+		BadRequest(c, err.Error())
 		return
 	}
 

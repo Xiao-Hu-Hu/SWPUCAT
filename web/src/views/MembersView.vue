@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { memberApi } from '@/api/member'
 import { checkinApi } from '@/api/checkin'
+import { userApi } from '@/api/user'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -17,6 +18,13 @@ const members = ref<Array<{
   checkin_count: number
 }>>([])
 const onlineMembers = ref<Array<{ user_id: number; nickname: string; online: boolean }>>([])
+
+const showTransferDialog = ref(false)
+const transferTargetId = ref(0)
+const transferTargetName = ref('')
+const transferCode = ref('')
+const transferCountdown = ref(0)
+let transferTimer: ReturnType<typeof setInterval> | null = null
 
 onMounted(async () => {
   await loadMembers()
@@ -45,14 +53,58 @@ function isOnline(userId: number) {
   return onlineMembers.value.find(m => m.user_id === userId)?.online || false
 }
 
-async function handleTransferCaptain(id: number) {
+function openTransferDialog(id: number, nickname: string) {
+  transferTargetId.value = id
+  transferTargetName.value = nickname
+  transferCode.value = ''
+  transferCountdown.value = 0
+  if (transferTimer) {
+    clearInterval(transferTimer)
+    transferTimer = null
+  }
+  showTransferDialog.value = true
+}
+
+async function handleSendTransferCode() {
+  if (transferCountdown.value > 0) return
   try {
-    await ElMessageBox.confirm('确定要转让队长权限吗？此操作不可撤销。', '提示', { type: 'warning' })
-    await memberApi.transferCaptain(id)
-    ElMessage.success('转让成功')
-    await loadMembers()
+    const res = await userApi.getProfile()
+    const email = res.data.email
+    if (!email) {
+      ElMessage.warning('未绑定邮箱')
+      return
+    }
+    await userApi.sendVerificationCode(email)
+    ElMessage.success('验证码已发送')
+    transferCountdown.value = 60
+    transferTimer = setInterval(() => {
+      transferCountdown.value--
+      if (transferCountdown.value <= 0 && transferTimer) {
+        clearInterval(transferTimer)
+        transferTimer = null
+      }
+    }, 1000)
   } catch {
-    // Cancelled
+    ElMessage.error('发送验证码失败')
+  }
+}
+
+async function handleConfirmTransfer() {
+  if (!transferCode.value) {
+    ElMessage.warning('请输入验证码')
+    return
+  }
+  try {
+    await memberApi.transferCaptain(transferTargetId.value, transferCode.value)
+    showTransferDialog.value = false
+    await ElMessageBox.alert('队长权限已转让，请重新登录以更新权限。', '转让成功', {
+      confirmButtonText: '确定',
+      type: 'success'
+    })
+    await authStore.logout()
+    window.location.href = '/'
+  } catch (err: any) {
+    ElMessage.error(err.response?.data?.message || '转让失败')
   }
 }
 
@@ -101,7 +153,7 @@ async function handleRemoveMember(id: number) {
             <el-button
               v-if="row.role !== 'captain'"
               size="small"
-              @click="handleTransferCaptain(row.id)"
+              @click="openTransferDialog(row.id, row.nickname)"
             >
               转让队长
             </el-button>
@@ -117,6 +169,32 @@ async function handleRemoveMember(id: number) {
         </el-table-column>
       </el-table>
     </div>
+
+    <el-dialog v-model="showTransferDialog" title="转让队长权限" width="450px">
+      <p style="margin-bottom: 1rem;">确定要将队长权限转让给 <strong>{{ transferTargetName }}</strong> 吗？此操作不可撤销。</p>
+      <el-form label-width="80px">
+        <el-form-item label="验证码">
+          <div class="code-input">
+            <el-input
+              v-model="transferCode"
+              placeholder="请输入邮箱验证码"
+              maxlength="6"
+            />
+            <el-button
+              type="primary"
+              :disabled="transferCountdown > 0"
+              @click="handleSendTransferCode"
+            >
+              {{ transferCountdown > 0 ? `${transferCountdown}秒后重试` : '发送验证码' }}
+            </el-button>
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showTransferDialog = false">取消</el-button>
+        <el-button type="warning" @click="handleConfirmTransfer">确认转让</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -165,5 +243,15 @@ async function handleRemoveMember(id: number) {
 .online-dot.online {
   background: var(--success);
   box-shadow: 0 0 6px var(--success);
+}
+
+.code-input {
+  display: flex;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.code-input .el-input {
+  flex: 1;
 }
 </style>

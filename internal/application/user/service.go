@@ -211,13 +211,17 @@ func (s *UserApplicationService) RefreshToken(ctx context.Context, refreshToken 
 	return s.generateTokens(u)
 }
 
-func (s *UserApplicationService) TransferCaptain(ctx context.Context, operatorID, targetID int64) error {
+func (s *UserApplicationService) TransferCaptain(ctx context.Context, operatorID, targetID int64, verificationCode string) error {
 	operator, err := s.userRepo.FindByID(ctx, operatorID)
 	if err != nil {
 		return err
 	}
 	target, err := s.userRepo.FindByID(ctx, targetID)
 	if err != nil {
+		return err
+	}
+
+	if err := s.verifyCode(ctx, operator.Email, verificationCode); err != nil {
 		return err
 	}
 
