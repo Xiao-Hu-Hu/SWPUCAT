@@ -122,6 +122,7 @@ func toDomainUser(m *database.UserModel) *user.User {
 		Avatar:       m.Avatar,
 		Role:         user.Role(m.Role),
 		CheckinCount: m.CheckinCount,
+		JoinedAt:     m.CreatedAt,
 		CreatedAt:    m.CreatedAt,
 		UpdatedAt:    m.UpdatedAt,
 	}
