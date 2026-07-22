@@ -97,21 +97,21 @@ onMounted(async () => {
 
 <style scoped>
 .dashboard {
-  max-width: 1200px;
+  width: 100%;
 }
 
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 1rem;
-  margin-bottom: 1.5rem;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
 }
 
 .stat-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 1.25rem;
+  padding: 1rem;
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -159,8 +159,8 @@ onMounted(async () => {
 
 .content-grid {
   display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 1rem;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
 }
 
 .card {

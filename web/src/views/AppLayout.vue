@@ -86,7 +86,7 @@ function handleLogout() {
 
 /* Sidebar */
 .sidebar {
-  width: 240px;
+  width: 210px;
   background: var(--bg-card);
   border-right: 1px solid var(--border);
   display: flex;
@@ -122,7 +122,7 @@ function handleLogout() {
 
 .sidebar-nav {
   flex: 1;
-  padding: 0.5rem 0.5rem;
+  padding: 0.375rem 0.375rem;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -196,7 +196,7 @@ function handleLogout() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 1.5rem;
+  padding: 0 1.25rem;
   position: sticky;
   top: 0;
   z-index: 10;
@@ -225,7 +225,7 @@ function handleLogout() {
 
 .content {
   flex: 1;
-  padding: 1.5rem;
+  padding: 1rem 1.25rem;
   background: var(--bg-deep);
 }
 </style>

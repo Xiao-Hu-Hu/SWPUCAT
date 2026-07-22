@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import { checkinApi } from '@/api/checkin'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
@@ -13,13 +13,9 @@ const status = ref({ status: 'idle', clock_in: '', clock_out: '' })
 const records = ref<Array<{ id: number; type: string; date: string; time: string }>>([])
 const weeklyStats = ref<Array<{ user_id: number; nickname: string; total_minutes: number; total_hours: number; days: number }>>([])
 const onlineMembers = ref<Array<{ user_id: number; nickname: string; online: boolean }>>([])
-const currentTime = ref(new Date().toLocaleTimeString('zh-CN'))
+const chartFilter = ref('week')
 
-const filteredStats = computed(() => {
-  return weeklyStats.value
-    .filter(s => s.nickname !== '超级管理员' && s.user_id > 0)
-    .sort((a, b) => b.total_minutes - a.total_minutes)
-})
+const filteredStats = weeklyStats
 
 function formatMinutes(totalMinutes: number): string {
   const m = Math.round(totalMinutes)
@@ -31,9 +27,62 @@ function formatMinutes(totalMinutes: number): string {
   return `${hours}小时${mins}分钟`
 }
 
-setInterval(() => {
-  currentTime.value = new Date().toLocaleTimeString('zh-CN')
-}, 1000)
+function formatTime(time: string): string {
+  if (!time) return '--:--'
+  return time.substring(0, 5)
+}
+
+function formatDate(): string {
+  return new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short' })
+}
+
+function calcTotalHours(): string {
+  if (!status.value.clock_in) return '0.0h'
+  const now = new Date()
+  const [sh, sm] = status.value.clock_in.split(':').map(Number)
+  let endH = now.getHours(), endM = now.getMinutes()
+  if (status.value.clock_out) {
+    endH = parseInt(status.value.clock_out.split(':')[0])
+    endM = parseInt(status.value.clock_out.split(':')[1])
+  }
+  const mins = (endH * 60 + endM) - (sh * 60 + sm)
+  return (Math.max(0, mins) / 60).toFixed(1) + 'h'
+}
+
+function calcDuration(signin: string, signout: string): string {
+  if (!signin) return '--'
+  const [sh, sm] = signin.split(':').map(Number)
+  let endH: number, endM: number
+  if (signout) {
+    endH = parseInt(signout.split(':')[0])
+    endM = parseInt(signout.split(':')[1])
+  } else {
+    const now = new Date()
+    endH = now.getHours()
+    endM = now.getMinutes()
+  }
+  let mins = (endH * 60 + endM) - (sh * 60 + sm)
+  if (mins < 0) mins += 1440
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return `${h}h${m < 10 ? '0' : ''}${m}m`
+}
+
+function getTodayOnlineCount(): number {
+  return onlineMembers.value.filter(m => m.online).length
+}
+
+function getAvgHours(): string {
+  if (filteredStats.value.length === 0) return '0.0h'
+  const total = filteredStats.value.reduce((sum, s) => sum + s.total_minutes, 0)
+  const avg = total / filteredStats.value.length / 60
+  return avg.toFixed(1) + 'h'
+}
+
+function getMyDays(): number {
+  const me = filteredStats.value.find(s => s.user_id === authStore.user?.id)
+  return me?.days || 0
+}
 
 onMounted(async () => {
   await loadStatus()
@@ -54,7 +103,7 @@ function initChart() {
 function updateChart() {
   if (!chart) return
   const data = filteredStats.value
-  const option = {
+  chart.setOption({
     tooltip: {
       trigger: 'axis',
       backgroundColor: '#ffffff',
@@ -66,25 +115,18 @@ function updateChart() {
         return `${d.name}<br/>本周累计: ${formatMinutes(d.value)}`
       }
     },
-    grid: {
-      left: '3%',
-      right: '4%',
-      bottom: '3%',
-      top: '15%',
-      containLabel: true
-    },
+    grid: { left: '3%', right: '4%', bottom: '3%', top: '10%', containLabel: true },
     xAxis: {
       type: 'category',
       data: data.map(d => d.nickname),
-      axisLabel: {
-        color: '#71717a',
-        rotate: data.length > 5 ? 30 : 0
-      }
+      axisLabel: { color: '#71717a', rotate: data.length > 6 ? 30 : 0 },
+      axisLine: { lineStyle: { color: '#e4e4e7' } }
     },
     yAxis: {
       type: 'value',
       name: '分钟',
-      axisLabel: { color: '#71717a' }
+      axisLabel: { color: '#71717a' },
+      splitLine: { lineStyle: { color: '#f4f4f5' } }
     },
     series: [{
       type: 'bar',
@@ -107,11 +149,16 @@ function updateChart() {
         show: true,
         position: 'top',
         formatter: (params: any) => formatMinutes(params.value),
-        color: '#71717a'
+        color: '#71717a',
+        fontSize: 11
       }
     }]
-  }
-  chart.setOption(option)
+  })
+}
+
+function setChartFilter(filter: string) {
+  chartFilter.value = filter
+  updateChart()
 }
 
 async function loadStatus() {
@@ -125,7 +172,7 @@ async function loadStatus() {
 
 async function loadRecords() {
   try {
-    const res = await checkinApi.getRecords(10)
+    const res = await checkinApi.getRecords(20)
     records.value = res.data
   } catch {
     console.error('Failed to load records')
@@ -160,7 +207,7 @@ async function handleClockOut() {
 async function loadWeeklyStats() {
   try {
     const res = await checkinApi.getWeeklyStats()
-    weeklyStats.value = res.data || []
+    weeklyStats.value = (res.data || []).filter((s: any) => s.nickname !== '超级管理员' && s.user_id > 0)
     updateChart()
   } catch {
     console.error('Failed to load weekly stats')
@@ -179,91 +226,123 @@ async function loadOnlineMembers() {
 
 <template>
   <div class="checkin">
-    <div class="clock-section">
-      <div class="clock-card">
-        <div class="clock-display">
-          <span class="time">{{ currentTime }}</span>
-          <span class="date">{{ new Date().toLocaleDateString('zh-CN') }}</span>
+    <!-- Punch Zone: two side-by-side cards -->
+    <div class="punch-zone">
+      <div class="punch-card punch-signin">
+        <div class="punch-label">签到</div>
+        <div class="punch-time">{{ formatTime(status.clock_in) }}</div>
+        <div class="punch-date">{{ status.clock_in ? formatDate() : '尚未签到' }}</div>
+        <el-button
+          type="primary"
+          size="large"
+          :disabled="status.status === 'clocked_in'"
+          @click="handleClockIn"
+        >
+          签到打卡
+        </el-button>
+        <div class="punch-status">
+          <span class="status-indicator" :class="{ active: status.status === 'clocked_in' }"></span>
+          <span v-if="status.status === 'clocked_in'">已签到</span>
+          <span v-else-if="status.status === 'clocked_out'">已完成签到</span>
+          <span v-else>等待签到</span>
         </div>
-        <div class="status-badge" :class="status.status">
-          {{ status.status === 'clocked_in' ? '已签到' : status.status === 'clocked_out' ? '已签退' : '未签到' }}
-        </div>
-        <div class="clock-actions">
-          <el-button
-            type="primary"
-            size="large"
-            :disabled="status.status === 'clocked_in'"
-            @click="handleClockIn"
-          >
-            签到
-          </el-button>
-          <el-button
-            type="danger"
-            size="large"
-            :disabled="status.status !== 'clocked_in'"
-            @click="handleClockOut"
-          >
-            签退
-          </el-button>
-        </div>
-        <div class="clock-info" v-if="status.clock_in || status.clock_out">
-          <span v-if="status.clock_in">签到时间: {{ status.clock_in }}</span>
-          <span v-if="status.clock_out">签退时间: {{ status.clock_out }}</span>
+      </div>
+
+      <div class="punch-card punch-signout">
+        <div class="punch-label">签退</div>
+        <div class="punch-time">{{ formatTime(status.clock_out) }}</div>
+        <div class="punch-date">{{ status.clock_out ? formatDate() : '尚未签退' }}</div>
+        <el-button
+          type="danger"
+          size="large"
+          :disabled="status.status !== 'clocked_in'"
+          @click="handleClockOut"
+        >
+          签退打卡
+        </el-button>
+        <div class="punch-status">
+          <span class="status-indicator" :class="{ active: status.status === 'clocked_out' }"></span>
+          <span v-if="status.status === 'clocked_out'">已签退</span>
+          <span v-else-if="status.status === 'clocked_in'">等待签退</span>
+          <span v-else>等待签退</span>
         </div>
       </div>
     </div>
 
+    <!-- Stats Row -->
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-label">今日在线</div>
+        <div class="stat-value accent">{{ getTodayOnlineCount() }}</div>
+        <div class="stat-sub">当前在线成员</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">平均工时</div>
+        <div class="stat-value blue">{{ getAvgHours() }}</div>
+        <div class="stat-sub">本周平均</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">我的签到天数</div>
+        <div class="stat-value amber">{{ getMyDays() }}</div>
+        <div class="stat-sub">本周累计</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">我的今日工时</div>
+        <div class="stat-value violet">{{ calcTotalHours() }}</div>
+        <div class="stat-sub">{{ status.status === 'clocked_in' ? '计时中' : status.status === 'clocked_out' ? '已完成' : '尚未签到' }}</div>
+      </div>
+    </div>
+
+    <!-- Chart Section -->
     <div class="chart-section">
       <div class="card">
-        <h3>本周签到时长统计</h3>
+        <div class="section-header">
+          <h3>成员工时统计</h3>
+          <div class="chart-filters">
+            <button class="filter-btn" :class="{ active: chartFilter === 'today' }" @click="setChartFilter('today')">今日</button>
+            <button class="filter-btn" :class="{ active: chartFilter === 'week' }" @click="setChartFilter('week')">本周</button>
+            <button class="filter-btn" :class="{ active: chartFilter === 'month' }" @click="setChartFilter('month')">本月</button>
+          </div>
+        </div>
         <div ref="chartRef" class="chart-container"></div>
       </div>
     </div>
 
-    <div class="stats-section">
+    <!-- Log Table -->
+    <div class="log-section">
       <div class="card">
-        <h3>本周签到统计</h3>
-        <el-table :data="filteredStats" style="width: 100%" :row-class-name="({ row }: any) => row.user_id === authStore.user?.id ? 'current-user-row' : ''">
-          <el-table-column prop="nickname" label="成员" width="120" />
-          <el-table-column label="本周累计时长" width="180">
-            <template #default="{ row }">
-              {{ formatMinutes(row.total_minutes) }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="days" label="签到天数" width="100" />
-          <el-table-column label="在线状态" width="100">
-            <template #default="{ row }">
-              <span class="online-dot" :class="{ online: onlineMembers.find(m => m.user_id === row.user_id)?.online }"></span>
-              {{ onlineMembers.find(m => m.user_id === row.user_id)?.online ? '在线' : '离线' }}
-            </template>
-          </el-table-column>
-        </el-table>
-      </div>
-    </div>
-
-    <div class="online-section">
-      <div class="card">
-        <h3>在线成员</h3>
-        <div class="online-list">
-          <div v-for="member in onlineMembers" :key="member.user_id" class="online-item">
-            <span class="online-dot" :class="{ online: member.online }"></span>
-            <span>{{ member.nickname }}</span>
-          </div>
+        <div class="section-header">
+          <h3>今日打卡记录</h3>
         </div>
-      </div>
-    </div>
-
-    <div class="records-section">
-      <div class="card">
-        <h3>签到记录</h3>
         <el-table :data="records" style="width: 100%">
-          <el-table-column prop="date" label="日期" width="120" />
-          <el-table-column prop="time" label="时间" width="120" />
-          <el-table-column prop="type" label="类型" width="100">
+          <el-table-column label="成员" min-width="140">
             <template #default="{ row }">
-              <el-tag :type="row.type === 'in' ? 'success' : 'danger'">
+              <div class="member-cell">
+                <span class="online-dot-sm" :class="{ online: onlineMembers.find(m => m.user_id === row.user_id)?.online }"></span>
+                <span>{{ row.nickname || '--' }}</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="类型" width="100">
+            <template #default="{ row }">
+              <span class="tag" :class="row.type === 'in' ? 'tag-in' : 'tag-out'">
                 {{ row.type === 'in' ? '签到' : '签退' }}
-              </el-tag>
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="签到时间" width="120">
+            <template #default="{ row }">
+              <span class="mono-text">{{ row.type === 'in' ? row.time : '--' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="签退时间" width="120">
+            <template #default="{ row }">
+              <span class="mono-text">{{ row.type === 'out' ? row.time : '--' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="工时" width="120">
+            <template #default="{ row }">
+              <span class="mono-text bold">{{ row.type === 'out' ? calcDuration(row.clock_in_time, row.time) : '--' }}</span>
             </template>
           </el-table-column>
         </el-table>
@@ -274,82 +353,164 @@ async function loadOnlineMembers() {
 
 <style scoped>
 .checkin {
-  max-width: 800px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
-.clock-section {
-  margin-bottom: 2rem;
+/* Punch Zone */
+.punch-zone {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
 }
 
-.clock-card {
+.punch-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
-  padding: 1.25rem;
-  text-align: center;
+  padding: 1.5rem;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-.clock-display {
-  margin-bottom: 1.5rem;
+.punch-card:hover {
+  box-shadow: var(--shadow-md);
 }
 
-.time {
-  display: block;
-  font-size: 2rem;
+.punch-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+}
+
+.punch-signin::before {
+  background: linear-gradient(90deg, var(--accent), transparent);
+}
+
+.punch-signout::before {
+  background: linear-gradient(90deg, var(--danger), transparent);
+}
+
+.punch-label {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.punch-signin .punch-label {
+  color: var(--accent);
+}
+
+.punch-signout .punch-label {
+  color: var(--danger);
+}
+
+.punch-time {
+  font-size: 2.5rem;
   font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  margin-bottom: 0.25rem;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
   font-family: 'Courier New', monospace;
   color: var(--text);
 }
 
-.date {
-  font-size: 0.875rem;
-  color: var(--text-muted);
+.punch-signout .punch-time {
+  color: var(--text-secondary);
 }
 
-.status-badge {
-  display: inline-block;
-  padding: 0.375rem 0.875rem;
-  border-radius: var(--radius);
+.punch-date {
   font-size: 0.8125rem;
-  font-weight: 500;
-  margin-bottom: 1.5rem;
-  transition: all 0.2s;
-}
-
-.status-badge.idle {
-  background: var(--bg-deep);
   color: var(--text-muted);
+  margin-bottom: 1.25rem;
 }
 
-.status-badge.clocked_in {
-  background: var(--success-bg);
-  color: var(--success);
-}
-
-.status-badge.clocked_out {
-  background: var(--danger-bg);
-  color: var(--danger);
-}
-
-.clock-actions {
+.punch-status {
+  margin-top: 0.75rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
   display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.status-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.status-indicator.active {
+  background: var(--success);
+  animation: pulse-dot 2s infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.4); }
+  50% { box-shadow: 0 0 0 6px transparent; }
+}
+
+/* Stats Row */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   gap: 1rem;
-  justify-content: center;
-  margin-bottom: 1rem;
 }
 
-.clock-info {
-  display: flex;
-  gap: 2rem;
-  justify-content: center;
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 1rem 1.25rem;
+  transition: border-color 0.2s;
+}
+
+.stat-card:hover {
+  border-color: var(--accent);
+}
+
+.stat-label {
+  font-size: 0.6875rem;
   color: var(--text-muted);
-  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
 }
 
-.card {
+.stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.stat-value.accent { color: var(--accent); }
+.stat-value.blue { color: #2563eb; }
+.stat-value.amber { color: var(--warning); }
+.stat-value.violet { color: #7c3aed; }
+
+.stat-sub {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+/* Chart Section */
+.chart-section .card {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -357,59 +518,48 @@ async function loadOnlineMembers() {
   padding: 1.25rem;
 }
 
-.card h3 {
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 1rem;
+}
+
+.section-header h3 {
   font-size: 0.9375rem;
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--text);
+  margin-bottom: 0;
 }
 
-.stats-section {
-  margin-bottom: 2rem;
-}
-
-.online-section {
-  margin-bottom: 2rem;
-}
-
-.online-list {
+.chart-filters {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-}
-
-.online-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.875rem;
+  gap: 2px;
   background: var(--bg-deep);
-  border-radius: var(--radius);
-  font-size: 0.875rem;
-  color: var(--text-secondary);
+  border-radius: 0.5rem;
+  padding: 3px;
+}
+
+.filter-btn {
+  padding: 0.375rem 0.875rem;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  border-radius: 0.375rem;
+  cursor: pointer;
   transition: all 0.2s;
 }
 
-.online-item:hover {
-  background: var(--bg-hover);
+.filter-btn.active {
+  background: var(--bg-card);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
 }
 
-.online-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.online-dot.online {
-  background: var(--success);
-  box-shadow: 0 0 6px var(--success);
-}
-
-.chart-section {
-  margin-bottom: 2rem;
+.filter-btn:hover:not(.active) {
+  color: var(--text-secondary);
 }
 
 .chart-container {
@@ -417,16 +567,69 @@ async function loadOnlineMembers() {
   height: 300px;
 }
 
-:deep(.current-user-row) {
-  background: var(--accent-bg) !important;
+/* Log Section */
+.log-section .card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 1.25rem;
 }
 
-:deep(.current-user-row:hover > td) {
-  background: var(--accent-bg) !important;
+.member-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
-:deep(.current-user-row .cell) {
+.online-dot-sm {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.online-dot-sm.online {
+  background: var(--success);
+}
+
+.tag {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+.tag-in {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.tag-out {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.mono-text {
+  font-family: 'Courier New', monospace;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.mono-text.bold {
   font-weight: 600;
   color: var(--text);
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+  .punch-zone {
+    grid-template-columns: 1fr;
+  }
+  .stats-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 </style>

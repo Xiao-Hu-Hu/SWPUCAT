@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { memberApi } from '@/api/member'
 import { checkinApi } from '@/api/checkin'
 import { userApi } from '@/api/user'
@@ -18,6 +18,14 @@ const members = ref<Array<{
   checkin_count: number
 }>>([])
 const onlineMembers = ref<Array<{ user_id: number; nickname: string; online: boolean }>>([])
+
+const currentPage = ref(1)
+const pageSize = ref(10)
+
+const paginatedMembers = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return members.value.slice(start, start + pageSize.value)
+})
 
 const showTransferDialog = ref(false)
 const transferTargetId = ref(0)
@@ -128,7 +136,7 @@ async function handleRemoveMember(id: number) {
         <span class="member-count">共 {{ members.length }} 人</span>
       </div>
 
-      <el-table :data="members" style="width: 100%">
+      <el-table :data="paginatedMembers" style="width: 100%">
         <el-table-column prop="nickname" label="昵称" width="150">
           <template #default="{ row }">
             <div class="member-info">
@@ -168,6 +176,17 @@ async function handleRemoveMember(id: number) {
           </template>
         </el-table-column>
       </el-table>
+
+      <div class="pagination-wrapper" v-if="members.length > 0">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :page-sizes="[5, 10, 20, 50]"
+          :total="members.length"
+          layout="total, sizes, prev, pager, next, jumper"
+          background
+        />
+      </div>
     </div>
 
     <el-dialog v-model="showTransferDialog" title="转让队长权限" width="450px">
@@ -200,7 +219,7 @@ async function handleRemoveMember(id: number) {
 
 <style scoped>
 .members {
-  max-width: 1000px;
+  width: 100%;
 }
 
 .card {
@@ -256,5 +275,13 @@ async function handleRemoveMember(id: number) {
 
 .code-input .el-input {
   flex: 1;
+}
+
+.pagination-wrapper {
+  display: flex;
+  justify-content: center;
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
 }
 </style>

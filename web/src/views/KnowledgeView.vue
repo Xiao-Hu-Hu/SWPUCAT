@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { knowledgeApi } from '@/api/knowledge'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -22,6 +22,14 @@ const items = ref<Array<{
 
 const selectedCategory = ref<number | undefined>(undefined)
 const searchQuery = ref('')
+
+const currentPage = ref(1)
+const pageSize = ref(10)
+
+const paginatedItems = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return items.value.slice(start, start + pageSize.value)
+})
 
 const showLinkDialog = ref(false)
 const showCategoryDialog = ref(false)
@@ -236,7 +244,7 @@ async function handleDownloadFile(id: number, name: string) {
         </div>
 
         <div class="items-list">
-          <div v-for="item in items" :key="item.id" class="item-card">
+          <div v-for="item in paginatedItems" :key="item.id" class="item-card">
             <div class="item-icon">
               <el-icon :size="24">
                 <Link v-if="item.type === 'link'" />
@@ -276,6 +284,17 @@ async function handleDownloadFile(id: number, name: string) {
             </div>
           </div>
           <el-empty v-if="items.length === 0" description="暂无资源" />
+        </div>
+
+        <div class="pagination-wrapper" v-if="items.length > 0">
+          <el-pagination
+            v-model:current-page="currentPage"
+            v-model:page-size="pageSize"
+            :page-sizes="[5, 10, 20, 50]"
+            :total="items.length"
+            layout="total, sizes, prev, pager, next, jumper"
+            background
+          />
         </div>
       </div>
     </div>
@@ -346,12 +365,12 @@ async function handleDownloadFile(id: number, name: string) {
 <style scoped>
 .knowledge {
   display: flex;
-  gap: 1.5rem;
-  max-width: 1200px;
+  gap: 1rem;
+  width: 100%;
 }
 
 .sidebar {
-  width: 240px;
+  width: 200px;
   flex-shrink: 0;
 }
 
@@ -479,5 +498,13 @@ async function handleDownloadFile(id: number, name: string) {
 .item-actions {
   display: flex;
   gap: 0.5rem;
+}
+
+.pagination-wrapper {
+  display: flex;
+  justify-content: center;
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
 }
 </style>

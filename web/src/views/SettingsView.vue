@@ -185,7 +185,7 @@ async function handleChangePassword() {
         </el-upload>
       </div>
 
-      <el-form label-width="100px" style="max-width: 500px">
+      <el-form label-width="100px" style="max-width: 600px">
         <el-form-item label="学号">
           <el-input :value="authStore.user?.username" disabled />
         </el-form-item>
@@ -269,7 +269,7 @@ async function handleChangePassword() {
 
 <style scoped>
 .settings {
-  max-width: 600px;
+  max-width: 720px;
 }
 
 .card {

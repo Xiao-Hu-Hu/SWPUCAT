@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { announcementApi } from '@/api/announcement'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -18,6 +18,14 @@ const announcements = ref<Array<{
 const showDialog = ref(false)
 const editingId = ref<number | null>(null)
 const form = ref({ title: '', content: '', pinned: false })
+
+const currentPage = ref(1)
+const pageSize = ref(10)
+
+const paginatedAnnouncements = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return announcements.value.slice(start, start + pageSize.value)
+})
 
 onMounted(async () => {
   await loadAnnouncements()
@@ -83,7 +91,7 @@ async function handleDelete(id: number) {
       </div>
 
       <div class="announcements-list">
-        <div v-for="ann in announcements" :key="ann.id" class="announcement-item">
+        <div v-for="ann in paginatedAnnouncements" :key="ann.id" class="announcement-item">
           <div class="ann-header">
             <div class="ann-title">
               <el-tag v-if="ann.pinned" type="warning" size="small">置顶</el-tag>
@@ -101,6 +109,17 @@ async function handleDelete(id: number) {
           </div>
         </div>
         <el-empty v-if="announcements.length === 0" description="暂无公告" />
+      </div>
+
+      <div class="pagination-wrapper" v-if="announcements.length > 0">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :page-sizes="[5, 10, 20, 50]"
+          :total="announcements.length"
+          layout="total, sizes, prev, pager, next, jumper"
+          background
+        />
       </div>
     </div>
 
@@ -126,7 +145,7 @@ async function handleDelete(id: number) {
 
 <style scoped>
 .announcements {
-  max-width: 800px;
+  width: 100%;
 }
 
 .card {
@@ -203,5 +222,13 @@ async function handleDelete(id: number) {
 .ann-actions {
   display: flex;
   gap: 0.5rem;
+}
+
+.pagination-wrapper {
+  display: flex;
+  justify-content: center;
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
 }
 </style>

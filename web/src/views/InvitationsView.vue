@@ -104,7 +104,7 @@ function copyCode(code: string) {
 
 <style scoped>
 .invitations {
-  max-width: 1000px;
+  width: 100%;
 }
 
 .card {

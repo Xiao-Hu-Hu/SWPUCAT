@@ -28,6 +28,14 @@ const rejectReason = ref('')
 
 const isManager = computed(() => authStore.isCaptain || authStore.isSuperAdmin)
 
+const currentPage = ref(1)
+const pageSize = ref(10)
+
+const paginatedItems = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return items.value.slice(start, start + pageSize.value)
+})
+
 onMounted(async () => {
   await loadItems()
 })
@@ -118,7 +126,7 @@ function getStatusTag(item: any) {
       </div>
 
       <div class="approval-list">
-        <div v-for="item in items" :key="item.id" class="approval-card">
+        <div v-for="item in paginatedItems" :key="item.id" class="approval-card">
           <div class="item-icon">
             <el-icon :size="24">
               <Link v-if="item.type === 'link'" />
@@ -168,6 +176,17 @@ function getStatusTag(item: any) {
         </div>
         <el-empty v-if="items.length === 0" :description="isManager ? '暂无待审批项目' : '暂无申请记录'" />
       </div>
+
+      <div class="pagination-wrapper" v-if="items.length > 0">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :page-sizes="[5, 10, 20, 50]"
+          :total="items.length"
+          layout="total, sizes, prev, pager, next, jumper"
+          background
+        />
+      </div>
     </div>
 
     <el-dialog v-model="showRejectDialog" title="拒绝理由" width="500px">
@@ -191,7 +210,7 @@ function getStatusTag(item: any) {
 
 <style scoped>
 .approvals {
-  max-width: 1000px;
+  width: 100%;
 }
 
 .card {
@@ -301,5 +320,13 @@ function getStatusTag(item: any) {
   gap: 0.5rem;
   align-items: center;
   flex-shrink: 0;
+}
+
+.pagination-wrapper {
+  display: flex;
+  justify-content: center;
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
 }
 </style>
