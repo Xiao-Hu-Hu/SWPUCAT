@@ -53,7 +53,7 @@ func (r *CheckinRepo) FindByUserIDAndDate(ctx context.Context, userID int64, dat
 
 func (r *CheckinRepo) FindByDate(ctx context.Context, date string) ([]*checkin.CheckinRecord, error) {
 	var models []database.CheckinRecordModel
-	if err := r.db.WithContext(ctx).Where("date = ?", date).Find(&models).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("date = ?", date).Order("created_at DESC").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	records := make([]*checkin.CheckinRecord, len(models))
