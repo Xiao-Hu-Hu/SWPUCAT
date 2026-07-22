@@ -34,6 +34,8 @@ function formatMinutes(totalMinutes: number): string {
   if (m < 1) return '0分钟'
   const hours = Math.floor(m / 60)
   const mins = m % 60
+  if (hours === 0) return `${mins}分钟`
+  if (mins === 0) return `${hours}小时`
   return `${hours}小时${mins}分钟`
 }
 

@@ -319,14 +319,49 @@ func (s *CheckinService) GetAllTodayRecords(ctx context.Context) ([]TodayRecordD
 		userMap[u.ID] = u
 	}
 
+	// Group records by user and pair in/out in chronological order
+	type recWithIdx struct {
+		rec *checkin.CheckinRecord
+		idx int
+	}
+	userRecs := make(map[int64][]recWithIdx)
+	for i, r := range records {
+		userRecs[r.UserID] = append(userRecs[r.UserID], recWithIdx{rec: r, idx: i})
+	}
+
+	// clockInTime for each "out" record, keyed by record index
+	clockInForOut := make(map[int]int)
+	for _, recs := range userRecs {
+		// Sort by time ascending to pair correctly
+		for i := 1; i < len(recs); i++ {
+			for j := i; j > 0 && recs[j].rec.Time < recs[j-1].rec.Time; j-- {
+				recs[j], recs[j-1] = recs[j-1], recs[j]
+			}
+		}
+		var lastInIdx int = -1
+		for _, wr := range recs {
+			if wr.rec.Type == checkin.CheckinTypeIn {
+				lastInIdx = wr.idx
+			} else if wr.rec.Type == checkin.CheckinTypeOut && lastInIdx >= 0 {
+				clockInForOut[wr.idx] = lastInIdx
+				lastInIdx = -1
+			}
+		}
+	}
+
 	result := make([]TodayRecordDTO, 0, len(records))
-	for _, r := range records {
+	for i, r := range records {
 		dto := TodayRecordDTO{
 			ID:     r.ID,
 			UserID: r.UserID,
 			Type:   string(r.Type),
 			Date:   r.Date,
 			Time:   r.Time,
+		}
+		if r.Type == checkin.CheckinTypeOut {
+			if inIdx, ok := clockInForOut[i]; ok {
+				dto.ClockInTime = records[inIdx].Time
+			}
 		}
 		if u, ok := userMap[r.UserID]; ok {
 			dto.Nickname = u.DisplayName()

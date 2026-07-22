@@ -15,12 +15,13 @@ type OnlineMemberDTO struct {
 }
 
 type TodayRecordDTO struct {
-	ID        int64  `json:"id"`
-	UserID    int64  `json:"user_id"`
-	Type      string `json:"type"`
-	Date      string `json:"date"`
-	Time      string `json:"time"`
-	Nickname  string `json:"nickname"`
-	StudentID string `json:"student_id"`
-	Avatar    string `json:"avatar"`
+	ID          int64  `json:"id"`
+	UserID      int64  `json:"user_id"`
+	Type        string `json:"type"`
+	Date        string `json:"date"`
+	Time        string `json:"time"`
+	ClockInTime string `json:"clock_in_time,omitempty"`
+	Nickname    string `json:"nickname"`
+	StudentID   string `json:"student_id"`
+	Avatar      string `json:"avatar"`
 }
