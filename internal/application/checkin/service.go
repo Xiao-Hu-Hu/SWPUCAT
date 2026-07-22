@@ -126,23 +126,45 @@ func (s *CheckinService) GetStatus(ctx context.Context, userID int64) (*CheckinS
 	if len(records) == 0 {
 		return &CheckinStatusDTO{Status: "idle"}, nil
 	}
+
+	// Find clock_in and clock_out times
+	var clockIn, clockOut string
+	for _, r := range records {
+		if r.Type == checkin.CheckinTypeIn {
+			clockIn = r.Time
+		} else if r.Type == checkin.CheckinTypeOut {
+			clockOut = r.Time
+		}
+	}
+
 	last := records[len(records)-1]
 	if last.Type == checkin.CheckinTypeIn {
-		return &CheckinStatusDTO{Status: "clocked_in", ClockIn: last.Time}, nil
+		return &CheckinStatusDTO{Status: "clocked_in", ClockIn: clockIn}, nil
 	}
-	return &CheckinStatusDTO{Status: "clocked_out", ClockOut: last.Time}, nil
+	return &CheckinStatusDTO{Status: "clocked_out", ClockIn: clockIn, ClockOut: clockOut}, nil
 }
 
-func (s *CheckinService) GetWeeklyStats(ctx context.Context) ([]WeeklyStatsDTO, error) {
+func (s *CheckinService) GetStatsByPeriod(ctx context.Context, period string) ([]WeeklyStatsDTO, error) {
 	now := time.Now()
-	weekday := now.Weekday()
-	if weekday == time.Sunday {
-		weekday = 7
-	}
-	weekStart := now.AddDate(0, 0, -int(weekday-1)).Format("2006-01-02")
-	weekEnd := now.Format("2006-01-02")
+	var startDate, endDate string
 
-	records, err := s.checkinRepo.FindByDateRange(ctx, weekStart, weekEnd)
+	switch period {
+	case "today":
+		startDate = now.Format("2006-01-02")
+		endDate = startDate
+	case "month":
+		startDate = now.AddDate(0, 0, -now.Day()+1).Format("2006-01-02")
+		endDate = now.Format("2006-01-02")
+	default: // week
+		weekday := now.Weekday()
+		if weekday == time.Sunday {
+			weekday = 7
+		}
+		startDate = now.AddDate(0, 0, -int(weekday-1)).Format("2006-01-02")
+		endDate = now.Format("2006-01-02")
+	}
+
+	records, err := s.checkinRepo.FindByDateRange(ctx, startDate, endDate)
 	if err != nil {
 		return nil, err
 	}
@@ -218,6 +240,34 @@ func (s *CheckinService) GetWeeklyStats(ctx context.Context) ([]WeeklyStatsDTO, 
 		result = append(result, *stat)
 	}
 	return result, nil
+}
+
+func (s *CheckinService) AutoClockOut(ctx context.Context, date string) error {
+	records, err := s.checkinRepo.FindByDate(ctx, date)
+	if err != nil {
+		return err
+	}
+
+	userLastRecord := make(map[int64]*checkin.CheckinRecord)
+	for _, r := range records {
+		if r.UserID == 0 {
+			continue
+		}
+		userLastRecord[r.UserID] = r
+	}
+
+	for userID, lastRecord := range userLastRecord {
+		if lastRecord.Type == checkin.CheckinTypeIn {
+			record, err := checkin.NewCheckinRecord(userID, checkin.CheckinTypeOut)
+			if err != nil {
+				continue
+			}
+			record.Time = "23:59:59"
+			record.Date = date
+			s.checkinRepo.Create(ctx, record)
+		}
+	}
+	return nil
 }
 
 func (s *CheckinService) GetOnlineMembers(ctx context.Context) ([]OnlineMemberDTO, error) {

@@ -16,8 +16,10 @@ import (
 	"SWPUCAT/internal/infrastructure/repository"
 	"SWPUCAT/internal/infrastructure/storage"
 	httpInterface "SWPUCAT/internal/interfaces/http"
+	"context"
 	"fmt"
 	"log"
+	"time"
 )
 
 func main() {
@@ -86,6 +88,21 @@ func main() {
 
 	// Setup routes
 	engine := router.Setup()
+
+	// Schedule midnight auto clock-out
+	go func() {
+		for {
+			now := time.Now()
+			midnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
+			time.Sleep(time.Until(midnight))
+			yesterday := midnight.Add(-24 * time.Hour).Format("2006-01-02")
+			if err := checkinSvc.AutoClockOut(context.Background(), yesterday); err != nil {
+				log.Printf("AutoClockOut failed: %v", err)
+			} else {
+				log.Printf("AutoClockOut completed for %s", yesterday)
+			}
+		}
+	}()
 
 	// Start server
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)

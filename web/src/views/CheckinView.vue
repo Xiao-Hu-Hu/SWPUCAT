@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { checkinApi } from '@/api/checkin'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
@@ -8,14 +8,15 @@ import * as echarts from 'echarts'
 const authStore = useAuthStore()
 const chartRef = ref<HTMLElement | null>(null)
 let chart: echarts.ECharts | null = null
+let midnightTimer: ReturnType<typeof setTimeout> | null = null
 
 const status = ref({ status: 'idle', clock_in: '', clock_out: '' })
 const records = ref<Array<{ id: number; type: string; date: string; time: string }>>([])
-const weeklyStats = ref<Array<{ user_id: number; nickname: string; total_minutes: number; total_hours: number; days: number }>>([])
+const statsData = ref<Array<{ user_id: number; nickname: string; total_minutes: number; total_hours: number; days: number }>>([])
 const onlineMembers = ref<Array<{ user_id: number; nickname: string; online: boolean }>>([])
 const chartFilter = ref('week')
 
-const filteredStats = weeklyStats
+const filteredStats = statsData
 
 function formatMinutes(totalMinutes: number): string {
   const m = Math.round(totalMinutes)
@@ -37,7 +38,7 @@ function formatDate(): string {
 }
 
 function calcTotalHours(): string {
-  if (!status.value.clock_in) return '0.0h'
+  if (!status.value.clock_in) return '0分钟'
   const now = new Date()
   const [sh, sm] = status.value.clock_in.split(':').map(Number)
   let endH = now.getHours(), endM = now.getMinutes()
@@ -45,8 +46,8 @@ function calcTotalHours(): string {
     endH = parseInt(status.value.clock_out.split(':')[0])
     endM = parseInt(status.value.clock_out.split(':')[1])
   }
-  const mins = (endH * 60 + endM) - (sh * 60 + sm)
-  return (Math.max(0, mins) / 60).toFixed(1) + 'h'
+  const mins = Math.max(0, (endH * 60 + endM) - (sh * 60 + sm))
+  return formatMinutes(mins)
 }
 
 function calcDuration(signin: string, signout: string): string {
@@ -63,9 +64,7 @@ function calcDuration(signin: string, signout: string): string {
   }
   let mins = (endH * 60 + endM) - (sh * 60 + sm)
   if (mins < 0) mins += 1440
-  const h = Math.floor(mins / 60)
-  const m = mins % 60
-  return `${h}h${m < 10 ? '0' : ''}${m}m`
+  return formatMinutes(mins)
 }
 
 function getTodayOnlineCount(): number {
@@ -73,10 +72,9 @@ function getTodayOnlineCount(): number {
 }
 
 function getAvgHours(): string {
-  if (filteredStats.value.length === 0) return '0.0h'
+  if (filteredStats.value.length === 0) return '0分钟'
   const total = filteredStats.value.reduce((sum, s) => sum + s.total_minutes, 0)
-  const avg = total / filteredStats.value.length / 60
-  return avg.toFixed(1) + 'h'
+  return formatMinutes(Math.round(total / filteredStats.value.length))
 }
 
 function getMyDays(): number {
@@ -84,13 +82,45 @@ function getMyDays(): number {
   return me?.days || 0
 }
 
+function getPeriodLabel(): string {
+  return chartFilter.value === 'today' ? '今日' : chartFilter.value === 'month' ? '本月' : '本周'
+}
+
+// Midnight auto-refresh: schedule next midnight refresh
+function scheduleMidnightRefresh() {
+  if (midnightTimer) clearTimeout(midnightTimer)
+  const now = new Date()
+  const midnight = new Date(now)
+  midnight.setHours(24, 0, 0, 0)
+  const msUntilMidnight = midnight.getTime() - now.getTime()
+  midnightTimer = setTimeout(async () => {
+    // Auto clock-out if still clocked in
+    if (status.value.status === 'clocked_in') {
+      try {
+        await checkinApi.clockOut()
+      } catch { /* ignore */ }
+    }
+    // Refresh all data
+    await loadStatus()
+    await loadRecords()
+    await loadStats()
+    await loadOnlineMembers()
+    scheduleMidnightRefresh()
+  }, msUntilMidnight)
+}
+
 onMounted(async () => {
   await loadStatus()
   await loadRecords()
-  await loadWeeklyStats()
+  await loadStats()
   await loadOnlineMembers()
   await nextTick()
   initChart()
+  scheduleMidnightRefresh()
+})
+
+onUnmounted(() => {
+  if (midnightTimer) clearTimeout(midnightTimer)
 })
 
 function initChart() {
@@ -103,6 +133,7 @@ function initChart() {
 function updateChart() {
   if (!chart) return
   const data = filteredStats.value
+  const periodLabel = chartFilter.value === 'today' ? '今日' : chartFilter.value === 'month' ? '本月' : '本周'
   chart.setOption({
     tooltip: {
       trigger: 'axis',
@@ -112,7 +143,7 @@ function updateChart() {
       axisPointer: { type: 'shadow' },
       formatter: (params: any) => {
         const d = params[0]
-        return `${d.name}<br/>本周累计: ${formatMinutes(d.value)}`
+        return `${d.name}<br/>${periodLabel}累计: ${formatMinutes(d.value)}`
       }
     },
     grid: { left: '3%', right: '4%', bottom: '3%', top: '10%', containLabel: true },
@@ -156,9 +187,9 @@ function updateChart() {
   })
 }
 
-function setChartFilter(filter: string) {
+async function setChartFilter(filter: string) {
   chartFilter.value = filter
-  updateChart()
+  await loadStats()
 }
 
 async function loadStatus() {
@@ -197,20 +228,20 @@ async function handleClockOut() {
     ElMessage.success('签退成功')
     await loadStatus()
     await loadRecords()
-    await loadWeeklyStats()
+    await loadStats()
     await loadOnlineMembers()
   } catch {
     ElMessage.error('签退失败')
   }
 }
 
-async function loadWeeklyStats() {
+async function loadStats() {
   try {
-    const res = await checkinApi.getWeeklyStats()
-    weeklyStats.value = (res.data || []).filter((s: any) => s.nickname !== '超级管理员' && s.user_id > 0)
+    const res = await checkinApi.getStats(chartFilter.value)
+    statsData.value = (res.data || []).filter((s: any) => s.nickname !== '超级管理员' && s.user_id > 0)
     updateChart()
   } catch {
-    console.error('Failed to load weekly stats')
+    console.error('Failed to load stats')
   }
 }
 
@@ -279,12 +310,12 @@ async function loadOnlineMembers() {
       <div class="stat-card">
         <div class="stat-label">平均工时</div>
         <div class="stat-value blue">{{ getAvgHours() }}</div>
-        <div class="stat-sub">本周平均</div>
+        <div class="stat-sub">{{ getPeriodLabel() }}平均</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">我的签到天数</div>
         <div class="stat-value amber">{{ getMyDays() }}</div>
-        <div class="stat-sub">本周累计</div>
+        <div class="stat-sub">{{ getPeriodLabel() }}累计</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">我的今日工时</div>

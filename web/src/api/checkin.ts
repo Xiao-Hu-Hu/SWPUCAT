@@ -13,8 +13,8 @@ export const checkinApi = {
   getRecords(limit = 10) {
     return api.get('/checkin/records', { params: { limit } })
   },
-  getWeeklyStats() {
-    return api.get('/checkin/weekly-stats')
+  getStats(period = 'week') {
+    return api.get('/checkin/stats', { params: { period } })
   },
   getOnlineMembers() {
     return api.get('/checkin/online')

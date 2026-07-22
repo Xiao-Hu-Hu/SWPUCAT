@@ -97,7 +97,7 @@ func (r *Router) Setup() *gin.Engine {
 			protected.POST("/checkin/clock-out", r.checkinHandler.ClockOut)
 			protected.GET("/checkin/records", r.checkinHandler.GetRecords)
 			protected.GET("/checkin/status", r.checkinHandler.GetStatus)
-			protected.GET("/checkin/weekly-stats", r.checkinHandler.GetWeeklyStats)
+			protected.GET("/checkin/stats", r.checkinHandler.GetStats)
 			protected.GET("/checkin/online", r.checkinHandler.GetOnlineMembers)
 
 			// Knowledge

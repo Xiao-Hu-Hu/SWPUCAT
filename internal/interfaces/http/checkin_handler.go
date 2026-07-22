@@ -75,10 +75,11 @@ func (h *CheckinHandler) GetStatus(c *gin.Context) {
 	Success(c, status)
 }
 
-func (h *CheckinHandler) GetWeeklyStats(c *gin.Context) {
-	stats, err := h.checkinSvc.GetWeeklyStats(c.Request.Context())
+func (h *CheckinHandler) GetStats(c *gin.Context) {
+	period := c.DefaultQuery("period", "week")
+	stats, err := h.checkinSvc.GetStatsByPeriod(c.Request.Context(), period)
 	if err != nil {
-		InternalError(c, "failed to get weekly stats")
+		InternalError(c, "failed to get stats")
 		return
 	}
 
