@@ -2,10 +2,10 @@ package http
 
 import (
 	"SWPUCAT/internal/application/knowledge"
-	knowledgeDomain "SWPUCAT/internal/domain/knowledge"
 	"SWPUCAT/internal/domain/shared"
 	"SWPUCAT/internal/infrastructure/storage"
 	"fmt"
+	"net/url"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -47,12 +47,6 @@ func (h *KnowledgeHandler) UploadFile(c *gin.Context) {
 		return
 	}
 	defer file.Close()
-
-	// Validate file type
-	if !knowledgeDomain.IsAllowedFileType(header.Filename) {
-		BadRequest(c, "file type not allowed")
-		return
-	}
 
 	// Get category ID from form
 	categoryIDStr := c.PostForm("category_id")
@@ -309,7 +303,9 @@ func (h *KnowledgeHandler) DownloadFile(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", item.Name))
+	// 使用 RFC 5987 编码处理中文文件名
+	encodedName := url.QueryEscape(item.Name)
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, item.Name, encodedName))
 	c.Header("Content-Type", "application/octet-stream")
 	c.File(filePath)
 }

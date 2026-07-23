@@ -17,25 +17,9 @@ func (t ItemType) IsValid() bool {
 	return t == ItemTypeLink || t == ItemTypeFile
 }
 
-var allowedFileTypes = map[string]bool{
-	".pdf":  true,
-	".doc":  true,
-	".docx": true,
-	".md":   true,
-	".zip":  true,
-	".exe":  true,
-	".txt":  true,
-	".ppt":  true,
-	".pptx": true,
-	".xls":  true,
-	".xlsx": true,
-	".rar":  true,
-	".7z":   true,
-}
-
 func IsAllowedFileType(filename string) bool {
-	ext := strings.ToLower(filepath.Ext(filename))
-	return allowedFileTypes[ext]
+	// 允许所有文件类型
+	return true
 }
 
 var (
