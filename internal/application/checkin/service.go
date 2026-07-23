@@ -351,6 +351,9 @@ func (s *CheckinService) GetAllTodayRecords(ctx context.Context) ([]TodayRecordD
 
 	result := make([]TodayRecordDTO, 0, len(records))
 	for i, r := range records {
+		if r.UserID == 0 {
+			continue
+		}
 		dto := TodayRecordDTO{
 			ID:     r.ID,
 			UserID: r.UserID,
