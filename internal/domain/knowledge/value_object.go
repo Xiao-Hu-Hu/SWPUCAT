@@ -2,8 +2,6 @@ package knowledge
 
 import (
 	"errors"
-	"path/filepath"
-	"strings"
 )
 
 type ItemType string
