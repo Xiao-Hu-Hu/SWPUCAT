@@ -174,7 +174,7 @@ async function handleDownloadFile(id: number, name: string) {
     const res = await knowledgeApi.downloadFile(id, (percent) => {
       downloading.value[id] = percent
     })
-    const url = window.URL.createObjectURL(new Blob([res.data]))
+    const url = window.URL.createObjectURL(new Blob([res]))
     const link = document.createElement('a')
     link.href = url
     link.setAttribute('download', name)
