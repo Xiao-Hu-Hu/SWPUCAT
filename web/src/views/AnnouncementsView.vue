@@ -270,11 +270,16 @@ async function handleDelete(id: number) {
 
 .ann-content :deep(table),
 .ann-content :deep(pre),
-.ann-content :deep(blockquote),
+.ann-content :deep(blockquote) {
+  display: none;
+}
+
 .ann-content :deep(h1),
 .ann-content :deep(h2),
 .ann-content :deep(h3) {
-  display: none;
+  font-size: inherit;
+  font-weight: 600;
+  margin: 0;
 }
 
 /* Footer with actions */
