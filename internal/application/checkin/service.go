@@ -545,8 +545,13 @@ func gradeFromStudentID(studentID string) int {
 	if err != nil {
 		return 0
 	}
-	currentYear := time.Now().Year()
+	now := time.Now()
+	currentYear := now.Year()
+	currentMonth := int(now.Month())
 	grade := currentYear - enrollmentYear + 1
+	if currentMonth < 9 {
+		grade--
+	}
 	if grade < 1 {
 		grade = 1
 	}
