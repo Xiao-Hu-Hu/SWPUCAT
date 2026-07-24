@@ -24,6 +24,20 @@ const makeupForm = ref({
 })
 const makeupLoading = ref(false)
 
+// Week range for date picker (Monday to Sunday)
+const now = new Date()
+const dayOfWeek = now.getDay() || 7 // 0=Sunday -> 7
+const weekStart = new Date(now)
+weekStart.setDate(now.getDate() - dayOfWeek + 1)
+weekStart.setHours(0, 0, 0, 0)
+const weekEnd = new Date(weekStart)
+weekEnd.setDate(weekStart.getDate() + 6)
+weekEnd.setHours(23, 59, 59, 999)
+
+function disabledDate(date: Date) {
+  return date < weekStart || date > now
+}
+
 // Requirements (frontend uses hours, backend uses minutes)
 interface Requirement {
   grade: number
@@ -157,6 +171,7 @@ onMounted(() => {
                 type="date"
                 placeholder="选择日期"
                 value-format="YYYY-MM-DD"
+                :disabled-date="disabledDate"
                 style="width: 100%"
               />
             </el-form-item>
