@@ -2,11 +2,14 @@ package email
 
 import (
 	"SWPUCAT/internal/infrastructure/config"
+	"bytes"
 	"crypto/tls"
 	"fmt"
 	"log"
 	"net"
 	"net/smtp"
+
+	"github.com/yuin/goldmark"
 )
 
 type SMTPService struct {
@@ -98,11 +101,25 @@ func (s *SMTPService) SendVerificationCode(to string, code string) error {
 	return client.Quit()
 }
 
+func markdownToHTML(md string) string {
+	var buf bytes.Buffer
+	if err := goldmark.New().Convert([]byte(md), &buf); err != nil {
+		return "<p>" + md + "</p>"
+	}
+	return buf.String()
+}
+
 func (s *SMTPService) SendAnnouncementNotification(to string, title string, content string) error {
 	subject := fmt.Sprintf("SWPUCAT - 公告通知：%s", title)
-	body := fmt.Sprintf("公告标题：%s\r\n\r\n%s\r\n\r\n---\r\n此邮件由系统自动发送，请勿回复。", title, content)
+	htmlContent := markdownToHTML(content)
+	body := fmt.Sprintf(`<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:640px;margin:0 auto;padding:20px;">
+  <h2 style="color:#1a1a1a;border-bottom:2px solid #409eff;padding-bottom:10px;">%s</h2>
+  <div style="line-height:1.7;color:#333;font-size:15px;">%s</div>
+  <hr style="border:none;border-top:1px solid #eee;margin:24px 0;">
+  <p style="color:#999;font-size:12px;">此邮件由 SWPUCAT 系统自动发送，请勿回复。</p>
+</div>`, title, htmlContent)
 
-	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s",
+	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
 		s.from, to, subject, body)
 
 	addr := fmt.Sprintf("%s:%d", s.host, s.port)
