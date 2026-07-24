@@ -177,9 +177,19 @@ async function handleNotify() {
   notifyLoading.value = true
   try {
     const res = await announcementApi.notify(notifyAnnId.value, selectedUserIds.value)
-    const sent = res.data?.sent || 0
-    ElMessage.success(`已成功通知 ${sent} 位成员`)
+    const { sent = 0, failed = [] } = res.data || {}
     showNotifyDialog.value = false
+
+    if (failed.length === 0) {
+      ElMessage.success(`已成功通知 ${sent} 位成员`)
+    } else {
+      const failList = failed.map((f: { nickname: string; reason: string }) => `• ${f.nickname}（${f.reason}）`).join('\n')
+      ElMessageBox.alert(
+        `成功 ${sent} 人，失败 ${failed.length} 人：\n\n${failList}`,
+        '通知发送结果',
+        { type: 'warning', confirmButtonText: '知道了' }
+      )
+    }
   } catch {
     ElMessage.error('通知发送失败')
   } finally {

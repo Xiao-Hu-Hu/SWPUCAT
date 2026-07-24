@@ -103,11 +103,11 @@ func (h *AnnouncementHandler) Notify(c *gin.Context) {
 		return
 	}
 
-	count, err := h.annSvc.NotifyMembers(c.Request.Context(), id, req.UserIDs)
+	result, err := h.annSvc.NotifyMembers(c.Request.Context(), id, req.UserIDs)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
 	}
 
-	Success(c, gin.H{"sent": count})
+	Success(c, result)
 }

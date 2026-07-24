@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"sync"
 
 	"SWPUCAT/internal/domain/announcement"
 	"SWPUCAT/internal/domain/shared"
@@ -137,38 +136,59 @@ func toDTO(a *announcement.Announcement) *AnnouncementDTO {
 	}
 }
 
-func (s *AnnouncementService) NotifyMembers(ctx context.Context, annID int64, userIDs []int64) (int, error) {
+type NotifyResult struct {
+	Sent  int              `json:"sent"`
+	Failed []FailedMember  `json:"failed"`
+}
+
+type FailedMember struct {
+	ID       int64  `json:"id"`
+	Nickname string `json:"nickname"`
+	Reason   string `json:"reason"`
+}
+
+func (s *AnnouncementService) NotifyMembers(ctx context.Context, annID int64, userIDs []int64) (*NotifyResult, error) {
 	ann, err := s.annRepo.FindByID(ctx, annID)
 	if err != nil {
-		return 0, fmt.Errorf("announcement not found")
+		return nil, fmt.Errorf("announcement not found")
 	}
 
 	users, err := s.userRepo.FindByIDs(ctx, userIDs)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	successCount := 0
+	type sendResult struct {
+		id       int64
+		nickname string
+		err      error
+	}
+
+	results := make(chan sendResult, len(users))
 
 	for _, u := range users {
 		if u.Email == "" {
+			results <- sendResult{id: u.ID, nickname: u.DisplayName(), err: fmt.Errorf("邮箱为空")}
 			continue
 		}
-		wg.Add(1)
-		go func(email string) {
-			defer wg.Done()
-			if err := s.emailSvc.SendAnnouncementNotification(email, ann.Title, ann.Content); err != nil {
+		go func(id int64, nickname, email string) {
+			err := s.emailSvc.SendAnnouncementNotification(email, ann.Title, ann.Content)
+			if err != nil {
 				log.Printf("[ERROR] Failed to send announcement notification to %s: %v", email, err)
-				return
 			}
-			mu.Lock()
-			successCount++
-			mu.Unlock()
-		}(string(u.Email))
+			results <- sendResult{id: id, nickname: nickname, err: err}
+		}(u.ID, u.DisplayName(), string(u.Email))
 	}
 
-	wg.Wait()
-	return successCount, nil
+	var res NotifyResult
+	for range users {
+		r := <-results
+		if r.err != nil {
+			res.Failed = append(res.Failed, FailedMember{ID: r.id, Nickname: r.nickname, Reason: r.err.Error()})
+		} else {
+			res.Sent++
+		}
+	}
+
+	return &res, nil
 }
