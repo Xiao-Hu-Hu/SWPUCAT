@@ -147,10 +147,10 @@ async function handleRemoveMember(id: number) {
           </template>
         </el-table-column>
         <el-table-column prop="student_id" label="学号" width="140" />
-        <el-table-column prop="role" label="角色" width="100">
+        <el-table-column prop="role" label="角色" width="120">
           <template #default="{ row }">
-            <el-tag :type="row.role === 'captain' ? 'warning' : 'info'">
-              {{ row.role === 'captain' ? '队长' : '成员' }}
+            <el-tag :type="row.role === 'super_admin' ? 'danger' : row.role === 'captain' ? 'warning' : 'info'">
+              {{ row.role === 'super_admin' ? '超级管理员' : row.role === 'captain' ? '队长' : '成员' }}
             </el-tag>
           </template>
         </el-table-column>
