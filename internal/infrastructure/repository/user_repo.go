@@ -81,11 +81,12 @@ func (r *UserRepo) FindByIDs(ctx context.Context, ids []int64) ([]*user.User, er
 
 func (r *UserRepo) Update(ctx context.Context, u *user.User) error {
 	return r.db.WithContext(ctx).Model(&database.UserModel{}).Where("id = ?", u.ID).Updates(map[string]interface{}{
-		"nickname":      string(u.Nickname),
-		"avatar":        u.Avatar,
-		"password_hash": string(u.PasswordHash),
-		"role":          string(u.Role),
-		"checkin_count": u.CheckinCount,
+		"nickname":        string(u.Nickname),
+		"avatar":          u.Avatar,
+		"tech_direction":  u.TechDirection,
+		"password_hash":   string(u.PasswordHash),
+		"role":            string(u.Role),
+		"checkin_count":   u.CheckinCount,
 	}).Error
 }
 
@@ -113,17 +114,18 @@ func (r *UserRepo) ExistsByStudentID(ctx context.Context, studentID user.Student
 
 func toDomainUser(m *database.UserModel) *user.User {
 	return &user.User{
-		ID:           m.ID,
-		Username:     user.Username(m.Username),
-		StudentID:    user.StudentID(m.StudentID),
-		Email:        m.Email,
-		PasswordHash: user.PasswordHash(m.PasswordHash),
-		Nickname:     user.Nickname(m.Nickname),
-		Avatar:       m.Avatar,
-		Role:         user.Role(m.Role),
-		CheckinCount: m.CheckinCount,
-		JoinedAt:     m.CreatedAt,
-		CreatedAt:    m.CreatedAt,
-		UpdatedAt:    m.UpdatedAt,
+		ID:            m.ID,
+		Username:      user.Username(m.Username),
+		StudentID:     user.StudentID(m.StudentID),
+		Email:         m.Email,
+		PasswordHash:  user.PasswordHash(m.PasswordHash),
+		Nickname:      user.Nickname(m.Nickname),
+		Avatar:        m.Avatar,
+		TechDirection: m.TechDirection,
+		Role:          user.Role(m.Role),
+		CheckinCount:  m.CheckinCount,
+		JoinedAt:      m.CreatedAt,
+		CreatedAt:     m.CreatedAt,
+		UpdatedAt:     m.UpdatedAt,
 	}
 }
