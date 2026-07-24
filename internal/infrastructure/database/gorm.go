@@ -25,20 +25,5 @@ func NewGORM(cfg *config.DatabaseConfig) (*gorm.DB, error) {
 	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
 	sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
 
-	// Auto-migrate schema
-	if err := db.AutoMigrate(
-		&UserModel{},
-		&AnnouncementModel{},
-		&CheckinRecordModel{},
-		&KnowledgeCategoryModel{},
-		&KnowledgeItemModel{},
-		&ApprovalModel{},
-		&SettingModel{},
-		&VerificationCodeModel{},
-		&InvitationCodeModel{},
-	); err != nil {
-		return nil, fmt.Errorf("failed to auto-migrate: %w", err)
-	}
-
 	return db, nil
 }
