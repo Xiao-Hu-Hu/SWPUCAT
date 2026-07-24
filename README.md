@@ -12,6 +12,11 @@ CSA（Computer Science Association）实验室管理系统 — 基于 Vue 3 + Go
 - 每日打卡记录表格（分页）
 - 零点自动签退
 
+### 打卡管理（队长 / 管理员）
+- **补签**：为指定成员在某天补录打卡时长，仅限本周内日期
+- **打卡要求**：按年级设置每周最低打卡时长（小时），年级从学号前4位自动识别
+- **发布报告**：一键生成本周打卡统计报告，自动发布为公告（Markdown 表格）
+
 ### 知识库
 - 链接与文件上传
 - 分类管理
@@ -24,10 +29,14 @@ CSA（Computer Science Association）实验室管理系统 — 基于 Vue 3 + Go
 - 角色权限：超级管理员 / 队长 / 成员
 - 邀请码注册机制
 - 成员信息展示与在线状态
+- 技术方向标签（Java后端、Go后端、Web前端、Python机器学习、Python深度学习、游戏开发）
 
 ### 公告系统
 - 公告发布与置顶
+- Markdown 渲染（标题、表格、代码块、列表等）
+- 查看详情弹窗
 - 队长 / 管理员可管理
+- **邮件通知**：发布公告后可选择成员发送邮件通知，按年级分组一键选择，HTML 格式支持 Markdown 渲染
 
 ### 邮箱验证
 - 注册时邮箱验证码校验
@@ -40,8 +49,8 @@ CSA（Computer Science Association）实验室管理系统 — 基于 Vue 3 + Go
 
 | 层级 | 技术 |
 |------|------|
-| 前端 | Vue 3、TypeScript、Element Plus、ECharts、Pinia、Vue Router |
-| 后端 | Go、Gin、GORM |
+| 前端 | Vue 3、TypeScript、Element Plus、ECharts、Pinia、Vue Router、marked |
+| 后端 | Go、Gin、GORM、goldmark |
 | 数据库 | PostgreSQL 16 |
 | 部署 | Docker Compose、Nginx（可选） |
 
@@ -232,29 +241,58 @@ docker compose up -d --build
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/api/checkin/in` | 签到 |
-| POST | `/api/checkin/out` | 签退 |
+| POST | `/api/checkin/clock-in` | 签到 |
+| POST | `/api/checkin/clock-out` | 签退 |
 | GET | `/api/checkin/status` | 获取签到状态 |
-| GET | `/api/checkin/today-records` | 获取今日打卡记录 |
+| GET | `/api/checkin/records` | 获取签到记录 |
 | GET | `/api/checkin/stats` | 获取工时统计 |
 | GET | `/api/checkin/online` | 获取在线成员 |
+| GET | `/api/checkin/today-records` | 获取今日打卡记录 |
+
+### 打卡管理（队长 / 管理员）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/checkin/makeup` | 补签 |
+| GET | `/api/checkin/requirements` | 获取打卡要求 |
+| POST | `/api/checkin/requirements` | 设置打卡要求 |
+| POST | `/api/checkin/report` | 发布打卡报告 |
 
 ### 知识库
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/knowledge/items` | 获取资源列表 |
+| GET | `/api/knowledge/items/pending` | 获取待审批资源 |
+| GET | `/api/knowledge/items/my` | 获取我的资源 |
+| GET | `/api/knowledge/items/:id` | 获取资源详情 |
 | POST | `/api/knowledge/links` | 添加链接 |
 | POST | `/api/knowledge/files` | 上传文件 |
-| GET | `/api/knowledge/files/:id/download` | 下载文件 |
+| DELETE | `/api/knowledge/items/:id` | 删除资源 |
+| PUT | `/api/knowledge/items/:id/approve` | 审批通过 |
+| PUT | `/api/knowledge/items/:id/reject` | 审批拒绝 |
+| GET | `/api/knowledge/download/:id` | 下载文件 |
 | GET | `/api/knowledge/categories` | 获取分类列表 |
 | POST | `/api/knowledge/categories` | 创建分类 |
+| DELETE | `/api/knowledge/categories/:id` | 删除分类 |
 
 ### 成员
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/members` | 获取成员列表 |
+| DELETE | `/api/members/:id` | 移除成员 |
+| POST | `/api/members/:id/transfer-captain` | 转让队长 |
+
+### 个人设置
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/profile` | 获取个人信息 |
+| PUT | `/api/profile` | 更新个人信息 |
+| PUT | `/api/profile/password` | 修改密码 |
+| PUT | `/api/profile/tech-direction` | 更新技术方向 |
+| POST | `/api/profile/avatar` | 上传头像 |
 
 ### 公告
 
@@ -262,6 +300,25 @@ docker compose up -d --build
 |------|------|------|
 | GET | `/api/announcements` | 获取公告列表 |
 | POST | `/api/announcements` | 发布公告 |
+| PUT | `/api/announcements/:id` | 更新公告 |
+| DELETE | `/api/announcements/:id` | 删除公告 |
+| POST | `/api/announcements/:id/notify` | 通知成员 |
+
+### 审批
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/approvals` | 获取待审批列表 |
+| POST | `/api/approvals` | 提交审批 |
+| POST | `/api/approvals/:id/approve` | 审批通过 |
+| POST | `/api/approvals/:id/reject` | 审批拒绝 |
+
+### 邀请码
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/invitations/generate` | 生成邀请码 |
+| GET | `/api/invitations/my` | 获取我的邀请码 |
 
 ## 许可证
 
