@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { announcementApi } from '@/api/announcement'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { marked } from 'marked'
 
 const authStore = useAuthStore()
 const announcements = ref<Array<{
@@ -18,6 +19,9 @@ const announcements = ref<Array<{
 const showDialog = ref(false)
 const editingId = ref<number | null>(null)
 const form = ref({ title: '', content: '', pinned: false })
+
+const showDetail = ref(false)
+const detailAnn = ref<typeof announcements.value[0] | null>(null)
 
 const currentPage = ref(1)
 const pageSize = ref(10)
@@ -50,6 +54,15 @@ function openEdit(ann: typeof announcements.value[0]) {
   editingId.value = ann.id
   form.value = { title: ann.title, content: ann.content, pinned: ann.pinned }
   showDialog.value = true
+}
+
+function openDetail(ann: typeof announcements.value[0]) {
+  detailAnn.value = ann
+  showDetail.value = true
+}
+
+function renderMarkdown(content: string) {
+  return marked(content || '', { breaks: true })
 }
 
 async function handleSubmit() {
@@ -90,12 +103,12 @@ async function handleDelete(id: number) {
         </el-button>
       </div>
 
-      <div class="announcements-list">
+      <div class="announcements-grid">
         <div v-for="ann in paginatedAnnouncements" :key="ann.id" class="announcement-item">
           <div class="ann-header">
             <div class="ann-title">
               <el-tag v-if="ann.pinned" type="warning" size="small">置顶</el-tag>
-              <span>{{ ann.title }}</span>
+              <span class="title-text">{{ ann.title }}</span>
             </div>
             <div class="ann-meta">
               <span>{{ ann.author_name }}</span>
@@ -103,9 +116,14 @@ async function handleDelete(id: number) {
             </div>
           </div>
           <div class="ann-content">{{ ann.content }}</div>
-          <div v-if="authStore.isCaptain" class="ann-actions">
-            <el-button size="small" @click="openEdit(ann)">编辑</el-button>
-            <el-button size="small" type="danger" @click="handleDelete(ann.id)">删除</el-button>
+          <div class="ann-footer">
+            <div class="ann-actions" v-if="authStore.isCaptain">
+              <el-button size="small" @click="openEdit(ann)">编辑</el-button>
+              <el-button size="small" type="danger" @click="handleDelete(ann.id)">删除</el-button>
+            </div>
+            <el-button class="detail-btn" size="small" type="primary" text @click="openDetail(ann)">
+              查看详情
+            </el-button>
           </div>
         </div>
         <el-empty v-if="announcements.length === 0" description="暂无公告" />
@@ -123,13 +141,14 @@ async function handleDelete(id: number) {
       </div>
     </div>
 
+    <!-- Create / Edit Dialog -->
     <el-dialog v-model="showDialog" :title="editingId ? '编辑公告' : '发布公告'" width="600px">
       <el-form :model="form" label-width="80px">
         <el-form-item label="标题">
           <el-input v-model="form.title" placeholder="请输入公告标题" />
         </el-form-item>
         <el-form-item label="内容">
-          <el-input v-model="form.content" type="textarea" :rows="6" placeholder="请输入公告内容" />
+          <el-input v-model="form.content" type="textarea" :rows="6" placeholder="支持 Markdown 格式" />
         </el-form-item>
         <el-form-item label="置顶">
           <el-switch v-model="form.pinned" />
@@ -139,6 +158,16 @@ async function handleDelete(id: number) {
         <el-button @click="showDialog = false">取消</el-button>
         <el-button type="primary" @click="handleSubmit">确定</el-button>
       </template>
+    </el-dialog>
+
+    <!-- Detail Dialog -->
+    <el-dialog v-model="showDetail" :title="detailAnn?.title || '公告详情'" width="700px" class="detail-dialog">
+      <div v-if="detailAnn" class="detail-meta">
+        <span>{{ detailAnn.author_name }}</span>
+        <span>{{ detailAnn.created_at }}</span>
+        <el-tag v-if="detailAnn.pinned" type="warning" size="small">置顶</el-tag>
+      </div>
+      <div v-if="detailAnn" class="detail-content markdown-body" v-html="renderMarkdown(detailAnn.content)"></div>
     </el-dialog>
   </div>
 </template>
@@ -170,9 +199,10 @@ async function handleDelete(id: number) {
   color: var(--text);
 }
 
-.announcements-list {
-  display: flex;
-  flex-direction: column;
+/* Card grid */
+.announcements-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 0.75rem;
 }
 
@@ -182,6 +212,9 @@ async function handleDelete(id: number) {
   border-radius: var(--radius);
   padding: 1rem;
   transition: border-color 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  height: 180px;
 }
 
 .announcement-item:hover {
@@ -193,6 +226,7 @@ async function handleDelete(id: number) {
   justify-content: space-between;
   align-items: flex-start;
   margin-bottom: 0.5rem;
+  flex-shrink: 0;
 }
 
 .ann-title {
@@ -203,6 +237,14 @@ async function handleDelete(id: number) {
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--text);
+  min-width: 0;
+  flex: 1;
+}
+
+.title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ann-meta {
@@ -210,18 +252,142 @@ async function handleDelete(id: number) {
   gap: 1rem;
   font-size: 0.75rem;
   color: var(--text-muted);
+  flex-shrink: 0;
+  margin-left: 0.5rem;
 }
 
+/* Truncated content */
 .ann-content {
   font-size: 0.875rem;
   color: var(--text-secondary);
-  margin-bottom: 0.75rem;
   line-height: 1.5;
+  flex: 1;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  text-overflow: ellipsis;
+}
+
+/* Footer with actions */
+.ann-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.5rem;
+  flex-shrink: 0;
 }
 
 .ann-actions {
   display: flex;
   gap: 0.5rem;
+}
+
+.detail-btn {
+  margin-left: auto;
+}
+
+/* Detail dialog */
+.detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.detail-content {
+  font-size: 0.9375rem;
+  line-height: 1.75;
+  color: var(--text);
+}
+
+/* Markdown styles */
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3) {
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.markdown-body :deep(h1) { font-size: 1.5em; }
+.markdown-body :deep(h2) { font-size: 1.3em; }
+.markdown-body :deep(h3) { font-size: 1.1em; }
+
+.markdown-body :deep(p) {
+  margin-bottom: 0.75em;
+}
+
+.markdown-body :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.875em;
+}
+
+.markdown-body :deep(th),
+.markdown-body :deep(td) {
+  border: 1px solid var(--border);
+  padding: 0.5em 0.75em;
+  text-align: left;
+}
+
+.markdown-body :deep(th) {
+  background: var(--bg-deep);
+  font-weight: 600;
+}
+
+.markdown-body :deep(code) {
+  background: var(--bg-deep);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.markdown-body :deep(pre) {
+  background: var(--bg-deep);
+  padding: 1em;
+  border-radius: var(--radius);
+  overflow-x: auto;
+  margin: 1em 0;
+}
+
+.markdown-body :deep(pre code) {
+  background: none;
+  padding: 0;
+}
+
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) {
+  padding-left: 1.5em;
+  margin-bottom: 0.75em;
+}
+
+.markdown-body :deep(blockquote) {
+  border-left: 3px solid var(--accent);
+  padding-left: 1em;
+  color: var(--text-secondary);
+  margin: 1em 0;
+}
+
+.markdown-body :deep(hr) {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.5em 0;
+}
+
+.markdown-body :deep(a) {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.markdown-body :deep(a:hover) {
+  text-decoration: underline;
 }
 
 .pagination-wrapper {
