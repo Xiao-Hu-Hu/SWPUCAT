@@ -180,7 +180,7 @@ func (s *AnnouncementService) NotifyMembers(ctx context.Context, annID int64, us
 		}(u.ID, u.DisplayName(), string(u.Email))
 	}
 
-	var res NotifyResult
+	res := NotifyResult{Failed: make([]FailedMember, 0)}
 	for range users {
 		r := <-results
 		if r.err != nil {

@@ -177,10 +177,11 @@ async function handleNotify() {
   notifyLoading.value = true
   try {
     const res = await announcementApi.notify(notifyAnnId.value, selectedUserIds.value)
+    console.log('[Notify] response:', res)
     const { sent = 0, failed = [] } = res.data || {}
     showNotifyDialog.value = false
 
-    if (failed.length === 0) {
+    if (!failed || failed.length === 0) {
       ElMessage.success(`已成功通知 ${sent} 位成员`)
     } else {
       const failList = failed.map((f: { nickname: string; reason: string }) => `• ${f.nickname}（${f.reason}）`).join('\n')
@@ -190,7 +191,8 @@ async function handleNotify() {
         { type: 'warning', confirmButtonText: '知道了' }
       )
     }
-  } catch {
+  } catch (err) {
+    console.error('[Notify] error:', err)
     ElMessage.error('通知发送失败')
   } finally {
     notifyLoading.value = false

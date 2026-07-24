@@ -106,49 +106,65 @@ func (s *SMTPService) SendAnnouncementNotification(to string, title string, cont
 		s.from, to, subject, body)
 
 	addr := fmt.Sprintf("%s:%d", s.host, s.port)
+	log.Printf("[SMTP-Notify] Connecting to %s, recipient=%s", addr, to)
 
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
+		log.Printf("[SMTP-Notify] Connection failed: %v", err)
 		return fmt.Errorf("failed to connect to SMTP server: %w", err)
 	}
 	defer conn.Close()
 
 	client, err := smtp.NewClient(conn, s.host)
 	if err != nil {
+		log.Printf("[SMTP-Notify] Client creation failed: %v", err)
 		return fmt.Errorf("failed to create SMTP client: %w", err)
 	}
 	defer client.Close()
 
 	tlsConfig := &tls.Config{ServerName: s.host}
 	if err = client.StartTLS(tlsConfig); err != nil {
+		log.Printf("[SMTP-Notify] TLS failed: %v", err)
 		return fmt.Errorf("failed to start TLS: %w", err)
 	}
 
 	auth := smtp.PlainAuth("", s.username, s.password, s.host)
 	if err = client.Auth(auth); err != nil {
+		log.Printf("[SMTP-Notify] Auth failed: %v", err)
 		return fmt.Errorf("authentication failed: %w", err)
 	}
 
 	if err = client.Mail(s.from); err != nil {
+		log.Printf("[SMTP-Notify] Set sender failed: %v", err)
 		return fmt.Errorf("failed to set sender: %w", err)
 	}
 	if err = client.Rcpt(to); err != nil {
+		log.Printf("[SMTP-Notify] Set recipient failed: %v", err)
 		return fmt.Errorf("failed to set recipient: %w", err)
 	}
 
 	writer, err := client.Data()
 	if err != nil {
+		log.Printf("[SMTP-Notify] Data command failed: %v", err)
 		return fmt.Errorf("failed to start data: %w", err)
 	}
 	_, err = writer.Write([]byte(msg))
 	if err != nil {
+		log.Printf("[SMTP-Notify] Write data failed: %v", err)
 		return fmt.Errorf("failed to write data: %w", err)
 	}
 	err = writer.Close()
 	if err != nil {
+		log.Printf("[SMTP-Notify] Close data failed: %v", err)
 		return fmt.Errorf("failed to close data: %w", err)
 	}
 
-	log.Printf("[SMTP] Announcement notification sent to %s", to)
-	return client.Quit()
+	log.Printf("[SMTP-Notify] Message accepted by server, sending QUIT...")
+	quitErr := client.Quit()
+	if quitErr != nil {
+		log.Printf("[SMTP-Notify] QUIT failed: %v", quitErr)
+		return fmt.Errorf("failed to quit: %w", quitErr)
+	}
+	log.Printf("[SMTP-Notify] Successfully sent to %s", to)
+	return nil
 }
