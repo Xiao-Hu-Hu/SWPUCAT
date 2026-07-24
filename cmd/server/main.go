@@ -57,7 +57,7 @@ func main() {
 
 	// Initialize application services
 	userSvc := user.NewUserApplicationService(userRepo, hasher, jwtSvc, publisher, emailSvc, codeRepo, invitationRepo)
-	annSvc := announcement.NewAnnouncementService(annRepo, publisher, userRepo)
+	annSvc := announcement.NewAnnouncementService(annRepo, publisher, userRepo, emailSvc)
 	invitationSvc := invitation.NewInvitationService(invitationRepo, userRepo)
 	checkinSvc := checkin.NewCheckinService(checkinRepo, userRepo, publisher, settingsRepo)
 	knowledgeSvc := knowledge.NewKnowledgeService(knowledgeRepo, publisher)

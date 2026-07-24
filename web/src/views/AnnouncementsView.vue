@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { announcementApi } from '@/api/announcement'
+import { memberApi } from '@/api/member'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
@@ -22,6 +23,30 @@ const form = ref({ title: '', content: '', pinned: false })
 
 const showDetail = ref(false)
 const detailAnn = ref<typeof announcements.value[0] | null>(null)
+
+// Notify
+const showNotifyDialog = ref(false)
+const notifyAnnId = ref<number | null>(null)
+const notifyLoading = ref(false)
+const selectedUserIds = ref<number[]>([])
+
+interface Member {
+  id: number
+  nickname: string
+  username: string
+  student_id: string
+  role: string
+}
+
+interface GradeGroup {
+  year: string
+  label: string
+  members: Member[]
+  selected: boolean
+}
+
+const allMembers = ref<Member[]>([])
+const gradeGroups = ref<GradeGroup[]>([])
 
 const currentPage = ref(1)
 const pageSize = ref(10)
@@ -65,19 +90,100 @@ function renderMarkdown(content: string) {
   return marked(content || '', { breaks: true })
 }
 
+async function openNotify(ann: typeof announcements.value[0]) {
+  notifyAnnId.value = ann.id
+  selectedUserIds.value = []
+  gradeGroups.value.forEach(g => g.selected = false)
+  await loadMembers()
+  showNotifyDialog.value = true
+}
+
+async function loadMembers() {
+  try {
+    const res = await memberApi.list()
+    const members: Member[] = (res.data || res || []).filter((m: Member) => m.role !== 'super_admin')
+    allMembers.value = members
+
+    // Group by enrollment year
+    const groups = new Map<string, Member[]>()
+    for (const m of members) {
+      const year = m.student_id?.slice(0, 4) || '未知'
+      if (!groups.has(year)) groups.set(year, [])
+      groups.get(year)!.push(m)
+    }
+
+    gradeGroups.value = Array.from(groups.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([year, members]) => ({
+        year,
+        label: `${year}届`,
+        members,
+        selected: false
+      }))
+  } catch {
+    allMembers.value = []
+    gradeGroups.value = []
+  }
+}
+
+function handleGroupToggle(group: GradeGroup) {
+  for (const m of group.members) {
+    const idx = selectedUserIds.value.indexOf(m.id)
+    if (group.selected && idx === -1) {
+      selectedUserIds.value.push(m.id)
+    } else if (!group.selected && idx !== -1) {
+      selectedUserIds.value.splice(idx, 1)
+    }
+  }
+}
+
+function handleMemberToggle(group: GradeGroup) {
+  group.selected = group.members.every(m => selectedUserIds.value.includes(m.id))
+}
+
 async function handleSubmit() {
   try {
     if (editingId.value) {
       await announcementApi.update(editingId.value, form.value.title, form.value.content, form.value.pinned)
       ElMessage.success('更新成功')
+      showDialog.value = false
+      await loadAnnouncements()
     } else {
-      await announcementApi.create(form.value.title, form.value.content, form.value.pinned)
+      const res = await announcementApi.create(form.value.title, form.value.content, form.value.pinned)
       ElMessage.success('创建成功')
+      showDialog.value = false
+      await loadAnnouncements()
+
+      // Show notify dialog for new announcements
+      const annId = res.data?.id
+      if (annId) {
+        notifyAnnId.value = annId
+        selectedUserIds.value = []
+        await loadMembers()
+        showNotifyDialog.value = true
+      }
     }
-    showDialog.value = false
-    await loadAnnouncements()
   } catch {
     ElMessage.error('操作失败')
+  }
+}
+
+async function handleNotify() {
+  if (!notifyAnnId.value || selectedUserIds.value.length === 0) {
+    ElMessage.warning('请至少选择一位成员')
+    return
+  }
+
+  notifyLoading.value = true
+  try {
+    const res = await announcementApi.notify(notifyAnnId.value, selectedUserIds.value)
+    const sent = res.data?.sent || 0
+    ElMessage.success(`已成功通知 ${sent} 位成员`)
+    showNotifyDialog.value = false
+  } catch {
+    ElMessage.error('通知发送失败')
+  } finally {
+    notifyLoading.value = false
   }
 }
 
@@ -119,6 +225,7 @@ async function handleDelete(id: number) {
           <div class="ann-footer">
             <div class="ann-actions" v-if="authStore.isCaptain">
               <el-button size="small" @click="openEdit(ann)">编辑</el-button>
+              <el-button size="small" type="success" @click="openNotify(ann)">通知</el-button>
               <el-button size="small" type="danger" @click="handleDelete(ann.id)">删除</el-button>
             </div>
             <el-button class="detail-btn" size="small" type="primary" text @click="openDetail(ann)">
@@ -168,6 +275,43 @@ async function handleDelete(id: number) {
         <el-tag v-if="detailAnn.pinned" type="warning" size="small">置顶</el-tag>
       </div>
       <div v-if="detailAnn" class="detail-content markdown-body" v-html="renderMarkdown(detailAnn.content)"></div>
+    </el-dialog>
+
+    <!-- Notify Dialog -->
+    <el-dialog v-model="showNotifyDialog" title="通知成员" width="500px">
+      <p class="notify-desc">选择要发送邮件通知的成员：</p>
+      <div class="notify-members">
+        <div v-for="group in gradeGroups" :key="group.year" class="grade-group">
+          <el-checkbox
+            v-model="group.selected"
+            @change="handleGroupToggle(group)"
+            class="group-checkbox"
+          >
+            {{ group.label }}
+          </el-checkbox>
+          <div class="member-list">
+            <el-checkbox
+              v-for="m in group.members"
+              :key="m.id"
+              :model-value="selectedUserIds.includes(m.id)"
+              @change="(val: boolean) => {
+                if (val) selectedUserIds.push(m.id)
+                else selectedUserIds.splice(selectedUserIds.indexOf(m.id), 1)
+                handleMemberToggle(group)
+              }"
+              class="member-checkbox"
+            >
+              {{ m.nickname }}（{{ m.student_id }}）
+            </el-checkbox>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showNotifyDialog = false">跳过</el-button>
+        <el-button type="primary" :loading="notifyLoading" @click="handleNotify">
+          发送通知（{{ selectedUserIds.length }}人）
+        </el-button>
+      </template>
     </el-dialog>
   </div>
 </template>
@@ -407,5 +551,38 @@ async function handleDelete(id: number) {
   margin-top: 1.25rem;
   padding-top: 1rem;
   border-top: 1px solid var(--border);
+}
+
+/* Notify dialog */
+.notify-desc {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  margin-bottom: 1rem;
+}
+
+.notify-members {
+  max-height: 400px;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}
+
+.grade-group {
+  margin-bottom: 1rem;
+}
+
+.group-checkbox {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.member-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding-left: 1.5rem;
+}
+
+.member-checkbox {
+  font-size: 0.875rem;
 }
 </style>

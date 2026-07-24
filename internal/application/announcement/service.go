@@ -2,11 +2,19 @@ package announcement
 
 import (
 	"context"
+	"fmt"
+	"log"
+	"sync"
+
 	"SWPUCAT/internal/domain/announcement"
 	"SWPUCAT/internal/domain/shared"
 	"SWPUCAT/internal/domain/user"
 	"time"
 )
+
+type EmailService interface {
+	SendAnnouncementNotification(to string, title string, content string) error
+}
 
 type CreateRequest struct {
 	Title   string `json:"title" validate:"required,max=256"`
@@ -35,10 +43,11 @@ type AnnouncementService struct {
 	annRepo   announcement.Repository
 	publisher shared.EventPublisher
 	userRepo  user.Repository
+	emailSvc  EmailService
 }
 
-func NewAnnouncementService(annRepo announcement.Repository, publisher shared.EventPublisher, userRepo user.Repository) *AnnouncementService {
-	return &AnnouncementService{annRepo: annRepo, publisher: publisher, userRepo: userRepo}
+func NewAnnouncementService(annRepo announcement.Repository, publisher shared.EventPublisher, userRepo user.Repository, emailSvc EmailService) *AnnouncementService {
+	return &AnnouncementService{annRepo: annRepo, publisher: publisher, userRepo: userRepo, emailSvc: emailSvc}
 }
 
 func (s *AnnouncementService) Create(ctx context.Context, operatorID int64, operatorName string, req CreateRequest) (*AnnouncementDTO, error) {
@@ -126,4 +135,40 @@ func toDTO(a *announcement.Announcement) *AnnouncementDTO {
 		CreatedAt:  a.CreatedAt.Format(time.DateTime),
 		UpdatedAt:  a.UpdatedAt.Format(time.DateTime),
 	}
+}
+
+func (s *AnnouncementService) NotifyMembers(ctx context.Context, annID int64, userIDs []int64) (int, error) {
+	ann, err := s.annRepo.FindByID(ctx, annID)
+	if err != nil {
+		return 0, fmt.Errorf("announcement not found")
+	}
+
+	users, err := s.userRepo.FindByIDs(ctx, userIDs)
+	if err != nil {
+		return 0, err
+	}
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	successCount := 0
+
+	for _, u := range users {
+		if u.Email == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(email string) {
+			defer wg.Done()
+			if err := s.emailSvc.SendAnnouncementNotification(email, ann.Title, ann.Content); err != nil {
+				log.Printf("[ERROR] Failed to send announcement notification to %s: %v", email, err)
+				return
+			}
+			mu.Lock()
+			successCount++
+			mu.Unlock()
+		}(string(u.Email))
+	}
+
+	wg.Wait()
+	return successCount, nil
 }

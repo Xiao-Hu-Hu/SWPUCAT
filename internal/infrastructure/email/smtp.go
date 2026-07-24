@@ -97,3 +97,58 @@ func (s *SMTPService) SendVerificationCode(to string, code string) error {
 	log.Printf("[SMTP] Email sent to %s", to)
 	return client.Quit()
 }
+
+func (s *SMTPService) SendAnnouncementNotification(to string, title string, content string) error {
+	subject := fmt.Sprintf("SWPUCAT - 公告通知：%s", title)
+	body := fmt.Sprintf("公告标题：%s\r\n\r\n%s\r\n\r\n---\r\n此邮件由系统自动发送，请勿回复。", title, content)
+
+	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s",
+		s.from, to, subject, body)
+
+	addr := fmt.Sprintf("%s:%d", s.host, s.port)
+
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("failed to connect to SMTP server: %w", err)
+	}
+	defer conn.Close()
+
+	client, err := smtp.NewClient(conn, s.host)
+	if err != nil {
+		return fmt.Errorf("failed to create SMTP client: %w", err)
+	}
+	defer client.Close()
+
+	tlsConfig := &tls.Config{ServerName: s.host}
+	if err = client.StartTLS(tlsConfig); err != nil {
+		return fmt.Errorf("failed to start TLS: %w", err)
+	}
+
+	auth := smtp.PlainAuth("", s.username, s.password, s.host)
+	if err = client.Auth(auth); err != nil {
+		return fmt.Errorf("authentication failed: %w", err)
+	}
+
+	if err = client.Mail(s.from); err != nil {
+		return fmt.Errorf("failed to set sender: %w", err)
+	}
+	if err = client.Rcpt(to); err != nil {
+		return fmt.Errorf("failed to set recipient: %w", err)
+	}
+
+	writer, err := client.Data()
+	if err != nil {
+		return fmt.Errorf("failed to start data: %w", err)
+	}
+	_, err = writer.Write([]byte(msg))
+	if err != nil {
+		return fmt.Errorf("failed to write data: %w", err)
+	}
+	err = writer.Close()
+	if err != nil {
+		return fmt.Errorf("failed to close data: %w", err)
+	}
+
+	log.Printf("[SMTP] Announcement notification sent to %s", to)
+	return client.Quit()
+}

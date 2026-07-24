@@ -12,5 +12,8 @@ export const announcementApi = {
   },
   delete(id: number) {
     return api.delete(`/announcements/${id}`)
+  },
+  notify(id: number, userIds: number[]) {
+    return api.post(`/announcements/${id}/notify`, { user_ids: userIds })
   }
 }

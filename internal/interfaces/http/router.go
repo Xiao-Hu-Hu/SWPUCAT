@@ -92,6 +92,7 @@ func (r *Router) Setup() *gin.Engine {
 			protected.POST("/announcements", r.annHandler.Create)
 			protected.PUT("/announcements/:id", r.annHandler.Update)
 			protected.DELETE("/announcements/:id", r.annHandler.Delete)
+			protected.POST("/announcements/:id/notify", r.annHandler.Notify)
 
 			// Checkin
 			protected.POST("/checkin/clock-in", r.checkinHandler.ClockIn)

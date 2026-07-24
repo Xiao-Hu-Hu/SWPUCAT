@@ -81,3 +81,33 @@ func (h *AnnouncementHandler) List(c *gin.Context) {
 
 	Success(c, anns)
 }
+
+func (h *AnnouncementHandler) Notify(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		BadRequest(c, "invalid announcement id")
+		return
+	}
+
+	var req struct {
+		UserIDs []int64 `json:"user_ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid request body")
+		return
+	}
+
+	if len(req.UserIDs) == 0 {
+		BadRequest(c, "user_ids is required")
+		return
+	}
+
+	count, err := h.annSvc.NotifyMembers(c.Request.Context(), id, req.UserIDs)
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, gin.H{"sent": count})
+}
