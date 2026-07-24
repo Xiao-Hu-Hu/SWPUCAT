@@ -58,7 +58,7 @@ const reportLoading = ref(false)
 async function loadMembers() {
   try {
     const res = await memberApi.list()
-    members.value = res.data || res || []
+    members.value = (res.data || res || []).filter((m: Member) => m.role !== 'super_admin')
   } catch {
     members.value = []
   }
