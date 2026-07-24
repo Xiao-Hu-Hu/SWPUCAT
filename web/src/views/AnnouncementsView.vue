@@ -103,7 +103,7 @@ async function handleDelete(id: number) {
         </el-button>
       </div>
 
-      <div class="announcements-grid">
+      <div class="announcements-list">
         <div v-for="ann in paginatedAnnouncements" :key="ann.id" class="announcement-item">
           <div class="ann-header">
             <div class="ann-title">
@@ -115,7 +115,7 @@ async function handleDelete(id: number) {
               <span>{{ ann.created_at }}</span>
             </div>
           </div>
-          <div class="ann-content">{{ ann.content }}</div>
+          <div class="ann-content markdown-body" v-html="renderMarkdown(ann.content)"></div>
           <div class="ann-footer">
             <div class="ann-actions" v-if="authStore.isCaptain">
               <el-button size="small" @click="openEdit(ann)">编辑</el-button>
@@ -199,10 +199,10 @@ async function handleDelete(id: number) {
   color: var(--text);
 }
 
-/* Card grid */
-.announcements-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+/* Card list */
+.announcements-list {
+  display: flex;
+  flex-direction: column;
   gap: 0.75rem;
 }
 
@@ -212,9 +212,6 @@ async function handleDelete(id: number) {
   border-radius: var(--radius);
   padding: 1rem;
   transition: border-color 0.15s ease;
-  display: flex;
-  flex-direction: column;
-  height: 180px;
 }
 
 .announcement-item:hover {
@@ -226,7 +223,6 @@ async function handleDelete(id: number) {
   justify-content: space-between;
   align-items: flex-start;
   margin-bottom: 0.5rem;
-  flex-shrink: 0;
 }
 
 .ann-title {
@@ -256,17 +252,29 @@ async function handleDelete(id: number) {
   margin-left: 0.5rem;
 }
 
-/* Truncated content */
+/* Truncated content with markdown */
 .ann-content {
   font-size: 0.875rem;
-  color: var(--text-secondary);
   line-height: 1.5;
-  flex: 1;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   text-overflow: ellipsis;
+  margin-bottom: 0.75rem;
+}
+
+.ann-content :deep(p) {
+  margin: 0;
+}
+
+.ann-content :deep(table),
+.ann-content :deep(pre),
+.ann-content :deep(blockquote),
+.ann-content :deep(h1),
+.ann-content :deep(h2),
+.ann-content :deep(h3) {
+  display: none;
 }
 
 /* Footer with actions */
@@ -274,8 +282,6 @@ async function handleDelete(id: number) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 0.5rem;
-  flex-shrink: 0;
 }
 
 .ann-actions {
