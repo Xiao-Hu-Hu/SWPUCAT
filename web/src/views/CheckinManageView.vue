@@ -24,17 +24,17 @@ const makeupForm = ref({
 })
 const makeupLoading = ref(false)
 
-// Requirements
+// Requirements (frontend uses hours, backend uses minutes)
 interface Requirement {
   grade: number
-  minutes: number
+  hours: number
 }
 const gradeNames: Record<number, string> = { 1: '大一', 2: '大二', 3: '大三', 4: '大四' }
 const requirements = ref<Requirement[]>([
-  { grade: 1, minutes: 600 },
-  { grade: 2, minutes: 480 },
-  { grade: 3, minutes: 360 },
-  { grade: 4, minutes: 240 }
+  { grade: 1, hours: 10 },
+  { grade: 2, hours: 8 },
+  { grade: 3, hours: 6 },
+  { grade: 4, hours: 4 }
 ])
 const requirementsLoading = ref(false)
 
@@ -55,7 +55,10 @@ async function loadRequirements() {
     const res = await checkinApi.getRequirements()
     const data = res.data || res
     if (data?.requirements?.length) {
-      requirements.value = data.requirements
+      requirements.value = data.requirements.map((r: any) => ({
+        grade: r.grade,
+        hours: Math.round(r.minutes / 60)
+      }))
     }
   } catch {
     // keep defaults
@@ -95,7 +98,11 @@ async function handleMakeup() {
 async function handleSaveRequirements() {
   requirementsLoading.value = true
   try {
-    await checkinApi.setRequirements(requirements.value)
+    const payload = requirements.value.map(r => ({
+      grade: r.grade,
+      minutes: r.hours * 60
+    }))
+    await checkinApi.setRequirements(payload)
     ElMessage.success('打卡要求已保存')
   } catch {
     ElMessage.error('保存失败')
@@ -181,13 +188,13 @@ onMounted(() => {
                 {{ gradeNames[row.grade] || `大${row.grade}` }}
               </template>
             </el-table-column>
-            <el-table-column label="每周要求时长（分钟）">
+            <el-table-column label="每周要求时长（小时）">
               <template #default="{ row }">
                 <el-input-number
-                  v-model="row.minutes"
+                  v-model="row.hours"
                   :min="0"
-                  :max="10080"
-                  :step="60"
+                  :max="168"
+                  :step="1"
                 />
               </template>
             </el-table-column>
