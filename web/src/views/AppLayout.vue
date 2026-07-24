@@ -15,6 +15,7 @@ const menuItems = [
   { path: '/app/members', icon: 'User', title: '成员管理' },
   { path: '/app/approvals', icon: 'Check', title: '审批管理' },
   { path: '/app/invitations', icon: 'Link', title: '邀请码管理', show: authStore.isSuperAdmin || authStore.isCaptain },
+  { path: '/app/checkin-manage', icon: 'Management', title: '打卡管理', show: authStore.isSuperAdmin || authStore.isCaptain },
   { path: '/app/settings', icon: 'Setting', title: '设置' }
 ]
 

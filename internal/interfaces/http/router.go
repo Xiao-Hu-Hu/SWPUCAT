@@ -125,6 +125,12 @@ func (r *Router) Setup() *gin.Engine {
 			// Invitation codes (super_admin and captain only)
 			protected.POST("/invitations/generate", r.invitationHandler.GenerateCode)
 			protected.GET("/invitations/my", r.invitationHandler.GetMyCodes)
+
+			// Checkin Management (captain/super_admin only)
+			protected.POST("/checkin/makeup", RBACMiddleware("captain", "super_admin"), r.checkinHandler.Makeup)
+			protected.GET("/checkin/requirements", r.checkinHandler.GetRequirements)
+			protected.POST("/checkin/requirements", RBACMiddleware("captain", "super_admin"), r.checkinHandler.SetRequirements)
+			protected.POST("/checkin/report", RBACMiddleware("captain", "super_admin"), r.checkinHandler.PublishReport)
 		}
 	}
 

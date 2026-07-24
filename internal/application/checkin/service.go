@@ -2,10 +2,17 @@ package checkin
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"math"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
 	"SWPUCAT/internal/domain/checkin"
 	"SWPUCAT/internal/domain/shared"
 	"SWPUCAT/internal/domain/user"
-	"time"
 )
 
 type CheckinRecordDTO struct {
@@ -21,21 +28,29 @@ type CheckinStatusDTO struct {
 	ClockOut string `json:"clock_out,omitempty"`
 }
 
+type SettingsRepository interface {
+	Get(ctx context.Context, key string) (string, error)
+	Set(ctx context.Context, key, value string) error
+}
+
 type CheckinService struct {
-	checkinRepo checkin.Repository
-	userRepo    user.Repository
-	publisher   shared.EventPublisher
+	checkinRepo  checkin.Repository
+	userRepo     user.Repository
+	publisher    shared.EventPublisher
+	settingsRepo SettingsRepository
 }
 
 func NewCheckinService(
 	checkinRepo checkin.Repository,
 	userRepo user.Repository,
 	publisher shared.EventPublisher,
+	settingsRepo SettingsRepository,
 ) *CheckinService {
 	return &CheckinService{
-		checkinRepo: checkinRepo,
-		userRepo:    userRepo,
-		publisher:   publisher,
+		checkinRepo:  checkinRepo,
+		userRepo:     userRepo,
+		publisher:    publisher,
+		settingsRepo: settingsRepo,
 	}
 }
 
@@ -374,4 +389,169 @@ func (s *CheckinService) GetAllTodayRecords(ctx context.Context) ([]TodayRecordD
 		result = append(result, dto)
 	}
 	return result, nil
+}
+
+func (s *CheckinService) Makeup(ctx context.Context, req MakeupRequest) error {
+	// Validate user exists
+	_, err := s.userRepo.FindByID(ctx, req.UserID)
+	if err != nil {
+		return fmt.Errorf("user not found")
+	}
+
+	// Validate date format
+	if _, err := time.Parse("2006-01-02", req.Date); err != nil {
+		return fmt.Errorf("invalid date format, use YYYY-MM-DD")
+	}
+
+	// Create in record
+	inRecord := &checkin.CheckinRecord{
+		UserID:    req.UserID,
+		Type:      checkin.CheckinTypeIn,
+		Date:      req.Date,
+		Time:      "08:00:00",
+		CreatedAt: time.Now(),
+	}
+	if err := s.checkinRepo.Create(ctx, inRecord); err != nil {
+		return err
+	}
+
+	// Calculate out time
+	inTime, _ := time.Parse("15:04:05", "08:00:00")
+	outTime := inTime.Add(time.Duration(req.Minutes) * time.Minute)
+
+	outRecord := &checkin.CheckinRecord{
+		UserID:    req.UserID,
+		Type:      checkin.CheckinTypeOut,
+		Date:      req.Date,
+		Time:      outTime.Format("15:04:05"),
+		CreatedAt: time.Now(),
+	}
+	return s.checkinRepo.Create(ctx, outRecord)
+}
+
+func (s *CheckinService) GetRequirements(ctx context.Context) RequirementsDTO {
+	defaults := RequirementsDTO{
+		Requirements: []CheckinRequirement{
+			{Grade: 1, Minutes: 600},
+			{Grade: 2, Minutes: 480},
+			{Grade: 3, Minutes: 360},
+			{Grade: 4, Minutes: 240},
+		},
+	}
+
+	val, err := s.settingsRepo.Get(ctx, "checkin_requirements")
+	if err != nil || val == "" {
+		return defaults
+	}
+
+	var result RequirementsDTO
+	if err := json.Unmarshal([]byte(val), &result); err != nil {
+		return defaults
+	}
+	if len(result.Requirements) == 0 {
+		return defaults
+	}
+	return result
+}
+
+func (s *CheckinService) SetRequirements(ctx context.Context, req RequirementsDTO) error {
+	data, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	return s.settingsRepo.Set(ctx, "checkin_requirements", string(data))
+}
+
+func (s *CheckinService) PublishReport(ctx context.Context) (string, string, error) {
+	// Get weekly stats
+	stats, err := s.GetStatsByPeriod(ctx, "week")
+	if err != nil {
+		return "", "", err
+	}
+
+	// Get all users for student IDs
+	users, err := s.userRepo.FindAll(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	userMap := make(map[int64]*user.User)
+	for _, u := range users {
+		userMap[u.ID] = u
+	}
+
+	// Get requirements
+	requirements := s.GetRequirements(ctx)
+	reqMap := make(map[int]int)
+	for _, r := range requirements.Requirements {
+		reqMap[r.Grade] = r.Minutes
+	}
+
+	// Build report rows
+	now := time.Now()
+	weekday := now.Weekday()
+	if weekday == time.Sunday {
+		weekday = 7
+	}
+	weekStart := now.AddDate(0, 0, -int(weekday-1)).Format("2006-01-02")
+	weekEnd := now.Format("2006-01-02")
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("## 本周打卡报告（%s ~ %s）\n\n", weekStart, weekEnd))
+	sb.WriteString("| 姓名 | 学号 | 年级 | 打卡时长 | 要求时长 | 状态 |\n")
+	sb.WriteString("|------|------|------|----------|----------|------|\n")
+
+	// Sort stats by nickname for consistent output
+	sort.Slice(stats, func(i, j int) bool {
+		return stats[i].Nickname < stats[j].Nickname
+	})
+
+	for _, stat := range stats {
+		u := userMap[stat.UserID]
+		studentID := ""
+		grade := 0
+		if u != nil {
+			studentID = string(u.StudentID)
+			grade = gradeFromStudentID(studentID)
+		}
+
+		requiredMin := reqMap[grade]
+		totalMin := stat.TotalMinutes
+		shortfall := float64(requiredMin) - totalMin
+
+		status := "达标"
+		if shortfall > 0 {
+			status = fmt.Sprintf("-%.1fh", math.Round(shortfall*10)/10/60)
+		}
+
+		sb.WriteString(fmt.Sprintf("| %s | %s | %d | %.1fh | %.1fh | %s |\n",
+			stat.Nickname,
+			studentID,
+			grade,
+			math.Round(totalMin*10)/10/60,
+			math.Round(float64(requiredMin)*10)/10/60,
+			status,
+		))
+	}
+
+	title := fmt.Sprintf("本周打卡报告（%s ~ %s）", weekStart, weekEnd)
+	return title, sb.String(), nil
+}
+
+func gradeFromStudentID(studentID string) int {
+	if len(studentID) < 4 {
+		return 0
+	}
+	enrollmentYear, err := strconv.Atoi(studentID[:4])
+	if err != nil {
+		return 0
+	}
+	currentYear := time.Now().Year()
+	grade := currentYear - enrollmentYear + 1
+	if grade < 1 {
+		grade = 1
+	}
+	if grade > 4 {
+		grade = 4
+	}
+	return grade
 }

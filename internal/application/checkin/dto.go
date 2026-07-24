@@ -25,3 +25,18 @@ type TodayRecordDTO struct {
 	StudentID   string `json:"student_id"`
 	Avatar      string `json:"avatar"`
 }
+
+type MakeupRequest struct {
+	UserID  int64  `json:"user_id" validate:"required"`
+	Date    string `json:"date" validate:"required"`
+	Minutes int    `json:"minutes" validate:"required,min=1,max=480"`
+}
+
+type CheckinRequirement struct {
+	Grade   int `json:"grade"`
+	Minutes int `json:"minutes"`
+}
+
+type RequirementsDTO struct {
+	Requirements []CheckinRequirement `json:"requirements"`
+}

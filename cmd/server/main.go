@@ -43,6 +43,7 @@ func main() {
 	approvalRepo := repository.NewApprovalRepo(db)
 	codeRepo := repository.NewVerificationCodeRepo(db)
 	invitationRepo := repository.NewInvitationRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
 
 	// Initialize infrastructure services
 	jwtSvc := auth.NewJWTService(&cfg.JWT)
@@ -58,7 +59,7 @@ func main() {
 	userSvc := user.NewUserApplicationService(userRepo, hasher, jwtSvc, publisher, emailSvc, codeRepo, invitationRepo)
 	annSvc := announcement.NewAnnouncementService(annRepo, publisher, userRepo)
 	invitationSvc := invitation.NewInvitationService(invitationRepo, userRepo)
-	checkinSvc := checkin.NewCheckinService(checkinRepo, userRepo, publisher)
+	checkinSvc := checkin.NewCheckinService(checkinRepo, userRepo, publisher, settingsRepo)
 	knowledgeSvc := knowledge.NewKnowledgeService(knowledgeRepo, publisher)
 	approvalSvc := approval.NewApprovalService(approvalRepo, knowledgeRepo, publisher)
 	dashboardSvc := dashboard.NewDashboardService(userRepo, checkinRepo, annRepo, knowledgeRepo)
@@ -68,7 +69,7 @@ func main() {
 	userHandler := httpInterface.NewUserHandler(userSvc, localStorage)
 	dashboardHandler := httpInterface.NewDashboardHandler(dashboardSvc)
 	annHandler := httpInterface.NewAnnouncementHandler(annSvc)
-	checkinHandler := httpInterface.NewCheckinHandler(checkinSvc)
+	checkinHandler := httpInterface.NewCheckinHandler(checkinSvc, annSvc)
 	knowledgeHandler := httpInterface.NewKnowledgeHandler(knowledgeSvc, localStorage)
 	approvalHandler := httpInterface.NewApprovalHandler(approvalSvc)
 	invitationHandler := httpInterface.NewInvitationHandler(invitationSvc)
