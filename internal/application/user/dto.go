@@ -30,15 +30,16 @@ type RefreshTokenRequest struct {
 }
 
 type UserDTO struct {
-	ID           int64  `json:"id"`
-	Username     string `json:"username"`
-	StudentID    string `json:"student_id,omitempty"`
-	Email        string `json:"email,omitempty"`
-	Nickname     string `json:"nickname"`
-	Avatar       string `json:"avatar,omitempty"`
-	Role         string `json:"role"`
-	JoinedAt     string `json:"joined_at"`
-	CheckinCount int64  `json:"checkin_count"`
+	ID            int64  `json:"id"`
+	Username      string `json:"username"`
+	StudentID     string `json:"student_id,omitempty"`
+	Email         string `json:"email,omitempty"`
+	Nickname      string `json:"nickname"`
+	Avatar        string `json:"avatar,omitempty"`
+	TechDirection string `json:"tech_direction,omitempty"`
+	Role          string `json:"role"`
+	JoinedAt      string `json:"joined_at"`
+	CheckinCount  int64  `json:"checkin_count"`
 }
 
 type ChangePasswordRequest struct {
@@ -52,12 +53,13 @@ type TransferCaptainRequest struct {
 }
 
 type MemberDTO struct {
-	ID           int64  `json:"id"`
-	Nickname     string `json:"nickname"`
-	Username     string `json:"username"`
-	StudentID    string `json:"student_id,omitempty"`
-	Avatar       string `json:"avatar,omitempty"`
-	Role         string `json:"role"`
-	JoinedAt     string `json:"joined_at"`
-	CheckinCount int64  `json:"checkin_count"`
+	ID            int64  `json:"id"`
+	Nickname      string `json:"nickname"`
+	Username      string `json:"username"`
+	StudentID     string `json:"student_id,omitempty"`
+	Avatar        string `json:"avatar,omitempty"`
+	TechDirection string `json:"tech_direction,omitempty"`
+	Role          string `json:"role"`
+	JoinedAt      string `json:"joined_at"`
+	CheckinCount  int64  `json:"checkin_count"`
 }

@@ -147,6 +147,12 @@ async function handleRemoveMember(id: number) {
           </template>
         </el-table-column>
         <el-table-column prop="student_id" label="学号" width="140" />
+        <el-table-column prop="tech_direction" label="技术方向" width="140">
+          <template #default="{ row }">
+            <el-tag v-if="row.tech_direction" type="primary" size="small">{{ row.tech_direction }}</el-tag>
+            <span v-else class="text-muted">未设置</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="role" label="角色" width="120">
           <template #default="{ row }">
             <el-tag :type="row.role === 'super_admin' ? 'danger' : row.role === 'captain' ? 'warning' : 'info'">

@@ -10,6 +10,7 @@ type UserModel struct {
 	PasswordHash    string    `gorm:"size:256;not null"`
 	Nickname        string    `gorm:"size:32;not null"`
 	Avatar          string    `gorm:"size:256"`
+	TechDirection   string    `gorm:"size:32"`
 	Role            string    `gorm:"size:16;not null;default:member"`
 	CheckinCount    int64     `gorm:"not null;default:0"`
 	LastCheckinDate string    `gorm:"size:10"`

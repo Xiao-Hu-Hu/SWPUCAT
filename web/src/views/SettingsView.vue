@@ -10,6 +10,16 @@ const router = useRouter()
 const email = ref('')
 const nickname = ref(authStore.user?.nickname || '')
 const avatar = ref(authStore.user?.avatar || '')
+const techDirection = ref('')
+
+const techOptions = [
+  'Java后端',
+  'Go后端',
+  'Web前端',
+  'Python机器学习',
+  'Python深度学习',
+  '游戏开发'
+]
 const showPasswordDialog = ref(false)
 
 const passwordForm = ref({
@@ -36,6 +46,7 @@ onMounted(async () => {
     email.value = res.data.email || ''
     nickname.value = res.data.nickname || ''
     avatar.value = res.data.avatar || ''
+    techDirection.value = res.data.tech_direction || ''
   } catch {
     console.error('Failed to load profile')
   }
@@ -67,6 +78,7 @@ async function handleAvatarChange(file: any) {
 async function handleSaveProfile() {
   try {
     await userApi.updateProfile(nickname.value)
+    await userApi.updateTechDirection(techDirection.value)
     if (authStore.user) {
       authStore.user.nickname = nickname.value
       localStorage.setItem('user', JSON.stringify(authStore.user))
@@ -191,6 +203,11 @@ async function handleChangePassword() {
         </el-form-item>
         <el-form-item label="昵称">
           <el-input v-model="nickname" placeholder="请输入昵称" />
+        </el-form-item>
+        <el-form-item label="技术方向">
+          <el-select v-model="techDirection" placeholder="请选择技术方向" clearable style="width: 100%">
+            <el-option v-for="item in techOptions" :key="item" :label="item" :value="item" />
+          </el-select>
         </el-form-item>
         <el-form-item label="邮箱">
           <el-input :value="email" disabled />

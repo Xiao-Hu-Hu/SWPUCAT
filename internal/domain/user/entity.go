@@ -17,18 +17,19 @@ var (
 )
 
 type User struct {
-	ID           int64
-	Username     Username
-	StudentID    StudentID
-	Email        string
-	Nickname     Nickname
-	Avatar       string
-	PasswordHash PasswordHash
-	Role         Role
-	JoinedAt     time.Time
-	CheckinCount int64
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID            int64
+	Username      Username
+	StudentID     StudentID
+	Email         string
+	Nickname      Nickname
+	Avatar        string
+	TechDirection string
+	PasswordHash  PasswordHash
+	Role          Role
+	JoinedAt      time.Time
+	CheckinCount  int64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 func NewUser(username Username, nickname Nickname, passwordHash PasswordHash) *User {

@@ -283,6 +283,15 @@ func (s *UserApplicationService) UpdateAvatar(ctx context.Context, userID int64,
 	return s.userRepo.Update(ctx, u)
 }
 
+func (s *UserApplicationService) UpdateTechDirection(ctx context.Context, userID int64, techDirection string) error {
+	u, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	u.TechDirection = techDirection
+	return s.userRepo.Update(ctx, u)
+}
+
 func (s *UserApplicationService) ChangePassword(ctx context.Context, userID int64, req ChangePasswordRequest) error {
 	u, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
@@ -322,14 +331,15 @@ func (s *UserApplicationService) ListMembers(ctx context.Context) ([]MemberDTO, 
 	result := make([]MemberDTO, 0, len(users))
 	for _, u := range users {
 		result = append(result, MemberDTO{
-			ID:           u.ID,
-			Nickname:     string(u.Nickname),
-			Username:     string(u.Username),
-			StudentID:    string(u.StudentID),
-			Avatar:       u.Avatar,
-			Role:         string(u.Role),
-			JoinedAt:     u.JoinedAt.Format("2006-01-02"),
-			CheckinCount: u.CheckinCount,
+			ID:            u.ID,
+			Nickname:      string(u.Nickname),
+			Username:      string(u.Username),
+			StudentID:     string(u.StudentID),
+			Avatar:        u.Avatar,
+			TechDirection: u.TechDirection,
+			Role:          string(u.Role),
+			JoinedAt:      u.JoinedAt.Format("2006-01-02"),
+			CheckinCount:  u.CheckinCount,
 		})
 	}
 	return result, nil
@@ -354,14 +364,15 @@ func (s *UserApplicationService) generateTokens(u *user.User) (*LoginResponse, e
 
 func toUserDTO(u *user.User) *UserDTO {
 	return &UserDTO{
-		ID:           u.ID,
-		Username:     string(u.Username),
-		StudentID:    string(u.StudentID),
-		Email:        string(u.Email),
-		Nickname:     string(u.Nickname),
-		Avatar:       u.Avatar,
-		Role:         string(u.Role),
-		JoinedAt:     u.JoinedAt.Format("2006-01-02"),
-		CheckinCount: u.CheckinCount,
+		ID:            u.ID,
+		Username:      string(u.Username),
+		StudentID:     string(u.StudentID),
+		Email:         string(u.Email),
+		Nickname:      string(u.Nickname),
+		Avatar:        u.Avatar,
+		TechDirection: u.TechDirection,
+		Role:          string(u.Role),
+		JoinedAt:      u.JoinedAt.Format("2006-01-02"),
+		CheckinCount:  u.CheckinCount,
 	}
 }

@@ -7,6 +7,9 @@ export const userApi = {
   updateProfile(nickname: string) {
     return api.put('/profile', { nickname })
   },
+  updateTechDirection(techDirection: string) {
+    return api.put('/profile/tech-direction', { tech_direction: techDirection })
+  },
   changePassword(oldPassword: string, newPassword: string, verificationCode: string) {
     return api.put('/profile/password', {
       old_password: oldPassword,

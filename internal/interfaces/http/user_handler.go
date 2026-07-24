@@ -67,6 +67,25 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	Success(c, nil)
 }
 
+func (h *UserHandler) UpdateTechDirection(c *gin.Context) {
+	userID := GetUserID(c)
+
+	var req struct {
+		TechDirection string `json:"tech_direction"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid request body")
+		return
+	}
+
+	if err := h.userSvc.UpdateTechDirection(c.Request.Context(), userID, req.TechDirection); err != nil {
+		InternalError(c, "failed to update tech direction")
+		return
+	}
+
+	Success(c, nil)
+}
+
 func (h *UserHandler) UploadAvatar(c *gin.Context) {
 	userID := GetUserID(c)
 
