@@ -113,10 +113,14 @@ async function loadMembers() {
     }
 
     gradeGroups.value = Array.from(groups.entries())
-      .sort((a, b) => b[0].localeCompare(a[0]))
+      .sort((a, b) => {
+        if (a[0] === '未知') return 1
+        if (b[0] === '未知') return -1
+        return b[0].localeCompare(a[0])
+      })
       .map(([year, members]) => ({
         year,
-        label: `${year}届`,
+        label: year === '未知' ? '未知' : `${year}级`,
         members,
         selected: false
       }))
