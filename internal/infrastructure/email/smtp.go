@@ -10,6 +10,7 @@ import (
 	"net/smtp"
 
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
 )
 
 type SMTPService struct {
@@ -103,7 +104,15 @@ func (s *SMTPService) SendVerificationCode(to string, code string) error {
 
 func markdownToHTML(md string) string {
 	var buf bytes.Buffer
-	if err := goldmark.New().Convert([]byte(md), &buf); err != nil {
+	mdParser := goldmark.New(
+		goldmark.WithExtensions(
+			extension.Table,
+			extension.Strikethrough,
+			extension.Linkify,
+			extension.TaskList,
+		),
+	)
+	if err := mdParser.Convert([]byte(md), &buf); err != nil {
 		return "<p>" + md + "</p>"
 	}
 	return buf.String()
@@ -114,7 +123,18 @@ func (s *SMTPService) SendAnnouncementNotification(to string, title string, cont
 	htmlContent := markdownToHTML(content)
 	body := fmt.Sprintf(`<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:640px;margin:0 auto;padding:20px;">
   <h2 style="color:#1a1a1a;border-bottom:2px solid #409eff;padding-bottom:10px;">%s</h2>
-  <div style="line-height:1.7;color:#333;font-size:15px;">%s</div>
+  <div style="line-height:1.7;color:#333;font-size:15px;">
+    <style>
+      table{border-collapse:collapse;width:100%%;margin:1em 0;font-size:14px}
+      th,td{border:1px solid #ddd;padding:8px 12px;text-align:left}
+      th{background:#f5f5f5;font-weight:600}
+      tr:nth-child(even){background:#fafafa}
+      code{background:#f0f0f0;padding:2px 6px;border-radius:3px;font-size:13px}
+      pre{background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto}
+      blockquote{border-left:3px solid #409eff;padding-left:12px;color:#666;margin:1em 0}
+    </style>
+    %s
+  </div>
   <hr style="border:none;border-top:1px solid #eee;margin:24px 0;">
   <p style="color:#999;font-size:12px;">此邮件由 SWPUCAT 系统自动发送，请勿回复。</p>
 </div>`, title, htmlContent)
