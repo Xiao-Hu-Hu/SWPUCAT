@@ -18,7 +18,8 @@ export const knowledgeApi = {
       formData.append('description', description)
     }
     return api.post('/knowledge/files', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 0
     })
   },
   deleteItem(id: number) {
@@ -27,6 +28,7 @@ export const knowledgeApi = {
   downloadFile(id: number, onProgress?: (percent: number) => void) {
     return api.get(`/knowledge/download/${id}`, {
       responseType: 'blob',
+      timeout: 0,
       onDownloadProgress: (progressEvent) => {
         if (onProgress && progressEvent.total) {
           const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)

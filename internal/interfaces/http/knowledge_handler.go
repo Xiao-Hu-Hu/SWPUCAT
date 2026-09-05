@@ -4,12 +4,17 @@ import (
 	"SWPUCAT/internal/application/knowledge"
 	"SWPUCAT/internal/domain/shared"
 	"SWPUCAT/internal/infrastructure/storage"
+	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
+
+// maxUploadSize 单个文件上传大小上限（1GB）
+const maxUploadSize = 1 << 30
 
 type KnowledgeHandler struct {
 	knowledgeSvc *knowledge.KnowledgeService
@@ -41,12 +46,32 @@ func (h *KnowledgeHandler) CreateLink(c *gin.Context) {
 }
 
 func (h *KnowledgeHandler) UploadFile(c *gin.Context) {
+	// 第一层：Content-Length 预检，超过 1GB 直接拒绝
+	if c.Request.ContentLength > maxUploadSize {
+		RequestTooLarge(c, "file too large: maximum 1GB")
+		return
+	}
+
+	// 第二层：body 读取时强制限制，防止 chunked 或伪造 Content-Length 绕过
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUploadSize)
+
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			RequestTooLarge(c, "file too large: maximum 1GB")
+			return
+		}
 		BadRequest(c, "file is required")
 		return
 	}
 	defer file.Close()
+
+	// 第三层：multipart part 头里声明的文件大小兜底校验
+	if header.Size > maxUploadSize {
+		RequestTooLarge(c, "file too large: maximum 1GB")
+		return
+	}
 
 	// Get category ID from form
 	categoryIDStr := c.PostForm("category_id")

@@ -55,6 +55,10 @@ func Conflict(c *gin.Context, message string) {
 	Error(c, http.StatusConflict, 409, message)
 }
 
+func RequestTooLarge(c *gin.Context, message string) {
+	Error(c, http.StatusRequestEntityTooLarge, 413, message)
+}
+
 func InternalError(c *gin.Context, message string) {
 	Error(c, http.StatusInternalServerError, 500, message)
 }

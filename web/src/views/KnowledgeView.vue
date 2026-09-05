@@ -138,6 +138,11 @@ async function handleUploadFile() {
     ElMessage.warning('请选择分类')
     return
   }
+  const MAX_SIZE = 1024 * 1024 * 1024
+  if (selectedFile.value.size > MAX_SIZE) {
+    ElMessage.error('文件大小超过 1GB 限制')
+    return
+  }
   uploading.value = true
   try {
     await knowledgeApi.uploadFile(selectedFile.value, uploadForm.value.category_id, uploadForm.value.description)
@@ -151,8 +156,14 @@ async function handleUploadFile() {
     uploadForm.value = { description: '', category_id: 0 }
     await loadItems()
     await loadCategories()
-  } catch {
-    ElMessage.error('上传失败')
+  } catch (err: any) {
+    if (err?.code === 'ECONNABORTED') {
+      ElMessage.error('上传超时，请检查网络或重试')
+    } else if (err?.response?.status === 413) {
+      ElMessage.error(err.response?.data?.message || '文件过大，上传失败')
+    } else {
+      ElMessage.error('上传失败')
+    }
   } finally {
     uploading.value = false
   }
