@@ -40,6 +40,9 @@ pgdata/
 redisdata/
 miniodata/
 
+# Backups
+backups/
+
 # Logs
 *.log
 
