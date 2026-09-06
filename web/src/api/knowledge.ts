@@ -1,4 +1,10 @@
 import api from './index'
+import type { AxiosProgressEvent } from 'axios'
+
+interface UploadOptions {
+  onProgress?: (event: AxiosProgressEvent) => void
+  signal?: AbortSignal
+}
 
 export const knowledgeApi = {
   listItems(categoryId?: number, search?: string) {
@@ -10,7 +16,7 @@ export const knowledgeApi = {
   createLink(name: string, url: string, categoryId: number, description?: string) {
     return api.post('/knowledge/links', { name, url, category_id: categoryId, description: description || '' })
   },
-  uploadFile(file: File, categoryId: number, description?: string) {
+  uploadFile(file: File, categoryId: number, description?: string, options: UploadOptions = {}) {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('category_id', categoryId.toString())
@@ -18,8 +24,9 @@ export const knowledgeApi = {
       formData.append('description', description)
     }
     return api.post('/knowledge/files', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 0
+      timeout: 0,
+      onUploadProgress: options.onProgress,
+      signal: options.signal
     })
   },
   deleteItem(id: number) {

@@ -1,12 +1,24 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import type { AxiosProgressEvent } from 'axios'
 import { knowledgeApi } from '@/api/knowledge'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import type { UploadFile, UploadUserFile } from 'element-plus'
 import { marked } from 'marked'
 
 const authStore = useAuthStore()
 const uploading = ref(false)
+const uploadPhase = ref<'sending' | 'saving'>('sending')
+const uploadPercent = ref<number | null>(0)
+const uploadedBytes = ref(0)
+const uploadTotal = ref<number | undefined>()
+const uploadSpeed = ref(0)
+const uploadRemaining = ref<number | undefined>()
+const refreshingCount = ref(0)
+let uploadController: AbortController | undefined
+let uploadStartedAt = 0
+let disposed = false
 const downloading = ref<Record<number, number>>({})
 const categories = ref<Array<{ id: number; name: string; is_system: boolean; count: number }>>([])
 const items = ref<Array<{
@@ -17,6 +29,7 @@ const items = ref<Array<{
   url: string
   file_size: string
   category_id: number
+  uploader_id: number
   uploader_name: string
   approved: boolean
   created_at: string
@@ -42,18 +55,23 @@ const linkForm = ref({ name: '', url: '', description: '', category_id: 0 })
 const categoryForm = ref({ name: '' })
 const uploadForm = ref({ description: '', category_id: 0 })
 const selectedFile = ref<File | null>(null)
+const fileList = ref<UploadUserFile[]>([])
 
-onMounted(async () => {
-  await loadCategories()
-  await loadItems()
+onMounted(refreshKnowledge)
+
+onBeforeUnmount(() => {
+  disposed = true
+  uploadController?.abort()
 })
 
 async function loadCategories() {
   try {
     const res = await knowledgeApi.listCategories()
     categories.value = res.data
+    return true
   } catch {
     console.error('Failed to load categories')
+    return false
   }
 }
 
@@ -61,8 +79,22 @@ async function loadItems() {
   try {
     const res = await knowledgeApi.listItems(selectedCategory.value, searchQuery.value)
     items.value = res.data
+    return true
   } catch {
     console.error('Failed to load items')
+    return false
+  }
+}
+
+async function refreshKnowledge() {
+  refreshingCount.value++
+  try {
+    const results = await Promise.all([loadItems(), loadCategories()])
+    if (!disposed && results.includes(false)) {
+      ElMessage.warning('部分列表刷新失败，请刷新页面重试')
+    }
+  } finally {
+    refreshingCount.value--
   }
 }
 
@@ -123,9 +155,54 @@ async function handleDeleteCategory(id: number) {
   }
 }
 
-function handleFileChange(file: any) {
-  selectedFile.value = file.raw
-  return false
+function handleFileChange(file: UploadFile) {
+  selectedFile.value = file.raw ?? null
+}
+
+function handleFileRemove() {
+  selectedFile.value = null
+}
+
+function resetUploadForm() {
+  selectedFile.value = null
+  fileList.value = []
+  uploadForm.value = { description: '', category_id: 0 }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${Math.round(bytes)} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+const remainingText = computed(() => {
+  const seconds = uploadRemaining.value
+  if (seconds === undefined || !Number.isFinite(seconds)) return '正在估算剩余时间'
+  if (seconds < 60) return `预计剩余 ${Math.max(1, Math.ceil(seconds))} 秒`
+  return `预计剩余 ${Math.ceil(seconds / 60)} 分钟`
+})
+
+function handleUploadProgress(event: AxiosProgressEvent) {
+  if (disposed || !uploading.value || uploadController?.signal.aborted) return
+  // A token refresh may retry the request; restart speed estimation if bytes reset.
+  if (event.loaded < uploadedBytes.value) uploadStartedAt = performance.now()
+  uploadedBytes.value = event.loaded
+  uploadTotal.value = event.total
+  const ratio = event.total ? Math.min(1, event.loaded / event.total) : undefined
+  uploadPercent.value = ratio === undefined ? null : Math.floor(ratio * 100)
+  uploadPhase.value = ratio === 1 ? 'saving' : 'sending'
+  const elapsed = (performance.now() - uploadStartedAt) / 1000
+  uploadSpeed.value = event.rate ?? (elapsed > 0 ? event.loaded / elapsed : 0)
+  uploadRemaining.value = event.estimated ?? (event.total && uploadSpeed.value > 0
+    ? Math.max(0, event.total - event.loaded) / uploadSpeed.value : undefined)
+}
+
+function handleCancelUpload() {
+  if (uploading.value) {
+    uploadController?.abort()
+  } else {
+    showUploadDialog.value = false
+  }
 }
 
 async function handleUploadFile() {
@@ -144,20 +221,39 @@ async function handleUploadFile() {
     return
   }
   uploading.value = true
+  uploadPhase.value = 'sending'
+  uploadPercent.value = 0
+  uploadedBytes.value = 0
+  uploadTotal.value = undefined
+  uploadSpeed.value = 0
+  uploadRemaining.value = undefined
+  uploadStartedAt = performance.now()
+  const controller = new AbortController()
+  uploadController = controller
+  let shouldRefresh = false
   try {
-    await knowledgeApi.uploadFile(selectedFile.value, uploadForm.value.category_id, uploadForm.value.description)
+    await knowledgeApi.uploadFile(selectedFile.value, uploadForm.value.category_id, uploadForm.value.description, {
+      onProgress: (event) => {
+        if (uploadController === controller) handleUploadProgress(event)
+      },
+      signal: controller.signal
+    })
+    if (disposed) return
     if (authStore.isCaptain || authStore.isSuperAdmin) {
       ElMessage.success('上传成功')
     } else {
       ElMessage.success('上传成功，等待队长审核')
     }
     showUploadDialog.value = false
-    selectedFile.value = null
-    uploadForm.value = { description: '', category_id: 0 }
-    await loadItems()
-    await loadCategories()
+    resetUploadForm()
+    shouldRefresh = true
   } catch (err: any) {
-    if (err?.code === 'ECONNABORTED') {
+    if (disposed) return
+    if (err?.code === 'ERR_CANCELED') {
+      ElMessage.info(uploadPhase.value === 'saving'
+        ? '已停止等待，正在刷新列表以确认文件是否已保存' : '已停止上传请求')
+      shouldRefresh = true
+    } else if (err?.code === 'ECONNABORTED') {
       ElMessage.error('上传超时，请检查网络或重试')
     } else if (err?.response?.status === 413) {
       ElMessage.error(err.response?.data?.message || '文件过大，上传失败')
@@ -166,7 +262,9 @@ async function handleUploadFile() {
     }
   } finally {
     uploading.value = false
+    uploadController = undefined
   }
+  if (shouldRefresh && !disposed) void refreshKnowledge()
 }
 
 function openPreview(item: { name: string; description: string }) {
@@ -248,7 +346,7 @@ async function handleDownloadFile(id: number, name: string) {
     <div class="content">
       <div class="card">
         <div class="card-header">
-          <h3>知识库</h3>
+          <h3>知识库 <span v-if="refreshingCount > 0" class="refresh-status" role="status">正在刷新列表…</span></h3>
           <div class="actions">
             <el-input
               v-model="searchQuery"
@@ -372,13 +470,24 @@ async function handleDownloadFile(id: number, name: string) {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showUploadDialog" title="上传文件" width="500px">
-      <el-form :model="uploadForm" label-width="80px">
+    <el-dialog
+      v-model="showUploadDialog"
+      title="上传文件"
+      width="500px"
+      :close-on-click-modal="!uploading"
+      :close-on-press-escape="!uploading"
+      :show-close="!uploading"
+      @closed="resetUploadForm"
+    >
+      <el-form :model="uploadForm" label-width="80px" :disabled="uploading">
         <el-form-item label="文件">
           <el-upload
+            v-model:file-list="fileList"
             :auto-upload="false"
             :limit="1"
+            :disabled="uploading"
             :on-change="handleFileChange"
+            :on-remove="handleFileRemove"
             :on-exceed="() => ElMessage.warning('只能上传一个文件')"
           >
             <el-button type="primary">选择文件</el-button>
@@ -403,10 +512,23 @@ async function handleDownloadFile(id: number, name: string) {
           />
         </el-form-item>
       </el-form>
+      <div v-if="uploading" class="upload-progress" aria-live="polite">
+        <div class="upload-stage">{{ uploadPhase === 'saving' ? '文件已发送，正在等待服务器保存…' : '正在上传文件' }}</div>
+        <el-progress
+          :percentage="uploadPercent ?? 0"
+          :indeterminate="uploadPercent === null"
+          :show-text="uploadPercent !== null"
+        />
+        <div class="upload-details">
+          <span>已发送 {{ formatBytes(uploadedBytes) }}<template v-if="uploadTotal"> / {{ formatBytes(uploadTotal) }}</template></span>
+          <span v-if="uploadPhase === 'sending'">{{ formatBytes(uploadSpeed) }}/s</span>
+        </div>
+        <div v-if="uploadPhase === 'sending'" class="upload-remaining">{{ remainingText }}</div>
+      </div>
       <template #footer>
-        <el-button @click="showUploadDialog = false" :disabled="uploading">取消</el-button>
+        <el-button @click="handleCancelUpload">{{ uploading ? (uploadPhase === 'saving' ? '停止等待' : '取消上传') : '取消' }}</el-button>
         <el-button type="primary" @click="handleUploadFile" :loading="uploading">
-          {{ uploading ? '上传中...' : '上传' }}
+          {{ uploading ? (uploadPhase === 'saving' ? '保存中...' : '上传中...') : '上传' }}
         </el-button>
       </template>
     </el-dialog>
@@ -421,6 +543,37 @@ async function handleDownloadFile(id: number, name: string) {
 </template>
 
 <style scoped>
+.upload-progress {
+  margin-top: 1rem;
+}
+
+.upload-stage {
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+
+.upload-details {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.5rem;
+}
+
+.upload-details,
+.upload-remaining,
+.refresh-status {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: normal;
+}
+
+.upload-remaining {
+  margin-top: 0.25rem;
+}
+
+.refresh-status {
+  margin-left: 0.5rem;
+}
+
 .knowledge {
   display: flex;
   gap: 1rem;

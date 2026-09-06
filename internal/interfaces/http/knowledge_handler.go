@@ -6,9 +6,12 @@ import (
 	"SWPUCAT/internal/infrastructure/storage"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 )
@@ -46,66 +49,36 @@ func (h *KnowledgeHandler) CreateLink(c *gin.Context) {
 }
 
 func (h *KnowledgeHandler) UploadFile(c *gin.Context) {
-	// 第一层：Content-Length 预检，超过 1GB 直接拒绝
-	if c.Request.ContentLength > maxUploadSize {
+	// The file limit excludes multipart headers and bounded metadata fields.
+	const maxRequestSize = maxUploadSize + (1 << 20)
+	if c.Request.ContentLength > maxRequestSize {
 		RequestTooLarge(c, "file too large: maximum 1GB")
 		return
 	}
-
-	// 第二层：body 读取时强制限制，防止 chunked 或伪造 Content-Length 绕过
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUploadSize)
-
-	file, header, err := c.Request.FormFile("file")
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRequestSize)
+	pending, req, err := h.receiveUpload(c.Request, maxUploadSize)
 	if err != nil {
 		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
+		var pathErr *os.PathError
+		if errors.Is(err, storage.ErrFileTooLarge) || errors.As(err, &maxBytesErr) {
 			RequestTooLarge(c, "file too large: maximum 1GB")
-			return
+		} else if errors.As(err, &pathErr) {
+			InternalError(c, "failed to save file")
+		} else {
+			BadRequest(c, "invalid or incomplete upload")
 		}
-		BadRequest(c, "file is required")
 		return
 	}
-	defer file.Close()
-
-	// 第三层：multipart part 头里声明的文件大小兜底校验
-	if header.Size > maxUploadSize {
-		RequestTooLarge(c, "file too large: maximum 1GB")
-		return
-	}
-
-	// Get category ID from form
-	categoryIDStr := c.PostForm("category_id")
-	categoryID, err := strconv.ParseInt(categoryIDStr, 10, 64)
-	if err != nil {
-		BadRequest(c, "invalid category_id")
-		return
-	}
-
-	// Save file to storage
-	fileKey, err := h.storage.Save(header.Filename, file)
+	defer pending.Discard()
+	fileKey, err := pending.Commit(c.Request.Context())
 	if err != nil {
 		InternalError(c, "failed to save file")
 		return
 	}
-
-	// Format file size
-	fileSize := fmt.Sprintf("%.2f MB", float64(header.Size)/(1024*1024))
-
-	// Get description from form
-	description := c.PostForm("description")
-
+	req.FileKey = fileKey
 	uploaderID := GetUserID(c)
 	uploaderName := GetUsername(c)
 	isCaptain := IsCaptain(c)
-
-	req := knowledge.UploadFileRequest{
-		FileName:    header.Filename,
-		Description: description,
-		FileSize:    fileSize,
-		FileKey:     fileKey,
-		CategoryID:  categoryID,
-	}
-
 	dto, err := h.knowledgeSvc.UploadFile(c.Request.Context(), uploaderID, uploaderName, isCaptain, req)
 	if err != nil {
 		// Clean up saved file on error
@@ -115,6 +88,80 @@ func (h *KnowledgeHandler) UploadFile(c *gin.Context) {
 	}
 
 	Created(c, dto)
+}
+
+// Fields may follow the file, as they do in existing clients. Keep the file
+// staged until all parts and metadata have been received and validated.
+func (h *KnowledgeHandler) receiveUpload(r *http.Request, limit int64) (*storage.PendingFile, knowledge.UploadFileRequest, error) {
+	var req knowledge.UploadFileRequest
+	reader, err := r.MultipartReader()
+	if err != nil {
+		return nil, req, err
+	}
+	var pending *storage.PendingFile
+	keep := false
+	defer func() {
+		if pending != nil && !keep {
+			pending.Discard()
+		}
+	}()
+	fields := make(map[string]string)
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, req, err
+		}
+		name := part.FormName()
+		if name == "file" {
+			if pending != nil || part.FileName() == "" {
+				return nil, req, errors.New("exactly one file is required")
+			}
+			req.FileName = part.FileName()
+			pending, err = h.storage.Stage(r.Context(), req.FileName, part, limit)
+			if err != nil {
+				return nil, req, err
+			}
+		} else {
+			if (name != "category_id" && name != "description") || part.FileName() != "" {
+				return nil, req, errors.New("unexpected upload field")
+			}
+			if _, exists := fields[name]; exists {
+				return nil, req, errors.New("duplicate upload field")
+			}
+			const maxFieldSize = 4 << 10
+			value, err := io.ReadAll(io.LimitReader(part, maxFieldSize+1))
+			if err != nil {
+				return nil, req, err
+			}
+			if len(value) > maxFieldSize {
+				return nil, req, errors.New("upload field too large")
+			}
+			fields[name] = string(value)
+		}
+		if err := part.Close(); err != nil {
+			return nil, req, err
+		}
+	}
+	if pending == nil {
+		return nil, req, errors.New("file is required")
+	}
+	req.CategoryID, err = strconv.ParseInt(fields["category_id"], 10, 64)
+	if err != nil || req.CategoryID <= 0 {
+		return nil, req, errors.New("invalid category_id")
+	}
+	req.Description = fields["description"]
+	if !utf8.ValidString(req.Description) || utf8.RuneCountInString(req.Description) > 1000 {
+		return nil, req, errors.New("description exceeds 1000 characters")
+	}
+	if err := r.Context().Err(); err != nil {
+		return nil, req, err
+	}
+	req.FileSize = fmt.Sprintf("%.2f MB", float64(pending.Size)/(1024*1024))
+	keep = true
+	return pending, req, nil
 }
 
 func (h *KnowledgeHandler) DeleteItem(c *gin.Context) {
