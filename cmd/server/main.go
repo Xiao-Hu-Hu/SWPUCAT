@@ -9,6 +9,7 @@ import (
 	"SWPUCAT/internal/application/invitation"
 	"SWPUCAT/internal/application/knowledge"
 	"SWPUCAT/internal/application/user"
+	"SWPUCAT/internal/infrastructure/agentclient"
 	"SWPUCAT/internal/infrastructure/auth"
 	"SWPUCAT/internal/infrastructure/config"
 	"SWPUCAT/internal/infrastructure/database"
@@ -80,6 +81,11 @@ func main() {
 	knowledgeHandler := httpInterface.NewKnowledgeHandler(knowledgeSvc, localStorage)
 	approvalHandler := httpInterface.NewApprovalHandler(approvalSvc)
 	invitationHandler := httpInterface.NewInvitationHandler(invitationSvc)
+	agentClient, err := agentclient.NewClient(cfg.Agent.BaseURL, cfg.Agent.InternalSecret, cfg.Agent.LLMTimeout+15*time.Second)
+	if err != nil {
+		log.Fatalf("Failed to initialize agent client: %v", err)
+	}
+	agentHandler := httpInterface.NewAgentHandler(agentClient)
 
 	// Initialize router
 	router := httpInterface.NewRouter(
@@ -93,6 +99,7 @@ func main() {
 		knowledgeHandler,
 		approvalHandler,
 		invitationHandler,
+		agentHandler,
 	)
 
 	// Setup routes

@@ -60,6 +60,8 @@ services:
       CSA_STORAGE_UPLOAD_DIR: /app/uploads
       CSA_SERVER_MODE: ${CSA_SERVER_MODE:-release}
       CSA_LOG_LEVEL: ${CSA_LOG_LEVEL:-info}
+      CSA_AGENT_BASE_URL: http://agent:8090
+      CSA_AGENT_INTERNAL_SECRET: ${CSA_AGENT_INTERNAL_SECRET:-}
       TZ: ${TZ:-Asia/Shanghai}
     ports:
       - "8080:8080"

@@ -41,8 +41,8 @@ type ChatResponse struct {
 }
 
 // Engine owns the Eino ChatModelAgent and the short-lived session history.
-// Business tools are deliberately injected in a later stage; this boundary
-// keeps model execution independent from the main service's repositories.
+// Business data stays behind the HTTP client and Eino tools so the Agent
+// process does not access the main service's repositories directly.
 type Engine struct {
 	enabled       bool
 	runner        *adk.Runner
@@ -184,8 +184,8 @@ func newSessionID() (string, error) {
 }
 
 const systemInstruction = `你是 SWPUCAT 团队打卡网站的助手。
-当前阶段只能进行一般问答，不要声称已经完成打卡、修改数据、审批或发布报告。
-当后续接入业务工具后，只有工具返回成功时才能告诉用户操作完成；涉及成员数据时遵守当前用户和队长的权限。
+你可以调用工具查询当前用户的打卡状态、知识库内容和队长可见的统计信息；只有工具返回成功时才能告诉用户打卡操作完成。
+涉及成员数据时遵守当前用户和队长的权限，不要尝试绕过权限，也不要把计划或推测说成已经完成的操作。
 回答优先使用简体中文，信息不足时明确说明需要什么信息，不要编造知识库内容。`
 
 type sessionStore struct {

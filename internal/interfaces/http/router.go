@@ -20,6 +20,7 @@ type Router struct {
 	knowledgeHandler  *KnowledgeHandler
 	approvalHandler   *ApprovalHandler
 	invitationHandler *InvitationHandler
+	agentHandler      *AgentHandler
 }
 
 func NewRouter(
@@ -33,6 +34,7 @@ func NewRouter(
 	knowledgeHandler *KnowledgeHandler,
 	approvalHandler *ApprovalHandler,
 	invitationHandler *InvitationHandler,
+	agentHandler *AgentHandler,
 ) *Router {
 	engine := gin.Default()
 
@@ -56,6 +58,7 @@ func NewRouter(
 		knowledgeHandler:  knowledgeHandler,
 		approvalHandler:   approvalHandler,
 		invitationHandler: invitationHandler,
+		agentHandler:      agentHandler,
 	}
 }
 
@@ -137,6 +140,10 @@ func (r *Router) Setup() *gin.Engine {
 			protected.GET("/checkin/requirements", r.checkinHandler.GetRequirements)
 			protected.POST("/checkin/requirements", RBACMiddleware("captain", "super_admin"), r.checkinHandler.SetRequirements)
 			protected.POST("/checkin/report", RBACMiddleware("captain", "super_admin"), r.checkinHandler.PublishReport)
+
+			// Agent assistant. JWT middleware above resolves the user and role;
+			// the handler forwards that identity to the private Agent service.
+			protected.POST("/agent/chat", r.agentHandler.Chat)
 		}
 	}
 
