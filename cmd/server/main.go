@@ -100,6 +100,13 @@ func main() {
 
 	// Schedule midnight auto clock-out
 	go func() {
+		// Catch up the previous date after a restart. The repository's durable
+		// claim makes this safe when multiple instances start together.
+		now := time.Now()
+		yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
+		if err := checkinSvc.AutoClockOut(context.Background(), yesterday); err != nil {
+			log.Printf("AutoClockOut catch-up failed for %s: %v", yesterday, err)
+		}
 		for {
 			now := time.Now()
 			midnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())

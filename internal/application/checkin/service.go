@@ -278,31 +278,8 @@ func (s *CheckinService) GetStatsByPeriod(ctx context.Context, period string) ([
 }
 
 func (s *CheckinService) AutoClockOut(ctx context.Context, date string) error {
-	records, err := s.checkinRepo.FindByDate(ctx, date)
-	if err != nil {
-		return err
-	}
-
-	userLastRecord := make(map[int64]*checkin.CheckinRecord)
-	for _, r := range records {
-		if r.UserID == 0 {
-			continue
-		}
-		userLastRecord[r.UserID] = r
-	}
-
-	for userID, lastRecord := range userLastRecord {
-		if lastRecord.Type == checkin.CheckinTypeIn {
-			record, err := checkin.NewCheckinRecord(userID, checkin.CheckinTypeOut)
-			if err != nil {
-				continue
-			}
-			record.Time = "23:59:59"
-			record.Date = date
-			s.checkinRepo.Create(ctx, record)
-		}
-	}
-	return nil
+	_, _, err := s.checkinRepo.RunAutoClockOut(ctx, date, "23:59:59")
+	return err
 }
 
 func (s *CheckinService) GetOnlineMembers(ctx context.Context) ([]OnlineMemberDTO, error) {

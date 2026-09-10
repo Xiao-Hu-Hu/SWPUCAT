@@ -60,6 +60,19 @@ type CheckinIdempotencyModel struct {
 
 func (CheckinIdempotencyModel) TableName() string { return "checkin_idempotency_keys" }
 
+type CheckinAutoClockoutRunModel struct {
+	ID           int64     `gorm:"primaryKey;autoIncrement"`
+	RunDate      string    `gorm:"size:10;not null;uniqueIndex"`
+	Status       string    `gorm:"size:16;not null"`
+	StartedAt    time.Time `gorm:"not null"`
+	FinishedAt   *time.Time
+	Processed    int       `gorm:"not null;default:0"`
+	ErrorMessage string    `gorm:"size:512"`
+	CreatedAt    time.Time `gorm:"not null;default:current_timestamp"`
+}
+
+func (CheckinAutoClockoutRunModel) TableName() string { return "checkin_auto_clockout_runs" }
+
 type KnowledgeCategoryModel struct {
 	ID        int64     `gorm:"primaryKey;autoIncrement"`
 	Name      string    `gorm:"size:64;not null"`

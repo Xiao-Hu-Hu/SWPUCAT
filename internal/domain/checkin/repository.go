@@ -10,6 +10,7 @@ type Repository interface {
 	// transitions for the same user to prevent concurrent duplicate records.
 	CreateTransition(ctx context.Context, record *CheckinRecord, idempotencyKey string) (created bool, err error)
 	CreateMakeup(ctx context.Context, inRecord, outRecord *CheckinRecord) error
+	RunAutoClockOut(ctx context.Context, date, clockOutTime string) (processed int, skipped bool, err error)
 	FindByUserID(ctx context.Context, userID int64) ([]*CheckinRecord, error)
 	FindByUserIDAndDate(ctx context.Context, userID int64, date string) ([]*CheckinRecord, error)
 	FindByUserIDAndDateRange(ctx context.Context, userID int64, startDate, endDate string) ([]*CheckinRecord, error)

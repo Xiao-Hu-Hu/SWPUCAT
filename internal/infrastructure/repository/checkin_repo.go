@@ -7,6 +7,7 @@ import (
 	"SWPUCAT/internal/infrastructure/database"
 	"context"
 	"errors"
+	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -200,6 +201,121 @@ func (r *CheckinRepo) CreateMakeup(ctx context.Context, inRecord, outRecord *che
 			"updated_at":        gorm.Expr("CURRENT_TIMESTAMP"),
 		}).Error
 	})
+}
+
+const (
+	autoClockoutRunning = "running"
+	autoClockoutSuccess = "succeeded"
+	autoClockoutFailed  = "failed"
+)
+
+// RunAutoClockOut claims one date and closes every active user's open session
+// in the same transaction. A unique run row makes the scheduler safe across
+// multiple server replicas; a stale running row can be reclaimed after an
+// interrupted process.
+func (r *CheckinRepo) RunAutoClockOut(ctx context.Context, date, clockOutTime string) (processed int, skipped bool, err error) {
+	claimed := false
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now()
+		run := &database.CheckinAutoClockoutRunModel{
+			RunDate:   date,
+			Status:    autoClockoutRunning,
+			StartedAt: now,
+		}
+		insert := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(run)
+		if insert.Error != nil {
+			return insert.Error
+		}
+		if insert.RowsAffected == 0 {
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("run_date = ?", date).First(run).Error; err != nil {
+				return err
+			}
+			if run.Status == autoClockoutSuccess {
+				skipped = true
+				return nil
+			}
+			if run.Status == autoClockoutRunning && now.Sub(run.StartedAt) < time.Hour {
+				skipped = true
+				return nil
+			}
+			if err := tx.Model(run).Updates(map[string]interface{}{
+				"status":        autoClockoutRunning,
+				"started_at":    now,
+				"finished_at":   nil,
+				"processed":     0,
+				"error_message": "",
+			}).Error; err != nil {
+				return err
+			}
+		}
+		claimed = true
+
+		var userIDs []int64
+		if err := tx.Model(&database.UserModel{}).
+			Where("status = ? OR status = ''", string(user.StatusActive)).
+			Order("id").Pluck("id", &userIDs).Error; err != nil {
+			return err
+		}
+		for _, userID := range userIDs {
+			var account database.UserModel
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&account, userID).Error; err != nil {
+				return err
+			}
+			var latest database.CheckinRecordModel
+			latestErr := tx.Where("user_id = ? AND date = ?", userID, date).
+				Order("created_at DESC, id DESC").First(&latest).Error
+			if errors.Is(latestErr, gorm.ErrRecordNotFound) {
+				continue
+			}
+			if latestErr != nil {
+				return latestErr
+			}
+			if latest.Type != string(checkin.CheckinTypeIn) {
+				continue
+			}
+			if err := tx.Create(&database.CheckinRecordModel{
+				UserID: userID,
+				Type:   string(checkin.CheckinTypeOut),
+				Date:   date,
+				Time:   clockOutTime,
+			}).Error; err != nil {
+				return err
+			}
+			processed++
+		}
+
+		finished := time.Now()
+		return tx.Model(run).Updates(map[string]interface{}{
+			"status":      autoClockoutSuccess,
+			"finished_at": finished,
+			"processed":   processed,
+		}).Error
+	})
+	if err != nil && claimed {
+		// The main transaction rolled back; retain a failure marker so the next
+		// scheduler run can reclaim it immediately and operators can inspect it.
+		finished := time.Now()
+		result := r.db.WithContext(ctx).Model(&database.CheckinAutoClockoutRunModel{}).
+			Where("run_date = ? AND status = ?", date, autoClockoutRunning).
+			Updates(map[string]interface{}{
+				"status":        autoClockoutFailed,
+				"finished_at":   finished,
+				"error_message": err.Error(),
+			})
+		if result.Error == nil && result.RowsAffected == 0 {
+			// A newly claimed row was rolled back with the failed transaction.
+			// Insert a marker, but never overwrite a successful concurrent run.
+			_ = r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&database.CheckinAutoClockoutRunModel{
+				RunDate:      date,
+				Status:       autoClockoutFailed,
+				StartedAt:    finished,
+				FinishedAt:   &finished,
+				Processed:    processed,
+				ErrorMessage: err.Error(),
+			})
+		}
+	}
+	return processed, skipped, err
 }
 
 func (r *CheckinRepo) FindByUserID(ctx context.Context, userID int64) ([]*checkin.CheckinRecord, error) {
