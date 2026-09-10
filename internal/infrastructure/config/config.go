@@ -19,6 +19,57 @@ type Config struct {
 	Log      LogConfig      `mapstructure:"log"`
 	Storage  StorageConfig  `mapstructure:"storage"`
 	Email    EmailConfig    `mapstructure:"email"`
+	Agent    AgentConfig    `mapstructure:"agent"`
+}
+
+type AgentConfig struct {
+	Enabled           bool          `mapstructure:"enabled"`
+	WriteEnabled      bool          `mapstructure:"write_enabled"`
+	Port              int           `mapstructure:"port"`
+	BaseURL           string        `mapstructure:"base_url"`
+	ServerURL         string        `mapstructure:"server_url"`
+	InternalSecret    string        `mapstructure:"internal_secret"`
+	LLMProvider       string        `mapstructure:"llm_provider"`
+	LLMModel          string        `mapstructure:"llm_model"`
+	LLMAPIKey         string        `mapstructure:"llm_api_key"`
+	LLMBaseURL        string        `mapstructure:"llm_base_url"`
+	LLMTimeout        time.Duration `mapstructure:"llm_timeout"`
+	MaxIterations     int           `mapstructure:"max_iterations"`
+	MaxToolCalls      int           `mapstructure:"max_tool_calls"`
+	WorkerConcurrency int           `mapstructure:"worker_concurrency"`
+}
+
+func (a *AgentConfig) Validate() error {
+	if a.Port < 1 || a.Port > 65535 {
+		return fmt.Errorf("agent.port must be between 1 and 65535")
+	}
+	if a.MaxIterations < 1 || a.MaxIterations > 32 {
+		return fmt.Errorf("agent.max_iterations must be between 1 and 32")
+	}
+	if a.MaxToolCalls < 0 || a.MaxToolCalls > 64 {
+		return fmt.Errorf("agent.max_tool_calls must be between 0 and 64")
+	}
+	if a.WorkerConcurrency < 1 || a.WorkerConcurrency > 16 {
+		return fmt.Errorf("agent.worker_concurrency must be between 1 and 16")
+	}
+	if a.Enabled {
+		if strings.TrimSpace(a.LLMProvider) == "" {
+			return fmt.Errorf("agent.llm_provider is required when agent is enabled")
+		}
+		if strings.TrimSpace(a.LLMModel) == "" {
+			return fmt.Errorf("agent.llm_model is required when agent is enabled")
+		}
+		if strings.TrimSpace(a.LLMAPIKey) == "" {
+			return fmt.Errorf("agent.llm_api_key is required when agent is enabled")
+		}
+		if a.LLMTimeout <= 0 {
+			return fmt.Errorf("agent.llm_timeout must be positive")
+		}
+		if len(a.InternalSecret) < 32 {
+			return fmt.Errorf("agent.internal_secret must be at least 32 characters when agent is enabled")
+		}
+	}
+	return nil
 }
 
 // ValidateForServer checks the values that are required by the HTTP service.
@@ -165,6 +216,20 @@ func Load() (*Config, error) {
 	viper.SetDefault("email.username", "")
 	viper.SetDefault("email.password", "")
 	viper.SetDefault("email.from", "")
+	viper.SetDefault("agent.enabled", false)
+	viper.SetDefault("agent.write_enabled", false)
+	viper.SetDefault("agent.port", 8090)
+	viper.SetDefault("agent.base_url", "http://localhost:8090")
+	viper.SetDefault("agent.server_url", "http://localhost:8080")
+	viper.SetDefault("agent.internal_secret", "")
+	viper.SetDefault("agent.llm_provider", "openai_compatible")
+	viper.SetDefault("agent.llm_model", "")
+	viper.SetDefault("agent.llm_api_key", "")
+	viper.SetDefault("agent.llm_base_url", "")
+	viper.SetDefault("agent.llm_timeout", 60*time.Second)
+	viper.SetDefault("agent.max_iterations", 4)
+	viper.SetDefault("agent.max_tool_calls", 8)
+	viper.SetDefault("agent.worker_concurrency", 1)
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
@@ -194,6 +259,20 @@ func Load() (*Config, error) {
 	applyStringEnv("CSA_EMAIL_USERNAME", &cfg.Email.Username)
 	applyStringEnv("CSA_EMAIL_PASSWORD", &cfg.Email.Password)
 	applyStringEnv("CSA_EMAIL_FROM", &cfg.Email.From)
+	applyBoolEnv("CSA_AGENT_ENABLED", &cfg.Agent.Enabled)
+	applyBoolEnv("CSA_AGENT_WRITE_ENABLED", &cfg.Agent.WriteEnabled)
+	applyIntEnv("CSA_AGENT_PORT", &cfg.Agent.Port)
+	applyStringEnv("CSA_AGENT_BASE_URL", &cfg.Agent.BaseURL)
+	applyStringEnv("CSA_SERVER_INTERNAL_URL", &cfg.Agent.ServerURL)
+	applyStringEnv("CSA_AGENT_INTERNAL_SECRET", &cfg.Agent.InternalSecret)
+	applyStringEnv("CSA_LLM_PROVIDER", &cfg.Agent.LLMProvider)
+	applyStringEnv("CSA_LLM_MODEL", &cfg.Agent.LLMModel)
+	applyStringEnv("CSA_LLM_API_KEY", &cfg.Agent.LLMAPIKey)
+	applyStringEnv("CSA_LLM_BASE_URL", &cfg.Agent.LLMBaseURL)
+	applyDurationEnv("CSA_LLM_TIMEOUT", &cfg.Agent.LLMTimeout)
+	applyIntEnv("CSA_AGENT_MAX_ITERATIONS", &cfg.Agent.MaxIterations)
+	applyIntEnv("CSA_AGENT_MAX_TOOL_CALLS", &cfg.Agent.MaxToolCalls)
+	applyIntEnv("CSA_AGENT_WORKER_CONCURRENCY", &cfg.Agent.WorkerConcurrency)
 	applyStringEnv("CSA_STORAGE_UPLOAD_DIR", &cfg.Storage.UploadDir)
 	applyInt64Env("CSA_STORAGE_MAX_FILE_SIZE", &cfg.Storage.MaxFileSize)
 	applyIntEnv("CSA_SERVER_PORT", &cfg.Server.Port)
@@ -223,6 +302,14 @@ func applyIntEnv(key string, target *int) {
 func applyInt64Env(key string, target *int64) {
 	if value, ok := os.LookupEnv(key); ok && value != "" {
 		if parsed, err := strconv.ParseInt(value, 10, 64); err == nil {
+			*target = parsed
+		}
+	}
+}
+
+func applyBoolEnv(key string, target *bool) {
+	if value, ok := os.LookupEnv(key); ok && value != "" {
+		if parsed, err := strconv.ParseBool(value); err == nil {
 			*target = parsed
 		}
 	}

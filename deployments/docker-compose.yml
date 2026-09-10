@@ -69,6 +69,32 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  agent:
+    image: swpucat-server
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+    container_name: swpucat-agent
+    restart: unless-stopped
+    environment:
+      CSA_AGENT_ENABLED: ${CSA_AGENT_ENABLED:-false}
+      CSA_AGENT_WRITE_ENABLED: ${CSA_AGENT_WRITE_ENABLED:-false}
+      CSA_AGENT_PORT: 8090
+      CSA_AGENT_INTERNAL_SECRET: ${CSA_AGENT_INTERNAL_SECRET:-}
+      CSA_LLM_PROVIDER: ${CSA_LLM_PROVIDER:-openai_compatible}
+      CSA_LLM_MODEL: ${CSA_LLM_MODEL:-}
+      CSA_LLM_API_KEY: ${CSA_LLM_API_KEY:-}
+      CSA_LLM_BASE_URL: ${CSA_LLM_BASE_URL:-}
+      CSA_LLM_TIMEOUT: ${CSA_LLM_TIMEOUT:-60s}
+      CSA_AGENT_MAX_ITERATIONS: ${CSA_AGENT_MAX_ITERATIONS:-4}
+      CSA_AGENT_MAX_TOOL_CALLS: ${CSA_AGENT_MAX_TOOL_CALLS:-8}
+      CSA_AGENT_WORKER_CONCURRENCY: ${CSA_AGENT_WORKER_CONCURRENCY:-1}
+      CSA_SERVER_MODE: ${CSA_SERVER_MODE:-release}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "8090:8090"
+    command: ["./agent"]
+
   web:
     image: node:20-alpine
     container_name: swpucat-web

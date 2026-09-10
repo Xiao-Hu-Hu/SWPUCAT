@@ -10,6 +10,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o server ./cmd/server
 RUN CGO_ENABLED=0 GOOS=linux go build -o migrate ./cmd/migrate
+RUN CGO_ENABLED=0 GOOS=linux go build -o agent ./cmd/agent
 
 FROM alpine:latest
 
@@ -19,9 +20,10 @@ WORKDIR /app
 
 COPY --from=builder /app/server .
 COPY --from=builder /app/migrate .
+COPY --from=builder /app/agent .
 COPY --from=builder /app/configs ./configs
 COPY --from=builder /app/migrations ./migrations
 
-EXPOSE 8080
+EXPOSE 8080 8090
 
 CMD ["./server"]
