@@ -34,7 +34,12 @@ func (r *KnowledgeRepo) CreateItem(ctx context.Context, item *knowledge.Knowledg
 		ReviewerID:   item.ReviewerID,
 		ReviewerName: item.ReviewerName,
 	}
-	return r.db.WithContext(ctx).Create(model).Error
+	if err := r.db.WithContext(ctx).Create(model).Error; err != nil {
+		return err
+	}
+	item.ID = model.ID
+	item.CreatedAt = model.CreatedAt
+	return nil
 }
 
 func (r *KnowledgeRepo) FindItemByID(ctx context.Context, id int64) (*knowledge.KnowledgeItem, error) {
@@ -117,7 +122,12 @@ func (r *KnowledgeRepo) CreateCategory(ctx context.Context, cat *knowledge.Categ
 		Name:     cat.Name,
 		IsSystem: cat.IsSystem,
 	}
-	return r.db.WithContext(ctx).Create(model).Error
+	if err := r.db.WithContext(ctx).Create(model).Error; err != nil {
+		return err
+	}
+	cat.ID = model.ID
+	cat.CreatedAt = model.CreatedAt
+	return nil
 }
 
 func (r *KnowledgeRepo) FindCategoryByID(ctx context.Context, id int64) (*knowledge.Category, error) {

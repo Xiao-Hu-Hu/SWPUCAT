@@ -24,7 +24,12 @@ func (r *CheckinRepo) Create(ctx context.Context, record *checkin.CheckinRecord)
 		Date:   record.Date,
 		Time:   record.Time,
 	}
-	return r.db.WithContext(ctx).Create(model).Error
+	if err := r.db.WithContext(ctx).Create(model).Error; err != nil {
+		return err
+	}
+	record.ID = model.ID
+	record.CreatedAt = model.CreatedAt
+	return nil
 }
 
 func (r *CheckinRepo) FindByUserID(ctx context.Context, userID int64) ([]*checkin.CheckinRecord, error) {

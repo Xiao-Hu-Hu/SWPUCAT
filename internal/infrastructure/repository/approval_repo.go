@@ -27,7 +27,12 @@ func (r *ApprovalRepo) Create(ctx context.Context, a *approval.Approval) error {
 		UploaderName: a.UploaderName,
 		Status:       string(a.Status),
 	}
-	return r.db.WithContext(ctx).Create(model).Error
+	if err := r.db.WithContext(ctx).Create(model).Error; err != nil {
+		return err
+	}
+	a.ID = model.ID
+	a.CreatedAt = model.CreatedAt
+	return nil
 }
 
 func (r *ApprovalRepo) FindByID(ctx context.Context, id int64) (*approval.Approval, error) {

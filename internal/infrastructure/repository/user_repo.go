@@ -28,7 +28,16 @@ func (r *UserRepo) Create(ctx context.Context, u *user.User) error {
 		Role:         string(u.Role),
 		CheckinCount: u.CheckinCount,
 	}
-	return r.db.WithContext(ctx).Create(model).Error
+	if err := r.db.WithContext(ctx).Create(model).Error; err != nil {
+		return err
+	}
+	u.ID = model.ID
+	u.CreatedAt = model.CreatedAt
+	u.UpdatedAt = model.UpdatedAt
+	if u.JoinedAt.IsZero() {
+		u.JoinedAt = model.CreatedAt
+	}
+	return nil
 }
 
 func (r *UserRepo) FindByID(ctx context.Context, id int64) (*user.User, error) {
@@ -81,12 +90,12 @@ func (r *UserRepo) FindByIDs(ctx context.Context, ids []int64) ([]*user.User, er
 
 func (r *UserRepo) Update(ctx context.Context, u *user.User) error {
 	return r.db.WithContext(ctx).Model(&database.UserModel{}).Where("id = ?", u.ID).Updates(map[string]interface{}{
-		"nickname":        string(u.Nickname),
-		"avatar":          u.Avatar,
-		"tech_direction":  u.TechDirection,
-		"password_hash":   string(u.PasswordHash),
-		"role":            string(u.Role),
-		"checkin_count":   u.CheckinCount,
+		"nickname":       string(u.Nickname),
+		"avatar":         u.Avatar,
+		"tech_direction": u.TechDirection,
+		"password_hash":  string(u.PasswordHash),
+		"role":           string(u.Role),
+		"checkin_count":  u.CheckinCount,
 	}).Error
 }
 
