@@ -10,10 +10,13 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"SWPUCAT/internal/agent/business"
+	agenttools "SWPUCAT/internal/agent/tools"
 	"SWPUCAT/internal/infrastructure/config"
 
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -24,10 +27,12 @@ var (
 )
 
 type ChatRequest struct {
-	Message   string `json:"message"`
-	SessionID string `json:"session_id,omitempty"`
-	UserID    int64  `json:"user_id,omitempty"`
-	Role      string `json:"role,omitempty"`
+	Message       string `json:"message"`
+	SessionID     string `json:"session_id,omitempty"`
+	UserID        int64  `json:"user_id,omitempty"`
+	Role          string `json:"role,omitempty"`
+	RequestID     string `json:"-"`
+	Authorization string `json:"-"`
 }
 
 type ChatResponse struct {
@@ -43,6 +48,7 @@ type Engine struct {
 	runner        *adk.Runner
 	sessions      *sessionStore
 	maxIterations int
+	tools         *agenttools.Registry
 }
 
 func NewEngine(ctx context.Context, cfg config.AgentConfig) (*Engine, error) {
@@ -70,12 +76,23 @@ func NewEngine(ctx context.Context, cfg config.AgentConfig) (*Engine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create Eino chat model: %w", err)
 	}
+	businessClient, err := business.NewClient(cfg.ServerURL, cfg.InternalSecret, cfg.LLMTimeout)
+	if err != nil {
+		return nil, err
+	}
+	registry := agenttools.NewRegistry(businessClient, cfg.WriteEnabled)
+	registeredTools, err := registry.Build(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("build agent tools: %w", err)
+	}
+	engine.tools = registry
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:          "swpucat-assistant",
 		Description:   "SWPUCAT 打卡与知识库助手",
 		Instruction:   systemInstruction,
 		Model:         model,
 		MaxIterations: cfg.MaxIterations,
+		ToolsConfig:   adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: registeredTools}},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create Eino ChatModelAgent: %w", err)
@@ -108,6 +125,20 @@ func (e *Engine) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 	// Include the authenticated user in the in-memory key so a caller cannot
 	// reuse another member's session identifier to read its context.
 	storeKey := fmt.Sprintf("%d:%s", req.UserID, sessionID)
+	requestID := strings.TrimSpace(req.RequestID)
+	if requestID == "" {
+		var err error
+		requestID, err = newSessionID()
+		if err != nil {
+			return ChatResponse{}, err
+		}
+	}
+	ctx = business.WithRequestContext(ctx, business.RequestContext{
+		Authorization: req.Authorization,
+		UserID:        req.UserID,
+		Role:          req.Role,
+		RequestID:     requestID,
+	})
 	unlock := e.sessions.lock(storeKey)
 	defer unlock()
 

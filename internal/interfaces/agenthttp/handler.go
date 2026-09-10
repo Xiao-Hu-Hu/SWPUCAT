@@ -33,6 +33,8 @@ func (h *Handler) Chat(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "invalid request body"})
 		return
 	}
+	req.Authorization = c.GetHeader("Authorization")
+	req.RequestID = c.GetHeader("X-Request-ID")
 	result, err := h.engine.Chat(c.Request.Context(), req)
 	if err != nil {
 		switch {
