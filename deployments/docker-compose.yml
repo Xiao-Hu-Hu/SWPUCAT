@@ -4,20 +4,40 @@ services:
     container_name: swpucat-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: csa
-      POSTGRES_PASSWORD: csa_password
-      POSTGRES_DB: csa_db
-      TZ: Asia/Shanghai
+      POSTGRES_USER: ${CSA_DATABASE_USER:?set CSA_DATABASE_USER in .env}
+      POSTGRES_PASSWORD: ${CSA_DATABASE_PASSWORD:?set CSA_DATABASE_PASSWORD in .env}
+      POSTGRES_DB: ${CSA_DATABASE_DBNAME:?set CSA_DATABASE_DBNAME in .env}
+      TZ: ${TZ:-Asia/Shanghai}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ../migrations:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U csa -d csa_db"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  migrate:
+    image: swpucat-server
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+    container_name: swpucat-migrate
+    restart: "no"
+    environment:
+      CSA_DATABASE_HOST: postgres
+      CSA_DATABASE_PORT: 5432
+      CSA_DATABASE_USER: ${CSA_DATABASE_USER:?set CSA_DATABASE_USER in .env}
+      CSA_DATABASE_PASSWORD: ${CSA_DATABASE_PASSWORD:?set CSA_DATABASE_PASSWORD in .env}
+      CSA_DATABASE_DBNAME: ${CSA_DATABASE_DBNAME:?set CSA_DATABASE_DBNAME in .env}
+      CSA_DATABASE_SSLMODE: ${CSA_DATABASE_SSLMODE:-disable}
+      CSA_MIGRATIONS_DIR: /app/migrations
+      TZ: ${TZ:-Asia/Shanghai}
+    command: ["./migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   server:
     image: swpucat-server
@@ -26,23 +46,28 @@ services:
       dockerfile: deployments/Dockerfile
     container_name: swpucat-server
     restart: unless-stopped
-    env_file:
-      - ../.env
     environment:
       CSA_DATABASE_HOST: postgres
       CSA_DATABASE_PORT: 5432
-      CSA_DATABASE_USER: csa
-      CSA_DATABASE_PASSWORD: csa_password
-      CSA_DATABASE_DBNAME: csa_db
+      CSA_DATABASE_USER: ${CSA_DATABASE_USER:?set CSA_DATABASE_USER in .env}
+      CSA_DATABASE_PASSWORD: ${CSA_DATABASE_PASSWORD:?set CSA_DATABASE_PASSWORD in .env}
+      CSA_DATABASE_DBNAME: ${CSA_DATABASE_DBNAME:?set CSA_DATABASE_DBNAME in .env}
+      CSA_DATABASE_SSLMODE: ${CSA_DATABASE_SSLMODE:-disable}
+      CSA_DATABASE_MAX_OPEN_CONNS: ${CSA_DATABASE_MAX_OPEN_CONNS:-15}
+      CSA_DATABASE_MAX_IDLE_CONNS: ${CSA_DATABASE_MAX_IDLE_CONNS:-3}
+      CSA_JWT_ACCESS_SECRET: ${CSA_JWT_ACCESS_SECRET:?set CSA_JWT_ACCESS_SECRET in .env}
+      CSA_JWT_REFRESH_SECRET: ${CSA_JWT_REFRESH_SECRET:?set CSA_JWT_REFRESH_SECRET in .env}
       CSA_STORAGE_UPLOAD_DIR: /app/uploads
-      TZ: Asia/Shanghai
+      CSA_SERVER_MODE: ${CSA_SERVER_MODE:-release}
+      CSA_LOG_LEVEL: ${CSA_LOG_LEVEL:-info}
+      TZ: ${TZ:-Asia/Shanghai}
     ports:
       - "8080:8080"
     volumes:
       - uploads_data:/app/uploads
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   web:
     image: node:20-alpine
@@ -55,7 +80,7 @@ services:
       - "3000:3000"
     command: sh -c "npm install && npm run dev"
     environment:
-      - NODE_ENV=development
+      NODE_ENV: development
 
 volumes:
   postgres_data:

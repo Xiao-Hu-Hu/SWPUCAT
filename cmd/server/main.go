@@ -29,6 +29,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
+	if err := cfg.ValidateForServer(); err != nil {
+		log.Fatalf("Invalid configuration: %v", err)
+	}
 
 	// Initialize database
 	db, err := database.NewGORM(&cfg.Database)
