@@ -1,6 +1,7 @@
 package http
 
 import (
+	"SWPUCAT/internal/application/authorization"
 	"SWPUCAT/internal/infrastructure/auth"
 
 	"github.com/gin-contrib/cors"
@@ -10,6 +11,7 @@ import (
 type Router struct {
 	engine            *gin.Engine
 	jwtSvc            *auth.JWTService
+	authzSvc          *authorization.Service
 	authHandler       *AuthHandler
 	userHandler       *UserHandler
 	dashboardHandler  *DashboardHandler
@@ -22,6 +24,7 @@ type Router struct {
 
 func NewRouter(
 	jwtSvc *auth.JWTService,
+	authzSvc *authorization.Service,
 	authHandler *AuthHandler,
 	userHandler *UserHandler,
 	dashboardHandler *DashboardHandler,
@@ -44,6 +47,7 @@ func NewRouter(
 	return &Router{
 		engine:            engine,
 		jwtSvc:            jwtSvc,
+		authzSvc:          authzSvc,
 		authHandler:       authHandler,
 		userHandler:       userHandler,
 		dashboardHandler:  dashboardHandler,
@@ -72,7 +76,7 @@ func (r *Router) Setup() *gin.Engine {
 
 		// Protected routes
 		protected := api.Group("")
-		protected.Use(JWTAuthMiddleware(r.jwtSvc))
+		protected.Use(JWTAuthMiddleware(r.jwtSvc, r.authzSvc))
 		{
 			// User
 			protected.GET("/profile", r.userHandler.GetProfile)
@@ -81,18 +85,18 @@ func (r *Router) Setup() *gin.Engine {
 			protected.PUT("/profile/tech-direction", r.userHandler.UpdateTechDirection)
 			protected.POST("/profile/avatar", r.userHandler.UploadAvatar)
 			protected.GET("/members", r.userHandler.ListMembers)
-			protected.POST("/members/:id/transfer-captain", r.userHandler.TransferCaptain)
-			protected.DELETE("/members/:id", r.userHandler.RemoveMember)
+			protected.POST("/members/:id/transfer-captain", RBACMiddleware("captain"), r.userHandler.TransferCaptain)
+			protected.DELETE("/members/:id", RBACMiddleware("captain", "super_admin"), r.userHandler.RemoveMember)
 
 			// Dashboard
 			protected.GET("/dashboard", r.dashboardHandler.GetDashboard)
 
 			// Announcements
 			protected.GET("/announcements", r.annHandler.List)
-			protected.POST("/announcements", r.annHandler.Create)
-			protected.PUT("/announcements/:id", r.annHandler.Update)
-			protected.DELETE("/announcements/:id", r.annHandler.Delete)
-			protected.POST("/announcements/:id/notify", r.annHandler.Notify)
+			protected.POST("/announcements", RBACMiddleware("captain", "super_admin"), r.annHandler.Create)
+			protected.PUT("/announcements/:id", RBACMiddleware("captain", "super_admin"), r.annHandler.Update)
+			protected.DELETE("/announcements/:id", RBACMiddleware("captain", "super_admin"), r.annHandler.Delete)
+			protected.POST("/announcements/:id/notify", RBACMiddleware("captain", "super_admin"), r.annHandler.Notify)
 
 			// Checkin
 			protected.POST("/checkin/clock-in", r.checkinHandler.ClockIn)
@@ -101,31 +105,31 @@ func (r *Router) Setup() *gin.Engine {
 			protected.GET("/checkin/status", r.checkinHandler.GetStatus)
 			protected.GET("/checkin/stats", r.checkinHandler.GetStats)
 			protected.GET("/checkin/online", r.checkinHandler.GetOnlineMembers)
-				protected.GET("/checkin/today-records", r.checkinHandler.GetAllTodayRecords)
+			protected.GET("/checkin/today-records", r.checkinHandler.GetAllTodayRecords)
 
 			// Knowledge
 			protected.GET("/knowledge/items", r.knowledgeHandler.ListItems)
-			protected.GET("/knowledge/items/pending", r.knowledgeHandler.ListPendingItems)
+			protected.GET("/knowledge/items/pending", RBACMiddleware("captain", "super_admin"), r.knowledgeHandler.ListPendingItems)
 			protected.GET("/knowledge/items/my", r.knowledgeHandler.ListUserItems)
 			protected.GET("/knowledge/items/:id", r.knowledgeHandler.GetItem)
 			protected.POST("/knowledge/links", r.knowledgeHandler.CreateLink)
 			protected.POST("/knowledge/files", r.knowledgeHandler.UploadFile)
 			protected.DELETE("/knowledge/items/:id", r.knowledgeHandler.DeleteItem)
-			protected.PUT("/knowledge/items/:id/approve", r.knowledgeHandler.ApproveItem)
-			protected.PUT("/knowledge/items/:id/reject", r.knowledgeHandler.RejectItem)
+			protected.PUT("/knowledge/items/:id/approve", RBACMiddleware("captain", "super_admin"), r.knowledgeHandler.ApproveItem)
+			protected.PUT("/knowledge/items/:id/reject", RBACMiddleware("captain", "super_admin"), r.knowledgeHandler.RejectItem)
 			protected.GET("/knowledge/download/:id", r.knowledgeHandler.DownloadFile)
 			protected.GET("/knowledge/categories", r.knowledgeHandler.ListCategories)
-			protected.POST("/knowledge/categories", r.knowledgeHandler.CreateCategory)
-			protected.DELETE("/knowledge/categories/:id", r.knowledgeHandler.DeleteCategory)
+			protected.POST("/knowledge/categories", RBACMiddleware("captain", "super_admin"), r.knowledgeHandler.CreateCategory)
+			protected.DELETE("/knowledge/categories/:id", RBACMiddleware("captain", "super_admin"), r.knowledgeHandler.DeleteCategory)
 
 			// Approvals
-			protected.GET("/approvals", r.approvalHandler.ListPending)
+			protected.GET("/approvals", RBACMiddleware("captain", "super_admin"), r.approvalHandler.ListPending)
 			protected.POST("/approvals", r.approvalHandler.Submit)
-			protected.POST("/approvals/:id/approve", r.approvalHandler.Approve)
-			protected.POST("/approvals/:id/reject", r.approvalHandler.Reject)
+			protected.POST("/approvals/:id/approve", RBACMiddleware("captain", "super_admin"), r.approvalHandler.Approve)
+			protected.POST("/approvals/:id/reject", RBACMiddleware("captain", "super_admin"), r.approvalHandler.Reject)
 
 			// Invitation codes (super_admin and captain only)
-			protected.POST("/invitations/generate", r.invitationHandler.GenerateCode)
+			protected.POST("/invitations/generate", RBACMiddleware("captain", "super_admin"), r.invitationHandler.GenerateCode)
 			protected.GET("/invitations/my", r.invitationHandler.GetMyCodes)
 
 			// Checkin Management (captain/super_admin only)

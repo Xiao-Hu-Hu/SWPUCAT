@@ -1,6 +1,8 @@
 package http
 
 import (
+	"SWPUCAT/internal/application/authorization"
+	"SWPUCAT/internal/domain/user"
 	"SWPUCAT/internal/infrastructure/auth"
 	"net/http"
 	"strings"
@@ -12,9 +14,10 @@ const (
 	ContextUserID   = "user_id"
 	ContextUsername = "username"
 	ContextRole     = "role"
+	ContextActor    = "actor"
 )
 
-func JWTAuthMiddleware(jwtSvc *auth.JWTService) gin.HandlerFunc {
+func JWTAuthMiddleware(jwtSvc *auth.JWTService, authzSvc *authorization.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
@@ -30,30 +33,37 @@ func JWTAuthMiddleware(jwtSvc *auth.JWTService) gin.HandlerFunc {
 			return
 		}
 
-		userID, username, role, err := jwtSvc.ParseToken(parts[1])
+		claims, err := jwtSvc.ParseToken(parts[1])
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, Response{Code: 401, Message: "invalid or expired token"})
 			c.Abort()
 			return
 		}
+		actor, err := authzSvc.ResolveActor(c.Request.Context(), claims.UserID, claims.AuthVersion)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, Response{Code: 401, Message: "account is inactive or session is revoked"})
+			c.Abort()
+			return
+		}
 
-		c.Set(ContextUserID, userID)
-		c.Set(ContextUsername, username)
-		c.Set(ContextRole, role)
+		c.Set(ContextUserID, actor.UserID)
+		c.Set(ContextUsername, actor.DisplayName)
+		c.Set(ContextRole, string(actor.Role))
+		c.Set(ContextActor, actor)
 		c.Next()
 	}
 }
 
 func RBACMiddleware(allowedRoles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		role, exists := c.Get(ContextRole)
+		actor, exists := c.Get(ContextActor)
 		if !exists {
 			c.JSON(http.StatusForbidden, Response{Code: 403, Message: "role not found"})
 			c.Abort()
 			return
 		}
 
-		roleStr, ok := role.(string)
+		resolvedActor, ok := actor.(authorization.Actor)
 		if !ok {
 			c.JSON(http.StatusForbidden, Response{Code: 403, Message: "invalid role"})
 			c.Abort()
@@ -61,7 +71,7 @@ func RBACMiddleware(allowedRoles ...string) gin.HandlerFunc {
 		}
 
 		for _, allowed := range allowedRoles {
-			if roleStr == allowed {
+			if resolvedActor.Role == user.Role(allowed) {
 				c.Next()
 				return
 			}
@@ -74,17 +84,20 @@ func RBACMiddleware(allowedRoles ...string) gin.HandlerFunc {
 
 func GetUserID(c *gin.Context) int64 {
 	id, _ := c.Get(ContextUserID)
-	return id.(int64)
+	value, _ := id.(int64)
+	return value
 }
 
 func GetUsername(c *gin.Context) string {
 	username, _ := c.Get(ContextUsername)
-	return username.(string)
+	value, _ := username.(string)
+	return value
 }
 
 func GetRole(c *gin.Context) string {
 	role, _ := c.Get(ContextRole)
-	return role.(string)
+	value, _ := role.(string)
+	return value
 }
 
 func IsCaptain(c *gin.Context) bool {

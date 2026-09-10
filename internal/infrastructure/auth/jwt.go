@@ -3,6 +3,7 @@ package auth
 import (
 	"SWPUCAT/internal/infrastructure/config"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -30,23 +31,28 @@ func NewJWTService(cfg *config.JWTConfig) *JWTService {
 }
 
 type Claims struct {
-	UserID    int64  `json:"user_id"`
-	Username  string `json:"username"`
-	StudentID string `json:"student_id,omitempty"`
-	Role      string `json:"role"`
+	UserID      int64  `json:"user_id"`
+	Username    string `json:"username"`
+	StudentID   string `json:"student_id,omitempty"`
+	Role        string `json:"role"`
+	AuthVersion int64  `json:"auth_version"`
+	TokenType   string `json:"token_type"`
 	jwt.RegisteredClaims
 }
 
-func (s *JWTService) GenerateAccessToken(userID int64, username, role, studentID string) (string, int64, error) {
+func (s *JWTService) GenerateAccessToken(userID int64, username, role, studentID string, authVersion int64) (string, int64, error) {
 	expiresAt := time.Now().Add(s.accessExpiry)
 	claims := Claims{
-		UserID:    userID,
-		Username:  username,
-		StudentID: studentID,
-		Role:      role,
+		UserID:      userID,
+		Username:    username,
+		StudentID:   studentID,
+		Role:        role,
+		AuthVersion: authVersion,
+		TokenType:   "access",
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Subject:   strconv.FormatInt(userID, 10),
 		},
 	}
 
@@ -58,12 +64,15 @@ func (s *JWTService) GenerateAccessToken(userID int64, username, role, studentID
 	return tokenString, expiresAt.Unix(), nil
 }
 
-func (s *JWTService) GenerateRefreshToken(userID int64) (string, error) {
+func (s *JWTService) GenerateRefreshToken(userID, authVersion int64) (string, error) {
 	claims := Claims{
-		UserID: userID,
+		UserID:      userID,
+		AuthVersion: authVersion,
+		TokenType:   "refresh",
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(s.refreshExpiry)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Subject:   strconv.FormatInt(userID, 10),
 		},
 	}
 
@@ -71,40 +80,35 @@ func (s *JWTService) GenerateRefreshToken(userID int64) (string, error) {
 	return token.SignedString(s.refreshSecret)
 }
 
-func (s *JWTService) ParseToken(tokenString string) (int64, string, string, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
-		return s.accessSecret, nil
-	})
-	if err != nil {
-		if errors.Is(err, jwt.ErrTokenExpired) {
-			return 0, "", "", ErrExpiredToken
-		}
-		return 0, "", "", ErrInvalidToken
-	}
-
-	claims, ok := token.Claims.(*Claims)
-	if !ok || !token.Valid {
-		return 0, "", "", ErrInvalidToken
-	}
-
-	return claims.UserID, claims.Username, claims.Role, nil
+func (s *JWTService) ParseToken(tokenString string) (*Claims, error) {
+	return parseToken(tokenString, s.accessSecret, "access")
 }
 
-func (s *JWTService) ParseRefreshToken(tokenString string) (int64, error) {
+func (s *JWTService) ParseRefreshToken(tokenString string) (int64, int64, error) {
+	claims, err := parseToken(tokenString, s.refreshSecret, "refresh")
+	if err != nil {
+		return 0, 0, err
+	}
+	return claims.UserID, claims.AuthVersion, nil
+}
+
+func parseToken(tokenString string, secret []byte, expectedType string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
-		return s.refreshSecret, nil
+		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+			return nil, ErrInvalidToken
+		}
+		return secret, nil
 	})
 	if err != nil {
 		if errors.Is(err, jwt.ErrTokenExpired) {
-			return 0, ErrExpiredToken
+			return nil, ErrExpiredToken
 		}
-		return 0, ErrInvalidToken
+		return nil, ErrInvalidToken
 	}
 
 	claims, ok := token.Claims.(*Claims)
-	if !ok || !token.Valid {
-		return 0, ErrInvalidToken
+	if !ok || !token.Valid || claims.TokenType != expectedType || claims.UserID <= 0 || claims.AuthVersion <= 0 {
+		return nil, ErrInvalidToken
 	}
-
-	return claims.UserID, nil
+	return claims, nil
 }

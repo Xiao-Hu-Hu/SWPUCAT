@@ -3,15 +3,18 @@ package database
 import "time"
 
 type UserModel struct {
-	ID              int64     `gorm:"primaryKey;autoIncrement"`
-	Username        string    `gorm:"uniqueIndex;size:32;not null"`
-	StudentID       string    `gorm:"uniqueIndex;size:12"`
-	Email           string    `gorm:"size:256"`
-	PasswordHash    string    `gorm:"size:256;not null"`
-	Nickname        string    `gorm:"size:32;not null"`
-	Avatar          string    `gorm:"size:256"`
-	TechDirection   string    `gorm:"size:32"`
-	Role            string    `gorm:"size:16;not null;default:member"`
+	ID              int64  `gorm:"primaryKey;autoIncrement"`
+	Username        string `gorm:"uniqueIndex;size:32;not null"`
+	StudentID       string `gorm:"uniqueIndex;size:12"`
+	Email           string `gorm:"size:256"`
+	PasswordHash    string `gorm:"size:256;not null"`
+	Nickname        string `gorm:"size:32;not null"`
+	Avatar          string `gorm:"size:256"`
+	TechDirection   string `gorm:"size:32"`
+	Role            string `gorm:"size:16;not null;default:member"`
+	Status          string `gorm:"size:16;not null;default:active;index"`
+	AuthVersion     int64  `gorm:"not null;default:1"`
+	DisabledAt      *time.Time
 	CheckinCount    int64     `gorm:"not null;default:0"`
 	LastCheckinDate string    `gorm:"size:10"`
 	CreatedAt       time.Time `gorm:"not null;default:current_timestamp"`
@@ -76,13 +79,13 @@ type KnowledgeItemModel struct {
 func (KnowledgeItemModel) TableName() string { return "knowledge_items" }
 
 type ApprovalModel struct {
-	ID           int64     `gorm:"primaryKey;autoIncrement"`
-	FileName     string    `gorm:"size:256;not null"`
-	FileSize     string    `gorm:"size:32"`
-	FileKey      string    `gorm:"size:256"`
-	CategoryID   int64     `gorm:"not null"`
-	UploaderID   int64     `gorm:"not null;index"`
-	UploaderName string    `gorm:"size:32;not null"`
+	ID           int64  `gorm:"primaryKey;autoIncrement"`
+	FileName     string `gorm:"size:256;not null"`
+	FileSize     string `gorm:"size:32"`
+	FileKey      string `gorm:"size:256"`
+	CategoryID   int64  `gorm:"not null"`
+	UploaderID   int64  `gorm:"not null;index"`
+	UploaderName string `gorm:"size:32;not null"`
 	ReviewerID   int64
 	Status       string    `gorm:"size:16;not null;default:pending"`
 	CreatedAt    time.Time `gorm:"not null;default:current_timestamp"`

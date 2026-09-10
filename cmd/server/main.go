@@ -3,6 +3,7 @@ package main
 import (
 	"SWPUCAT/internal/application/announcement"
 	"SWPUCAT/internal/application/approval"
+	"SWPUCAT/internal/application/authorization"
 	"SWPUCAT/internal/application/checkin"
 	"SWPUCAT/internal/application/dashboard"
 	"SWPUCAT/internal/application/invitation"
@@ -68,6 +69,7 @@ func main() {
 	knowledgeSvc := knowledge.NewKnowledgeService(knowledgeRepo, publisher)
 	approvalSvc := approval.NewApprovalService(approvalRepo, knowledgeRepo, publisher)
 	dashboardSvc := dashboard.NewDashboardService(userRepo, checkinRepo, annRepo, knowledgeRepo)
+	authzSvc := authorization.NewService(userRepo)
 
 	// Initialize handlers
 	authHandler := httpInterface.NewAuthHandler(userSvc)
@@ -82,6 +84,7 @@ func main() {
 	// Initialize router
 	router := httpInterface.NewRouter(
 		jwtSvc,
+		authzSvc,
 		authHandler,
 		userHandler,
 		dashboardHandler,

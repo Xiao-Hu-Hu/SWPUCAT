@@ -16,6 +16,13 @@ var (
 	ErrNotCaptain           = errors.New("user is not captain")
 )
 
+type Status string
+
+const (
+	StatusActive   Status = "active"
+	StatusDisabled Status = "disabled"
+)
+
 type User struct {
 	ID            int64
 	Username      Username
@@ -26,6 +33,9 @@ type User struct {
 	TechDirection string
 	PasswordHash  PasswordHash
 	Role          Role
+	Status        Status
+	AuthVersion   int64
+	DisabledAt    *time.Time
 	JoinedAt      time.Time
 	CheckinCount  int64
 	CreatedAt     time.Time
@@ -39,6 +49,8 @@ func NewUser(username Username, nickname Nickname, passwordHash PasswordHash) *U
 		Nickname:     nickname,
 		PasswordHash: passwordHash,
 		Role:         RoleMember,
+		Status:       StatusActive,
+		AuthVersion:  1,
 		JoinedAt:     now,
 		CheckinCount: 0,
 		CreatedAt:    now,
@@ -55,11 +67,17 @@ func NewUserWithStudentID(studentID StudentID, email string, nickname Nickname, 
 		Nickname:     nickname,
 		PasswordHash: passwordHash,
 		Role:         RoleMember,
+		Status:       StatusActive,
+		AuthVersion:  1,
 		JoinedAt:     now,
 		CheckinCount: 0,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
+}
+
+func (u *User) IsActive() bool {
+	return u.Status == StatusActive
 }
 
 func (u *User) TransferCaptainTo(target *User) error {
