@@ -83,22 +83,25 @@ type KnowledgeCategoryModel struct {
 func (KnowledgeCategoryModel) TableName() string { return "knowledge_categories" }
 
 type KnowledgeItemModel struct {
-	ID           int64     `gorm:"primaryKey;autoIncrement"`
-	Type         string    `gorm:"size:8;not null"`
-	Name         string    `gorm:"size:256;not null"`
-	Description  string    `gorm:"type:text"`
-	URL          string    `gorm:"size:512"`
-	FileSize     string    `gorm:"size:32"`
-	FileKey      string    `gorm:"size:256"`
-	CategoryID   int64     `gorm:"not null;index"`
-	CategoryName string    `gorm:"size:64"`
-	UploaderID   int64     `gorm:"not null"`
-	UploaderName string    `gorm:"size:32;not null"`
-	Approved     bool      `gorm:"not null;default:false"`
-	Rejected     bool      `gorm:"not null;default:false"`
-	RejectReason string    `gorm:"size:512"`
-	ReviewerID   int64     `gorm:"index"`
-	ReviewerName string    `gorm:"size:32"`
+	ID           int64      `gorm:"primaryKey;autoIncrement"`
+	Type         string     `gorm:"size:8;not null"`
+	Name         string     `gorm:"size:256;not null"`
+	Description  string     `gorm:"type:text"`
+	URL          string     `gorm:"size:512"`
+	FileSize     string     `gorm:"size:32"`
+	FileKey      string     `gorm:"size:256"`
+	CategoryID   int64      `gorm:"not null;index"`
+	CategoryName string     `gorm:"size:64"`
+	UploaderID   int64      `gorm:"not null"`
+	UploaderName string     `gorm:"size:32;not null"`
+	Status       string     `gorm:"size:16;not null;default:pending;index"`
+	Approved     bool       `gorm:"not null;default:false"`
+	Rejected     bool       `gorm:"not null;default:false"`
+	RejectReason string     `gorm:"size:512"`
+	ReviewerID   int64      `gorm:"index"`
+	ReviewerName string     `gorm:"size:32"`
+	DeletedAt    *time.Time `gorm:"index"`
+	DeletedBy    int64
 	CreatedAt    time.Time `gorm:"not null;default:current_timestamp"`
 }
 

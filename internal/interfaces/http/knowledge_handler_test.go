@@ -148,8 +148,8 @@ func TestInvalidUploadsLeaveNoFilesOrRecords(t *testing.T) {
 	}{
 		{"invalid-late-category", "invalid", "", 1},
 		{"missing-category", "", "", 1},
-		{"oversized-late-field", "2", strings.Repeat("x", 4097), 1},
-		{"description-too-long", "2", strings.Repeat("中", 1001), 1},
+		{"oversized-late-field", "2", strings.Repeat("x", maxKnowledgeMetadataFieldSize+1), 1},
+		{"description-too-long", "2", strings.Repeat("中", maxKnowledgeDescriptionRunes+1), 1},
 		{"duplicate-file", "2", "", 2},
 		{"missing-file", "2", "", 0},
 	} {

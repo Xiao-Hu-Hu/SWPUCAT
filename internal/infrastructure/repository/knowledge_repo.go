@@ -4,6 +4,7 @@ import (
 	"SWPUCAT/internal/domain/knowledge"
 	"SWPUCAT/internal/infrastructure/database"
 	"context"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -17,8 +18,8 @@ func NewKnowledgeRepo(db *gorm.DB) *KnowledgeRepo {
 }
 
 func (r *KnowledgeRepo) CreateItem(ctx context.Context, item *knowledge.KnowledgeItem) error {
+	item.SetStatus(item.EffectiveStatus())
 	model := &database.KnowledgeItemModel{
-		ID:           item.ID,
 		Type:         string(item.Type),
 		Name:         item.Name,
 		Description:  item.Description,
@@ -28,11 +29,15 @@ func (r *KnowledgeRepo) CreateItem(ctx context.Context, item *knowledge.Knowledg
 		CategoryID:   item.CategoryID,
 		UploaderID:   item.UploaderID,
 		UploaderName: item.UploaderName,
+		Status:       string(item.Status),
 		Approved:     item.Approved,
 		Rejected:     item.Rejected,
 		RejectReason: item.RejectReason,
 		ReviewerID:   item.ReviewerID,
 		ReviewerName: item.ReviewerName,
+		DeletedAt:    item.DeletedAt,
+		DeletedBy:    item.DeletedBy,
+		CreatedAt:    item.CreatedAt,
 	}
 	if err := r.db.WithContext(ctx).Create(model).Error; err != nil {
 		return err
@@ -42,88 +47,139 @@ func (r *KnowledgeRepo) CreateItem(ctx context.Context, item *knowledge.Knowledg
 	return nil
 }
 
+func (r *KnowledgeRepo) itemQuery(ctx context.Context) *gorm.DB {
+	return r.db.WithContext(ctx).
+		Model(&database.KnowledgeItemModel{}).
+		Joins("LEFT JOIN knowledge_categories ON knowledge_categories.id = knowledge_items.category_id").
+		Select("knowledge_items.*, knowledge_categories.name AS category_name").
+		Where("knowledge_items.status <> ?", string(knowledge.ItemStatusDeleted)).
+		Where("knowledge_items.deleted_at IS NULL")
+}
+
 func (r *KnowledgeRepo) FindItemByID(ctx context.Context, id int64) (*knowledge.KnowledgeItem, error) {
 	var model database.KnowledgeItemModel
-	if err := r.db.WithContext(ctx).First(&model, id).Error; err != nil {
+	if err := r.itemQuery(ctx).Where("knowledge_items.id = ?", id).First(&model).Error; err != nil {
 		return nil, err
 	}
 	return toDomainKnowledgeItem(&model), nil
 }
 
 func (r *KnowledgeRepo) FindItems(ctx context.Context, filter knowledge.ItemFilter) ([]*knowledge.KnowledgeItem, error) {
-	query := r.db.WithContext(ctx).Model(&database.KnowledgeItemModel{})
+	query := r.itemQuery(ctx)
 	if filter.CategoryID != nil {
-		query = query.Where("category_id = ?", *filter.CategoryID)
+		query = query.Where("knowledge_items.category_id = ?", *filter.CategoryID)
 	}
 	if filter.Search != "" {
-		query = query.Where("name LIKE ?", "%"+filter.Search+"%")
+		pattern := "%" + filter.Search + "%"
+		query = query.Where(
+			"(knowledge_items.name ILIKE ? OR knowledge_items.description ILIKE ? OR knowledge_categories.name ILIKE ?)",
+			pattern, pattern, pattern,
+		)
 	}
-	if filter.Approved != nil {
-		query = query.Where("approved = ?", *filter.Approved)
+	if filter.Status != nil {
+		query = query.Where("knowledge_items.status = ?", string(*filter.Status))
+	} else if filter.Approved != nil {
+		status := knowledge.ItemStatusPending
 		if *filter.Approved {
-			query = query.Where("rejected = ?", false)
+			status = knowledge.ItemStatusApproved
 		}
+		query = query.Where("knowledge_items.status = ?", string(status))
+	}
+	if filter.Page > 0 && filter.PageSize > 0 {
+		query = query.Offset((filter.Page - 1) * filter.PageSize).Limit(filter.PageSize)
 	}
 
 	var models []database.KnowledgeItemModel
-	if err := query.Order("created_at DESC").Find(&models).Error; err != nil {
+	if err := query.Order("knowledge_items.created_at DESC").Find(&models).Error; err != nil {
 		return nil, err
 	}
-	items := make([]*knowledge.KnowledgeItem, len(models))
-	for i, m := range models {
-		items[i] = toDomainKnowledgeItem(&m)
+	items := make([]*knowledge.KnowledgeItem, 0, len(models))
+	for i := range models {
+		items = append(items, toDomainKnowledgeItem(&models[i]))
 	}
 	return items, nil
 }
 
 func (r *KnowledgeRepo) FindItemsByUploader(ctx context.Context, uploaderID int64) ([]*knowledge.KnowledgeItem, error) {
 	var models []database.KnowledgeItemModel
-	if err := r.db.WithContext(ctx).Where("uploader_id = ?", uploaderID).Order("created_at DESC").Find(&models).Error; err != nil {
+	if err := r.itemQuery(ctx).
+		Where("knowledge_items.uploader_id = ?", uploaderID).
+		Order("knowledge_items.created_at DESC").
+		Find(&models).Error; err != nil {
 		return nil, err
 	}
-	items := make([]*knowledge.KnowledgeItem, len(models))
-	for i, m := range models {
-		items[i] = toDomainKnowledgeItem(&m)
+	items := make([]*knowledge.KnowledgeItem, 0, len(models))
+	for i := range models {
+		items = append(items, toDomainKnowledgeItem(&models[i]))
 	}
 	return items, nil
 }
 
-func (r *KnowledgeRepo) UpdateItem(ctx context.Context, item *knowledge.KnowledgeItem) error {
-	return r.db.WithContext(ctx).Model(&database.KnowledgeItemModel{}).Where("id = ?", item.ID).Updates(map[string]interface{}{
-		"name":          item.Name,
-		"description":   item.Description,
-		"url":           item.URL,
-		"file_size":     item.FileSize,
-		"category_id":   item.CategoryID,
-		"approved":      item.Approved,
-		"rejected":      item.Rejected,
-		"reject_reason": item.RejectReason,
-		"reviewer_id":   item.ReviewerID,
-		"reviewer_name": item.ReviewerName,
-	}).Error
+func (r *KnowledgeRepo) UpdateItem(ctx context.Context, item *knowledge.KnowledgeItem, expectedStatus knowledge.ItemStatus) error {
+	item.SetStatus(item.EffectiveStatus())
+	result := r.db.WithContext(ctx).
+		Model(&database.KnowledgeItemModel{}).
+		Where("id = ? AND status = ? AND deleted_at IS NULL", item.ID, string(expectedStatus)).
+		Updates(map[string]interface{}{
+			"name":          item.Name,
+			"description":   item.Description,
+			"url":           item.URL,
+			"file_size":     item.FileSize,
+			"file_key":      item.FileKey,
+			"category_id":   item.CategoryID,
+			"status":        string(item.Status),
+			"approved":      item.Approved,
+			"rejected":      item.Rejected,
+			"reject_reason": item.RejectReason,
+			"reviewer_id":   item.ReviewerID,
+			"reviewer_name": item.ReviewerName,
+			"deleted_at":    item.DeletedAt,
+			"deleted_by":    item.DeletedBy,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return knowledge.ErrInvalidItemState
+	}
+	return nil
 }
 
-func (r *KnowledgeRepo) DeleteItem(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Delete(&database.KnowledgeItemModel{}, id).Error
+func (r *KnowledgeRepo) DeleteItem(ctx context.Context, id, deletedBy int64) error {
+	result := r.db.WithContext(ctx).
+		Model(&database.KnowledgeItemModel{}).
+		Where("id = ? AND status <> ?", id, string(knowledge.ItemStatusDeleted)).
+		Updates(map[string]interface{}{
+			"status":     string(knowledge.ItemStatusDeleted),
+			"approved":   false,
+			"rejected":   false,
+			"deleted_at": time.Now(),
+			"deleted_by": deletedBy,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func (r *KnowledgeRepo) CountItems(ctx context.Context) (int64, error) {
 	var count int64
-	err := r.db.WithContext(ctx).Model(&database.KnowledgeItemModel{}).Where("approved = ?", true).Count(&count).Error
-	return count, err
-}
-
-func (r *KnowledgeRepo) CountItemsByCategory(ctx context.Context, categoryID int64) (int64, error) {
-	var count int64
-	err := r.db.WithContext(ctx).Model(&database.KnowledgeItemModel{}).Where("category_id = ? AND approved = ?", categoryID, true).Count(&count).Error
+	err := r.db.WithContext(ctx).
+		Model(&database.KnowledgeItemModel{}).
+		Where("status = ?", string(knowledge.ItemStatusApproved)).
+		Where("deleted_at IS NULL").
+		Count(&count).Error
 	return count, err
 }
 
 func (r *KnowledgeRepo) CreateCategory(ctx context.Context, cat *knowledge.Category) error {
 	model := &database.KnowledgeCategoryModel{
-		ID:       cat.ID,
-		Name:     cat.Name,
-		IsSystem: cat.IsSystem,
+		Name:      cat.Name,
+		IsSystem:  cat.IsSystem,
+		CreatedAt: cat.CreatedAt,
 	}
 	if err := r.db.WithContext(ctx).Create(model).Error; err != nil {
 		return err
@@ -133,56 +189,74 @@ func (r *KnowledgeRepo) CreateCategory(ctx context.Context, cat *knowledge.Categ
 	return nil
 }
 
+func (r *KnowledgeRepo) FindAllCategories(ctx context.Context) ([]*knowledge.Category, error) {
+	var models []database.KnowledgeCategoryModel
+	if err := r.db.WithContext(ctx).Order("id ASC").Find(&models).Error; err != nil {
+		return nil, err
+	}
+	categories := make([]*knowledge.Category, 0, len(models))
+	for i := range models {
+		categories = append(categories, &knowledge.Category{
+			ID:        models[i].ID,
+			Name:      models[i].Name,
+			IsSystem:  models[i].IsSystem,
+			CreatedAt: models[i].CreatedAt,
+		})
+	}
+	return categories, nil
+}
+
 func (r *KnowledgeRepo) FindCategoryByID(ctx context.Context, id int64) (*knowledge.Category, error) {
 	var model database.KnowledgeCategoryModel
 	if err := r.db.WithContext(ctx).First(&model, id).Error; err != nil {
 		return nil, err
 	}
-	return toDomainCategory(&model), nil
-}
-
-func (r *KnowledgeRepo) FindAllCategories(ctx context.Context) ([]*knowledge.Category, error) {
-	var models []database.KnowledgeCategoryModel
-	if err := r.db.WithContext(ctx).Order("id").Find(&models).Error; err != nil {
-		return nil, err
-	}
-	cats := make([]*knowledge.Category, len(models))
-	for i, m := range models {
-		cats[i] = toDomainCategory(&m)
-	}
-	return cats, nil
+	return &knowledge.Category{
+		ID:        model.ID,
+		Name:      model.Name,
+		IsSystem:  model.IsSystem,
+		CreatedAt: model.CreatedAt,
+	}, nil
 }
 
 func (r *KnowledgeRepo) DeleteCategory(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Delete(&database.KnowledgeCategoryModel{}, id).Error
 }
 
-func toDomainKnowledgeItem(m *database.KnowledgeItemModel) *knowledge.KnowledgeItem {
-	return &knowledge.KnowledgeItem{
-		ID:           m.ID,
-		Type:         knowledge.ItemType(m.Type),
-		Name:         m.Name,
-		Description:  m.Description,
-		URL:          m.URL,
-		FileSize:     m.FileSize,
-		FileKey:      m.FileKey,
-		CategoryID:   m.CategoryID,
-		UploaderID:   m.UploaderID,
-		UploaderName: m.UploaderName,
-		Approved:     m.Approved,
-		Rejected:     m.Rejected,
-		RejectReason: m.RejectReason,
-		ReviewerID:   m.ReviewerID,
-		ReviewerName: m.ReviewerName,
-		CreatedAt:    m.CreatedAt,
-	}
+func (r *KnowledgeRepo) CountItemsByCategory(ctx context.Context, categoryID int64) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Model(&database.KnowledgeItemModel{}).
+		Where("category_id = ?", categoryID).
+		Where("status <> ?", string(knowledge.ItemStatusDeleted)).
+		Where("deleted_at IS NULL").
+		Count(&count).Error
+	return count, err
 }
 
-func toDomainCategory(m *database.KnowledgeCategoryModel) *knowledge.Category {
-	return &knowledge.Category{
-		ID:        m.ID,
-		Name:      m.Name,
-		IsSystem:  m.IsSystem,
-		CreatedAt: m.CreatedAt,
+func toDomainKnowledgeItem(model *database.KnowledgeItemModel) *knowledge.KnowledgeItem {
+	item := &knowledge.KnowledgeItem{
+		ID:           model.ID,
+		Type:         knowledge.ItemType(model.Type),
+		Name:         model.Name,
+		Description:  model.Description,
+		URL:          model.URL,
+		FileSize:     model.FileSize,
+		FileKey:      model.FileKey,
+		CategoryID:   model.CategoryID,
+		CategoryName: model.CategoryName,
+		UploaderID:   model.UploaderID,
+		UploaderName: model.UploaderName,
+		Status:       knowledge.ItemStatus(model.Status),
+		Approved:     model.Approved,
+		Rejected:     model.Rejected,
+		RejectReason: model.RejectReason,
+		ReviewerID:   model.ReviewerID,
+		ReviewerName: model.ReviewerName,
+		DeletedAt:    model.DeletedAt,
+		DeletedBy:    model.DeletedBy,
+		CreatedAt:    model.CreatedAt,
 	}
+	item.SetStatus(item.EffectiveStatus())
+	return item
 }

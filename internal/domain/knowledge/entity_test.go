@@ -12,7 +12,7 @@ func TestKnowledgeItemVisibility(t *testing.T) {
 	}{
 		{
 			name:     "approved public item",
-			item:     KnowledgeItem{Approved: true, UploaderID: 1},
+			item:     KnowledgeItem{Status: ItemStatusApproved, Approved: true, UploaderID: 1},
 			viewerID: 2,
 			visible:  true,
 		},
@@ -30,7 +30,7 @@ func TestKnowledgeItemVisibility(t *testing.T) {
 		},
 		{
 			name:      "pending reviewer",
-			item:      KnowledgeItem{UploaderID: 1},
+			item:      KnowledgeItem{Status: ItemStatusPending, UploaderID: 1},
 			viewerID:  2,
 			canReview: true,
 			visible:   true,
@@ -41,6 +41,12 @@ func TestKnowledgeItemVisibility(t *testing.T) {
 			viewerID: 2,
 			visible:  false,
 		},
+		{
+			name:     "deleted item is private even to owner",
+			item:     KnowledgeItem{Status: ItemStatusDeleted, UploaderID: 1},
+			viewerID: 1,
+			visible:  false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -49,5 +55,21 @@ func TestKnowledgeItemVisibility(t *testing.T) {
 				t.Fatalf("IsVisibleTo() = %v, want %v", got, tt.visible)
 			}
 		})
+	}
+}
+
+func TestKnowledgeItemStatusSynchronizesLegacyFlags(t *testing.T) {
+	item := KnowledgeItem{}
+	item.Approve()
+	if item.Status != ItemStatusApproved || !item.Approved || item.Rejected {
+		t.Fatalf("approve produced inconsistent state: %+v", item)
+	}
+	item.Reject("outdated")
+	if item.Status != ItemStatusRejected || item.Approved || !item.Rejected || item.RejectReason != "outdated" {
+		t.Fatalf("reject produced inconsistent state: %+v", item)
+	}
+	item.MarkDeleted(9)
+	if item.Status != ItemStatusDeleted || item.Approved || item.Rejected || item.DeletedBy != 9 || item.DeletedAt == nil {
+		t.Fatalf("delete produced inconsistent state: %+v", item)
 	}
 }

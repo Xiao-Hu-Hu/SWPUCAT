@@ -10,13 +10,13 @@ import (
 type CreateLinkRequest struct {
 	Name        string `json:"name" validate:"required,max=256"`
 	URL         string `json:"url" validate:"required,url"`
-	Description string `json:"description" validate:"max=1000"`
+	Description string `json:"description" validate:"max=20000"`
 	CategoryID  int64  `json:"category_id" validate:"required"`
 }
 
 type UploadFileRequest struct {
 	FileName    string `json:"file_name" validate:"required,max=256"`
-	Description string `json:"description" validate:"max=1000"`
+	Description string `json:"description" validate:"max=20000"`
 	FileSize    string `json:"file_size"`
 	FileKey     string `json:"file_key"`
 	CategoryID  int64  `json:"category_id" validate:"required"`
@@ -38,6 +38,7 @@ type KnowledgeItemDTO struct {
 	CategoryName string `json:"category_name"`
 	UploaderID   int64  `json:"uploader_id"`
 	UploaderName string `json:"uploader_name"`
+	Status       string `json:"status"`
 	Approved     bool   `json:"approved"`
 	Rejected     bool   `json:"rejected"`
 	RejectReason string `json:"reject_reason,omitempty"`
@@ -67,11 +68,15 @@ func (s *KnowledgeService) CreateLink(ctx context.Context, uploaderID int64, upl
 	if err != nil {
 		return nil, err
 	}
-	item.Approved = isCaptain
+	if isCaptain {
+		item.Approve()
+	} else {
+		item.SetStatus(knowledge.ItemStatusPending)
+	}
 	if err := s.repo.CreateItem(ctx, item); err != nil {
 		return nil, err
 	}
-	return toItemDTO(item, ""), nil
+	return toItemDTO(item), nil
 }
 
 func (s *KnowledgeService) UploadFile(ctx context.Context, uploaderID int64, uploaderName string, isCaptain bool, req UploadFileRequest) (*KnowledgeItemDTO, error) {
@@ -83,7 +88,7 @@ func (s *KnowledgeService) UploadFile(ctx context.Context, uploaderID int64, upl
 		return nil, err
 	}
 	s.publisher.Publish(knowledge.NewFileUploaded(item.ID, item.Name, item.UploaderID, !isCaptain))
-	return toItemDTO(item, ""), nil
+	return toItemDTO(item), nil
 }
 
 func (s *KnowledgeService) DeleteItem(ctx context.Context, itemID, userID int64, isCaptain bool) error {
@@ -94,39 +99,37 @@ func (s *KnowledgeService) DeleteItem(ctx context.Context, itemID, userID int64,
 	if !isCaptain && !item.IsOwnedBy(userID) {
 		return shared.ErrForbidden
 	}
-	return s.repo.DeleteItem(ctx, itemID)
+	return s.repo.DeleteItem(ctx, itemID, userID)
 }
 
 func (s *KnowledgeService) ListItems(ctx context.Context, categoryID *int64, search string) ([]KnowledgeItemDTO, error) {
-	trueVal := true
+	approved := knowledge.ItemStatusApproved
 	items, err := s.repo.FindItems(ctx, knowledge.ItemFilter{
 		CategoryID: categoryID,
 		Search:     search,
-		Approved:   &trueVal,
+		Status:     &approved,
 	})
 	if err != nil {
 		return nil, err
 	}
 	result := make([]KnowledgeItemDTO, 0, len(items))
 	for _, item := range items {
-		result = append(result, *toItemDTO(item, ""))
+		result = append(result, *toItemDTO(item))
 	}
 	return result, nil
 }
 
 func (s *KnowledgeService) ListPendingItems(ctx context.Context) ([]KnowledgeItemDTO, error) {
-	falseVal := false
+	pending := knowledge.ItemStatusPending
 	items, err := s.repo.FindItems(ctx, knowledge.ItemFilter{
-		Approved: &falseVal,
+		Status: &pending,
 	})
 	if err != nil {
 		return nil, err
 	}
 	result := make([]KnowledgeItemDTO, 0, len(items))
 	for _, item := range items {
-		if !item.Rejected {
-			result = append(result, *toItemDTO(item, ""))
-		}
+		result = append(result, *toItemDTO(item))
 	}
 	return result, nil
 }
@@ -138,7 +141,7 @@ func (s *KnowledgeService) ListUserItems(ctx context.Context, userID int64) ([]K
 	}
 	result := make([]KnowledgeItemDTO, 0, len(items))
 	for _, item := range items {
-		result = append(result, *toItemDTO(item, ""))
+		result = append(result, *toItemDTO(item))
 	}
 	return result, nil
 }
@@ -148,10 +151,13 @@ func (s *KnowledgeService) ApproveItem(ctx context.Context, itemID, reviewerID i
 	if err != nil {
 		return err
 	}
-	item.Approved = true
+	if item.EffectiveStatus() != knowledge.ItemStatusPending {
+		return knowledge.ErrInvalidItemState
+	}
+	item.Approve()
 	item.ReviewerID = reviewerID
 	item.ReviewerName = reviewerName
-	return s.repo.UpdateItem(ctx, item)
+	return s.repo.UpdateItem(ctx, item, knowledge.ItemStatusPending)
 }
 
 func (s *KnowledgeService) RejectItem(ctx context.Context, itemID, reviewerID int64, reviewerName, reason string) (string, error) {
@@ -159,17 +165,16 @@ func (s *KnowledgeService) RejectItem(ctx context.Context, itemID, reviewerID in
 	if err != nil {
 		return "", err
 	}
-	item.Rejected = true
-	item.RejectReason = reason
+	if item.EffectiveStatus() != knowledge.ItemStatusPending {
+		return "", knowledge.ErrInvalidItemState
+	}
+	item.Reject(reason)
 	item.ReviewerID = reviewerID
 	item.ReviewerName = reviewerName
-	if err := s.repo.UpdateItem(ctx, item); err != nil {
+	if err := s.repo.UpdateItem(ctx, item, knowledge.ItemStatusPending); err != nil {
 		return "", err
 	}
-	// Return file key for cleanup if it's a file
-	if item.Type == knowledge.ItemTypeFile && item.FileKey != "" {
-		return item.FileKey, nil
-	}
+	// Rejected attachments remain available for audit and possible re-review.
 	return "", nil
 }
 
@@ -189,7 +194,10 @@ func (s *KnowledgeService) DeleteCategory(ctx context.Context, catID int64) erro
 	if cat.IsSystem {
 		return knowledge.ErrCategoryInUse
 	}
-	count, _ := s.repo.CountItemsByCategory(ctx, catID)
+	count, err := s.repo.CountItemsByCategory(ctx, catID)
+	if err != nil {
+		return err
+	}
 	if count > 0 {
 		return knowledge.ErrCategoryInUse
 	}
@@ -222,10 +230,10 @@ func (s *KnowledgeService) GetItem(ctx context.Context, id, viewerID int64, canR
 	if !item.IsVisibleTo(viewerID, canReview) {
 		return nil, shared.ErrForbidden
 	}
-	return toItemDTO(item, ""), nil
+	return toItemDTO(item), nil
 }
 
-func toItemDTO(item *knowledge.KnowledgeItem, catName string) *KnowledgeItemDTO {
+func toItemDTO(item *knowledge.KnowledgeItem) *KnowledgeItemDTO {
 	return &KnowledgeItemDTO{
 		ID:           item.ID,
 		Type:         string(item.Type),
@@ -235,9 +243,10 @@ func toItemDTO(item *knowledge.KnowledgeItem, catName string) *KnowledgeItemDTO 
 		FileKey:      item.FileKey,
 		FileSize:     item.FileSize,
 		CategoryID:   item.CategoryID,
-		CategoryName: catName,
+		CategoryName: item.CategoryName,
 		UploaderID:   item.UploaderID,
 		UploaderName: item.UploaderName,
+		Status:       string(item.EffectiveStatus()),
 		Approved:     item.Approved,
 		Rejected:     item.Rejected,
 		RejectReason: item.RejectReason,

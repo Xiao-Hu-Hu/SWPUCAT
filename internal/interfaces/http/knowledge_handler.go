@@ -16,8 +16,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// maxUploadSize 单个文件上传大小上限（1GB）
-const maxUploadSize = 1 << 30
+const (
+	// maxUploadSize 单个文件上传大小上限（1GB）
+	maxUploadSize                 = 1 << 30
+	maxKnowledgeDescriptionRunes  = 20000
+	maxKnowledgeMetadataFieldSize = maxKnowledgeDescriptionRunes*utf8.UTFMax + 1024
+)
 
 type KnowledgeHandler struct {
 	knowledgeSvc *knowledge.KnowledgeService
@@ -32,6 +36,10 @@ func (h *KnowledgeHandler) CreateLink(c *gin.Context) {
 	var req knowledge.CreateLinkRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, "invalid request body")
+		return
+	}
+	if !validKnowledgeDescription(req.Description) {
+		BadRequest(c, "description exceeds 20000 characters")
 		return
 	}
 
@@ -131,12 +139,11 @@ func (h *KnowledgeHandler) receiveUpload(r *http.Request, limit int64) (*storage
 			if _, exists := fields[name]; exists {
 				return nil, req, errors.New("duplicate upload field")
 			}
-			const maxFieldSize = 4 << 10
-			value, err := io.ReadAll(io.LimitReader(part, maxFieldSize+1))
+			value, err := io.ReadAll(io.LimitReader(part, maxKnowledgeMetadataFieldSize+1))
 			if err != nil {
 				return nil, req, err
 			}
-			if len(value) > maxFieldSize {
+			if len(value) > maxKnowledgeMetadataFieldSize {
 				return nil, req, errors.New("upload field too large")
 			}
 			fields[name] = string(value)
@@ -153,8 +160,8 @@ func (h *KnowledgeHandler) receiveUpload(r *http.Request, limit int64) (*storage
 		return nil, req, errors.New("invalid category_id")
 	}
 	req.Description = fields["description"]
-	if !utf8.ValidString(req.Description) || utf8.RuneCountInString(req.Description) > 1000 {
-		return nil, req, errors.New("description exceeds 1000 characters")
+	if !validKnowledgeDescription(req.Description) {
+		return nil, req, errors.New("description exceeds 20000 characters")
 	}
 	if err := r.Context().Err(); err != nil {
 		return nil, req, err
@@ -162,6 +169,10 @@ func (h *KnowledgeHandler) receiveUpload(r *http.Request, limit int64) (*storage
 	req.FileSize = fmt.Sprintf("%.2f MB", float64(pending.Size)/(1024*1024))
 	keep = true
 	return pending, req, nil
+}
+
+func validKnowledgeDescription(description string) bool {
+	return utf8.ValidString(description) && utf8.RuneCountInString(description) <= maxKnowledgeDescriptionRunes
 }
 
 func (h *KnowledgeHandler) DeleteItem(c *gin.Context) {
@@ -339,15 +350,10 @@ func (h *KnowledgeHandler) RejectItem(c *gin.Context) {
 	reviewerID := GetUserID(c)
 	reviewerName := GetUsername(c)
 
-	fileKey, err := h.knowledgeSvc.RejectItem(c.Request.Context(), id, reviewerID, reviewerName, req.Reason)
+	_, err = h.knowledgeSvc.RejectItem(c.Request.Context(), id, reviewerID, reviewerName, req.Reason)
 	if err != nil {
 		InternalError(c, "failed to reject item")
 		return
-	}
-
-	// Delete file from storage if it exists
-	if fileKey != "" {
-		h.storage.Delete(fileKey)
 	}
 
 	Success(c, nil)

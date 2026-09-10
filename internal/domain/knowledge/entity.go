@@ -18,13 +18,17 @@ type KnowledgeItem struct {
 	FileKey      string
 	FileSize     string
 	CategoryID   int64
+	CategoryName string
 	UploaderID   int64
 	UploaderName string
+	Status       ItemStatus
 	Approved     bool
 	Rejected     bool
 	RejectReason string
 	ReviewerID   int64
 	ReviewerName string
+	DeletedAt    *time.Time
+	DeletedBy    int64
 	CreatedAt    time.Time
 }
 
@@ -43,6 +47,7 @@ func NewLink(name, url, description string, categoryID, uploaderID int64, upload
 		CategoryID:   categoryID,
 		UploaderID:   uploaderID,
 		UploaderName: uploaderName,
+		Status:       ItemStatusApproved,
 		Approved:     true,
 		CreatedAt:    time.Now(),
 	}, nil
@@ -51,6 +56,10 @@ func NewLink(name, url, description string, categoryID, uploaderID int64, upload
 func NewFile(name, description, fileSize, fileKey string, categoryID, uploaderID int64, uploaderName string, approved bool) (*KnowledgeItem, error) {
 	if name == "" {
 		return nil, ErrEmptyItemName
+	}
+	status := ItemStatusPending
+	if approved {
+		status = ItemStatusApproved
 	}
 	return &KnowledgeItem{
 		Type:         ItemTypeFile,
@@ -61,13 +70,59 @@ func NewFile(name, description, fileSize, fileKey string, categoryID, uploaderID
 		CategoryID:   categoryID,
 		UploaderID:   uploaderID,
 		UploaderName: uploaderName,
+		Status:       status,
 		Approved:     approved,
 		CreatedAt:    time.Now(),
 	}, nil
 }
 
 func (k *KnowledgeItem) Approve() {
-	k.Approved = true
+	k.RejectReason = ""
+	k.SetStatus(ItemStatusApproved)
+}
+
+func (k *KnowledgeItem) Reject(reason string) {
+	k.RejectReason = reason
+	k.SetStatus(ItemStatusRejected)
+}
+
+func (k *KnowledgeItem) MarkDeleted(deletedBy int64) {
+	now := time.Now()
+	k.DeletedAt = &now
+	k.DeletedBy = deletedBy
+	k.SetStatus(ItemStatusDeleted)
+}
+
+func (k *KnowledgeItem) SetStatus(status ItemStatus) {
+	k.Status = status
+	switch status {
+	case ItemStatusApproved:
+		k.Approved = true
+		k.Rejected = false
+	case ItemStatusRejected:
+		k.Approved = false
+		k.Rejected = true
+	case ItemStatusPending, ItemStatusDeleted:
+		k.Approved = false
+		k.Rejected = false
+	}
+}
+
+func (k *KnowledgeItem) EffectiveStatus() ItemStatus {
+	if k.Status.IsValid() {
+		return k.Status
+	}
+	if k.Rejected {
+		return ItemStatusRejected
+	}
+	if k.Approved {
+		return ItemStatusApproved
+	}
+	return ItemStatusPending
+}
+
+func (k *KnowledgeItem) IsDeleted() bool {
+	return k.EffectiveStatus() == ItemStatusDeleted
 }
 
 func (k *KnowledgeItem) IsOwnedBy(userID int64) bool {
@@ -75,8 +130,11 @@ func (k *KnowledgeItem) IsOwnedBy(userID int64) bool {
 }
 
 func (k *KnowledgeItem) IsVisibleTo(viewerID int64, canReview bool) bool {
+	if k.IsDeleted() {
+		return false
+	}
 	if canReview || k.IsOwnedBy(viewerID) {
 		return true
 	}
-	return k.Approved && !k.Rejected
+	return k.EffectiveStatus() == ItemStatusApproved
 }
