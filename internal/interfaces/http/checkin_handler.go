@@ -5,6 +5,7 @@ import (
 	"SWPUCAT/internal/application/checkin"
 	domaincheckin "SWPUCAT/internal/domain/checkin"
 	"SWPUCAT/internal/domain/shared"
+	"SWPUCAT/internal/domain/user"
 	"errors"
 	"strconv"
 	"strings"
@@ -157,6 +158,22 @@ func (h *CheckinHandler) Makeup(c *gin.Context) {
 	}
 
 	if err := h.checkinSvc.Makeup(c.Request.Context(), req); err != nil {
+		if errors.Is(err, shared.ErrValidation) {
+			BadRequest(c, err.Error())
+			return
+		}
+		if errors.Is(err, shared.ErrConflict) {
+			Conflict(c, "checkin records already exist for this date")
+			return
+		}
+		if errors.Is(err, shared.ErrForbidden) {
+			Forbidden(c, "account is disabled")
+			return
+		}
+		if errors.Is(err, user.ErrUserNotFound) {
+			NotFound(c, "user not found")
+			return
+		}
 		InternalError(c, err.Error())
 		return
 	}

@@ -177,70 +177,90 @@ func (s *CheckinService) GetStatsByPeriod(ctx context.Context, period string) ([
 	if err != nil {
 		return nil, err
 	}
-
-	// Group records by user (skip invalid user_id 0)
-	type userRecords struct {
-		records []*checkin.CheckinRecord
-	}
-	userMap := make(map[int64]*userRecords)
-	for _, r := range records {
-		if r.UserID == 0 {
-			continue
-		}
-		if _, ok := userMap[r.UserID]; !ok {
-			userMap[r.UserID] = &userRecords{}
-		}
-		userMap[r.UserID].records = append(userMap[r.UserID].records, r)
-	}
-
-	// Calculate total time per user
-	statsMap := make(map[int64]*WeeklyStatsDTO)
-	for userID, ur := range userMap {
-		var totalMinutes float64
-		days := make(map[string]bool)
-
-		// Group by date
-		dateRecords := make(map[string][]*checkin.CheckinRecord)
-		for _, r := range ur.records {
-			dateRecords[r.Date] = append(dateRecords[r.Date], r)
-		}
-
-		for date, dayRecords := range dateRecords {
-			days[date] = true
-			// Find in/out pairs
-			var lastIn *checkin.CheckinRecord
-			for _, dr := range dayRecords {
-				if dr.Type == checkin.CheckinTypeIn {
-					lastIn = dr
-				} else if dr.Type == checkin.CheckinTypeOut && lastIn != nil {
-					inTime, _ := time.Parse("15:04:05", lastIn.Time)
-					outTime, _ := time.Parse("15:04:05", dr.Time)
-					totalMinutes += outTime.Sub(inTime).Minutes()
-					lastIn = nil
-				}
-			}
-		}
-
-		statsMap[userID] = &WeeklyStatsDTO{
-			UserID:       userID,
-			TotalMinutes: totalMinutes,
-			TotalHours:   totalMinutes / 60,
-			Days:         len(days),
-		}
-	}
-
-	// Fetch user info
-	userIDs := make([]int64, 0, len(statsMap))
-	for uid := range statsMap {
-		userIDs = append(userIDs, uid)
-	}
-	users, err := s.userRepo.FindByIDs(ctx, userIDs)
+	users, err := s.userRepo.FindAll(ctx)
 	if err != nil {
 		return nil, err
 	}
+
+	// Initialize every active member so an absent member remains visible to the
+	// captain instead of disappearing from the statistics result.
+	statsMap := make(map[int64]*WeeklyStatsDTO, len(users))
+	userRecords := make(map[int64][]*checkin.CheckinRecord)
 	for _, u := range users {
-		if stat, ok := statsMap[u.ID]; ok {
-			stat.Nickname = u.DisplayName()
+		statsMap[u.ID] = &WeeklyStatsDTO{
+			UserID:    u.ID,
+			Nickname:  u.DisplayName(),
+			Status:    "absent",
+			Anomalies: []string{"no_checkin"},
+		}
+	}
+	for _, r := range records {
+		if _, ok := statsMap[r.UserID]; ok {
+			userRecords[r.UserID] = append(userRecords[r.UserID], r)
+		}
+	}
+
+	for userID, memberRecords := range userRecords {
+		stat := statsMap[userID]
+		dateRecords := make(map[string][]*checkin.CheckinRecord)
+		for _, r := range memberRecords {
+			dateRecords[r.Date] = append(dateRecords[r.Date], r)
+		}
+
+		var totalMinutes float64
+		days := make(map[string]bool, len(dateRecords))
+		anomalySet := make(map[string]struct{})
+		for date, dayRecords := range dateRecords {
+			days[date] = true
+			sort.SliceStable(dayRecords, func(i, j int) bool {
+				if dayRecords[i].CreatedAt.Equal(dayRecords[j].CreatedAt) {
+					return dayRecords[i].ID < dayRecords[j].ID
+				}
+				return dayRecords[i].CreatedAt.Before(dayRecords[j].CreatedAt)
+			})
+
+			var openIn *checkin.CheckinRecord
+			for _, record := range dayRecords {
+				switch record.Type {
+				case checkin.CheckinTypeIn:
+					if openIn != nil {
+						anomalySet["duplicate_clock_in"] = struct{}{}
+					}
+					openIn = record
+				case checkin.CheckinTypeOut:
+					if openIn == nil {
+						anomalySet["orphan_clock_out"] = struct{}{}
+						continue
+					}
+					inTime, inErr := time.Parse("15:04:05", openIn.Time)
+					outTime, outErr := time.Parse("15:04:05", record.Time)
+					if inErr != nil || outErr != nil || outTime.Before(inTime) {
+						anomalySet["invalid_time_pair"] = struct{}{}
+					} else {
+						totalMinutes += outTime.Sub(inTime).Minutes()
+					}
+					openIn = nil
+				default:
+					anomalySet["invalid_type"] = struct{}{}
+				}
+			}
+			if openIn != nil {
+				anomalySet["missing_clock_out"] = struct{}{}
+			}
+		}
+
+		stat.TotalMinutes = totalMinutes
+		stat.TotalHours = totalMinutes / 60
+		stat.Days = len(days)
+		stat.Anomalies = make([]string, 0, len(anomalySet))
+		for anomaly := range anomalySet {
+			stat.Anomalies = append(stat.Anomalies, anomaly)
+		}
+		sort.Strings(stat.Anomalies)
+		if len(stat.Anomalies) == 0 {
+			stat.Status = "normal"
+		} else {
+			stat.Status = "attention"
 		}
 	}
 
@@ -248,6 +268,12 @@ func (s *CheckinService) GetStatsByPeriod(ctx context.Context, period string) ([
 	for _, stat := range statsMap {
 		result = append(result, *stat)
 	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Nickname == result[j].Nickname {
+			return result[i].UserID < result[j].UserID
+		}
+		return result[i].Nickname < result[j].Nickname
+	})
 	return result, nil
 }
 
@@ -386,18 +412,28 @@ func (s *CheckinService) GetAllTodayRecords(ctx context.Context) ([]TodayRecordD
 }
 
 func (s *CheckinService) Makeup(ctx context.Context, req MakeupRequest) error {
-	// Validate user exists
-	_, err := s.userRepo.FindByID(ctx, req.UserID)
+	if req.Minutes < 1 || req.Minutes > 480 {
+		return fmt.Errorf("%w: minutes must be between 1 and 480", shared.ErrValidation)
+	}
+
+	u, err := s.userRepo.FindByID(ctx, req.UserID)
 	if err != nil {
-		return fmt.Errorf("user not found")
+		return user.ErrUserNotFound
+	}
+	if !u.IsActive() {
+		return shared.ErrForbidden
 	}
 
 	// Validate date format
-	if _, err := time.Parse("2006-01-02", req.Date); err != nil {
-		return fmt.Errorf("invalid date format, use YYYY-MM-DD")
+	parsedDate, err := time.Parse("2006-01-02", req.Date)
+	if err != nil || parsedDate.Format("2006-01-02") != req.Date {
+		return fmt.Errorf("%w: date must use YYYY-MM-DD", shared.ErrValidation)
+	}
+	if req.Date > time.Now().Format("2006-01-02") {
+		return fmt.Errorf("%w: date cannot be in the future", shared.ErrValidation)
 	}
 
-	// Create in record
+	// Build both records before entering the repository transaction.
 	inRecord := &checkin.CheckinRecord{
 		UserID:    req.UserID,
 		Type:      checkin.CheckinTypeIn,
@@ -405,10 +441,6 @@ func (s *CheckinService) Makeup(ctx context.Context, req MakeupRequest) error {
 		Time:      "08:00:00",
 		CreatedAt: time.Now(),
 	}
-	if err := s.checkinRepo.Create(ctx, inRecord); err != nil {
-		return err
-	}
-
 	// Calculate out time
 	inTime, _ := time.Parse("15:04:05", "08:00:00")
 	outTime := inTime.Add(time.Duration(req.Minutes) * time.Minute)
@@ -420,7 +452,7 @@ func (s *CheckinService) Makeup(ctx context.Context, req MakeupRequest) error {
 		Time:      outTime.Format("15:04:05"),
 		CreatedAt: time.Now(),
 	}
-	return s.checkinRepo.Create(ctx, outRecord)
+	return s.checkinRepo.CreateMakeup(ctx, inRecord, outRecord)
 }
 
 func (s *CheckinService) GetRequirements(ctx context.Context) RequirementsDTO {

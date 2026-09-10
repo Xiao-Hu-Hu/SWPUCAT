@@ -1,11 +1,13 @@
 package checkin
 
 type WeeklyStatsDTO struct {
-	UserID       int64   `json:"user_id"`
-	Nickname     string  `json:"nickname"`
-	TotalMinutes float64 `json:"total_minutes"`
-	TotalHours   float64 `json:"total_hours"`
-	Days         int     `json:"days"`
+	UserID       int64    `json:"user_id"`
+	Nickname     string   `json:"nickname"`
+	TotalMinutes float64  `json:"total_minutes"`
+	TotalHours   float64  `json:"total_hours"`
+	Days         int      `json:"days"`
+	Status       string   `json:"status"`
+	Anomalies    []string `json:"anomalies,omitempty"`
 }
 
 type OnlineMemberDTO struct {
