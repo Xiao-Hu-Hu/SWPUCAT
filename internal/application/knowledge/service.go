@@ -1,9 +1,9 @@
 package knowledge
 
 import (
-	"context"
 	"SWPUCAT/internal/domain/knowledge"
 	"SWPUCAT/internal/domain/shared"
+	"context"
 	"time"
 )
 
@@ -214,10 +214,13 @@ func (s *KnowledgeService) ListCategories(ctx context.Context) ([]CategoryDTO, e
 	return result, nil
 }
 
-func (s *KnowledgeService) GetItem(ctx context.Context, id int64) (*KnowledgeItemDTO, error) {
+func (s *KnowledgeService) GetItem(ctx context.Context, id, viewerID int64, canReview bool) (*KnowledgeItemDTO, error) {
 	item, err := s.repo.FindItemByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if !item.IsVisibleTo(viewerID, canReview) {
+		return nil, shared.ErrForbidden
 	}
 	return toItemDTO(item, ""), nil
 }

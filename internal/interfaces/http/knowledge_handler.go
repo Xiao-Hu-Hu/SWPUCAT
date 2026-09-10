@@ -215,8 +215,12 @@ func (h *KnowledgeHandler) GetItem(c *gin.Context) {
 		return
 	}
 
-	item, err := h.knowledgeSvc.GetItem(c.Request.Context(), id)
+	item, err := h.knowledgeSvc.GetItem(c.Request.Context(), id, GetUserID(c), IsCaptain(c))
 	if err != nil {
+		if errors.Is(err, shared.ErrForbidden) {
+			Forbidden(c, "not allowed to access this item")
+			return
+		}
 		NotFound(c, "item not found")
 		return
 	}
@@ -357,8 +361,12 @@ func (h *KnowledgeHandler) DownloadFile(c *gin.Context) {
 		return
 	}
 
-	item, err := h.knowledgeSvc.GetItem(c.Request.Context(), id)
+	item, err := h.knowledgeSvc.GetItem(c.Request.Context(), id, GetUserID(c), IsCaptain(c))
 	if err != nil {
+		if errors.Is(err, shared.ErrForbidden) {
+			Forbidden(c, "not allowed to download this item")
+			return
+		}
 		NotFound(c, "item not found")
 		return
 	}

@@ -50,6 +50,9 @@ func NewAnnouncementService(annRepo announcement.Repository, publisher shared.Ev
 }
 
 func (s *AnnouncementService) Create(ctx context.Context, operatorID int64, operatorName string, req CreateRequest) (*AnnouncementDTO, error) {
+	if err := s.requireManager(ctx, operatorID); err != nil {
+		return nil, err
+	}
 	ann, err := announcement.NewAnnouncement(req.Title, req.Content, operatorID, operatorName, req.Pinned)
 	if err != nil {
 		return nil, err
@@ -61,7 +64,10 @@ func (s *AnnouncementService) Create(ctx context.Context, operatorID int64, oper
 	return toDTO(ann), nil
 }
 
-func (s *AnnouncementService) Update(ctx context.Context, annID int64, req UpdateRequest) error {
+func (s *AnnouncementService) Update(ctx context.Context, operatorID, annID int64, req UpdateRequest) error {
+	if err := s.requireManager(ctx, operatorID); err != nil {
+		return err
+	}
 	ann, err := s.annRepo.FindByID(ctx, annID)
 	if err != nil {
 		return err
@@ -79,7 +85,10 @@ func (s *AnnouncementService) Update(ctx context.Context, annID int64, req Updat
 	return s.annRepo.Update(ctx, ann)
 }
 
-func (s *AnnouncementService) Delete(ctx context.Context, annID int64) error {
+func (s *AnnouncementService) Delete(ctx context.Context, operatorID, annID int64) error {
+	if err := s.requireManager(ctx, operatorID); err != nil {
+		return err
+	}
 	return s.annRepo.Delete(ctx, annID)
 }
 
@@ -137,8 +146,8 @@ func toDTO(a *announcement.Announcement) *AnnouncementDTO {
 }
 
 type NotifyResult struct {
-	Sent  int              `json:"sent"`
-	Failed []FailedMember  `json:"failed"`
+	Sent   int            `json:"sent"`
+	Failed []FailedMember `json:"failed"`
 }
 
 type FailedMember struct {
@@ -147,7 +156,10 @@ type FailedMember struct {
 	Reason   string `json:"reason"`
 }
 
-func (s *AnnouncementService) NotifyMembers(ctx context.Context, annID int64, userIDs []int64) (*NotifyResult, error) {
+func (s *AnnouncementService) NotifyMembers(ctx context.Context, operatorID, annID int64, userIDs []int64) (*NotifyResult, error) {
+	if err := s.requireManager(ctx, operatorID); err != nil {
+		return nil, err
+	}
 	ann, err := s.annRepo.FindByID(ctx, annID)
 	if err != nil {
 		return nil, fmt.Errorf("announcement not found")
@@ -191,4 +203,15 @@ func (s *AnnouncementService) NotifyMembers(ctx context.Context, annID int64, us
 	}
 
 	return &res, nil
+}
+
+func (s *AnnouncementService) requireManager(ctx context.Context, operatorID int64) error {
+	operator, err := s.userRepo.FindByID(ctx, operatorID)
+	if err != nil {
+		return err
+	}
+	if !operator.IsActive() || (!operator.Role.IsCaptain() && !operator.Role.IsSuperAdmin()) {
+		return shared.ErrForbidden
+	}
+	return nil
 }

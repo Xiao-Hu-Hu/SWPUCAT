@@ -60,6 +60,9 @@ func (r *KnowledgeRepo) FindItems(ctx context.Context, filter knowledge.ItemFilt
 	}
 	if filter.Approved != nil {
 		query = query.Where("approved = ?", *filter.Approved)
+		if *filter.Approved {
+			query = query.Where("rejected = ?", false)
+		}
 	}
 
 	var models []database.KnowledgeItemModel

@@ -73,3 +73,10 @@ func (k *KnowledgeItem) Approve() {
 func (k *KnowledgeItem) IsOwnedBy(userID int64) bool {
 	return k.UploaderID == userID
 }
+
+func (k *KnowledgeItem) IsVisibleTo(viewerID int64, canReview bool) bool {
+	if canReview || k.IsOwnedBy(viewerID) {
+		return true
+	}
+	return k.Approved && !k.Rejected
+}
