@@ -54,7 +54,7 @@ func NewCheckinService(
 	}
 }
 
-func (s *CheckinService) ClockIn(ctx context.Context, userID int64) (*CheckinRecordDTO, error) {
+func (s *CheckinService) ClockIn(ctx context.Context, userID int64, idempotencyKey string) (*CheckinRecordDTO, error) {
 	today := time.Now().Format("2006-01-02")
 
 	record, err := checkin.NewCheckinRecord(userID, checkin.CheckinTypeIn)
@@ -62,11 +62,14 @@ func (s *CheckinService) ClockIn(ctx context.Context, userID int64) (*CheckinRec
 		return nil, err
 	}
 	record.Date = today
-	if err := s.checkinRepo.CreateTransition(ctx, record); err != nil {
+	created, err := s.checkinRepo.CreateTransition(ctx, record, idempotencyKey)
+	if err != nil {
 		return nil, err
 	}
 
-	s.publisher.Publish(checkin.NewClockedIn(record.ID, userID))
+	if created {
+		s.publisher.Publish(checkin.NewClockedIn(record.ID, userID))
+	}
 
 	return &CheckinRecordDTO{
 		ID:   record.ID,
@@ -76,7 +79,7 @@ func (s *CheckinService) ClockIn(ctx context.Context, userID int64) (*CheckinRec
 	}, nil
 }
 
-func (s *CheckinService) ClockOut(ctx context.Context, userID int64) (*CheckinRecordDTO, error) {
+func (s *CheckinService) ClockOut(ctx context.Context, userID int64, idempotencyKey string) (*CheckinRecordDTO, error) {
 	today := time.Now().Format("2006-01-02")
 
 	record, err := checkin.NewCheckinRecord(userID, checkin.CheckinTypeOut)
@@ -84,11 +87,14 @@ func (s *CheckinService) ClockOut(ctx context.Context, userID int64) (*CheckinRe
 		return nil, err
 	}
 	record.Date = today
-	if err := s.checkinRepo.CreateTransition(ctx, record); err != nil {
+	created, err := s.checkinRepo.CreateTransition(ctx, record, idempotencyKey)
+	if err != nil {
 		return nil, err
 	}
 
-	s.publisher.Publish(checkin.NewClockedOut(record.ID, userID))
+	if created {
+		s.publisher.Publish(checkin.NewClockedOut(record.ID, userID))
+	}
 
 	return &CheckinRecordDTO{
 		ID:   record.ID,

@@ -40,12 +40,13 @@ func (r *CheckinRepo) Create(ctx context.Context, record *checkin.CheckinRecord)
 // transaction. Locking the user row gives every request for one user a stable
 // serialization point, so two simultaneous clock-in/out requests cannot both
 // observe the same previous state and create duplicate transitions.
-func (r *CheckinRepo) CreateTransition(ctx context.Context, record *checkin.CheckinRecord) error {
+func (r *CheckinRepo) CreateTransition(ctx context.Context, record *checkin.CheckinRecord, idempotencyKey string) (bool, error) {
 	if record == nil || !record.Type.IsValid() {
-		return checkin.ErrInvalidCheckinType
+		return false, checkin.ErrInvalidCheckinType
 	}
 
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	created := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var account database.UserModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&account, record.UserID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -55,6 +56,22 @@ func (r *CheckinRepo) CreateTransition(ctx context.Context, record *checkin.Chec
 		}
 		if account.Status != "" && account.Status != string(user.StatusActive) {
 			return shared.ErrForbidden
+		}
+
+		if idempotencyKey != "" {
+			var previous database.CheckinIdempotencyModel
+			lookupErr := tx.Where("user_id = ? AND action = ? AND idempotency_key = ?", record.UserID, string(record.Type), idempotencyKey).
+				First(&previous).Error
+			if lookupErr == nil {
+				record.ID = previous.RecordID
+				record.Date = previous.RecordDate
+				record.Time = previous.RecordTime
+				record.CreatedAt = previous.CreatedAt
+				return nil
+			}
+			if !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+				return lookupErr
+			}
 		}
 
 		var latest database.CheckinRecordModel
@@ -100,8 +117,22 @@ func (r *CheckinRepo) CreateTransition(ctx context.Context, record *checkin.Chec
 				return err
 			}
 		}
+		if idempotencyKey != "" {
+			if err := tx.Create(&database.CheckinIdempotencyModel{
+				UserID:         record.UserID,
+				Action:         string(record.Type),
+				IdempotencyKey: idempotencyKey,
+				RecordID:       record.ID,
+				RecordDate:     record.Date,
+				RecordTime:     record.Time,
+			}).Error; err != nil {
+				return err
+			}
+		}
+		created = true
 		return nil
 	})
+	return created, err
 }
 
 func (r *CheckinRepo) FindByUserID(ctx context.Context, userID int64) ([]*checkin.CheckinRecord, error) {

@@ -7,6 +7,7 @@ import (
 	"SWPUCAT/internal/domain/shared"
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -23,7 +24,11 @@ func NewCheckinHandler(checkinSvc *checkin.CheckinService, annSvc *announcement.
 func (h *CheckinHandler) ClockIn(c *gin.Context) {
 	userID := GetUserID(c)
 
-	dto, err := h.checkinSvc.ClockIn(c.Request.Context(), userID)
+	idempotencyKey, ok := checkinIdempotencyKey(c)
+	if !ok {
+		return
+	}
+	dto, err := h.checkinSvc.ClockIn(c.Request.Context(), userID, idempotencyKey)
 	if err != nil {
 		if errors.Is(err, domaincheckin.ErrAlreadyClockedIn) {
 			Conflict(c, "already clocked in today")
@@ -43,7 +48,11 @@ func (h *CheckinHandler) ClockIn(c *gin.Context) {
 func (h *CheckinHandler) ClockOut(c *gin.Context) {
 	userID := GetUserID(c)
 
-	dto, err := h.checkinSvc.ClockOut(c.Request.Context(), userID)
+	idempotencyKey, ok := checkinIdempotencyKey(c)
+	if !ok {
+		return
+	}
+	dto, err := h.checkinSvc.ClockOut(c.Request.Context(), userID, idempotencyKey)
 	if err != nil {
 		if errors.Is(err, domaincheckin.ErrNotClockedIn) {
 			Conflict(c, "not clocked in")
@@ -58,6 +67,15 @@ func (h *CheckinHandler) ClockOut(c *gin.Context) {
 	}
 
 	Success(c, dto)
+}
+
+func checkinIdempotencyKey(c *gin.Context) (string, bool) {
+	key := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if len(key) > 128 {
+		BadRequest(c, "Idempotency-Key must be at most 128 characters")
+		return "", false
+	}
+	return key, true
 }
 
 func (h *CheckinHandler) GetRecords(c *gin.Context) {

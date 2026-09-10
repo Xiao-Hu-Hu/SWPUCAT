@@ -47,6 +47,19 @@ type CheckinRecordModel struct {
 
 func (CheckinRecordModel) TableName() string { return "checkin_records" }
 
+type CheckinIdempotencyModel struct {
+	ID             int64     `gorm:"primaryKey;autoIncrement"`
+	UserID         int64     `gorm:"not null;index"`
+	Action         string    `gorm:"size:8;not null"`
+	IdempotencyKey string    `gorm:"size:128;not null"`
+	RecordID       int64     `gorm:"not null"`
+	RecordDate     string    `gorm:"size:10;not null"`
+	RecordTime     string    `gorm:"size:8;not null"`
+	CreatedAt      time.Time `gorm:"not null;default:current_timestamp"`
+}
+
+func (CheckinIdempotencyModel) TableName() string { return "checkin_idempotency_keys" }
+
 type KnowledgeCategoryModel struct {
 	ID        int64     `gorm:"primaryKey;autoIncrement"`
 	Name      string    `gorm:"size:64;not null"`
