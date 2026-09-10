@@ -146,10 +146,21 @@ async function handleRegister() {
     <el-dialog v-model="showLogin" title="登录" width="400px">
       <el-form :model="loginForm" label-width="80px">
         <el-form-item label="学号">
-          <el-input v-model="loginForm.username" placeholder="请输入12位学号" maxlength="12" />
+          <el-input
+            v-model="loginForm.username"
+            placeholder="请输入12位学号"
+            maxlength="12"
+            @keyup.enter="handleLogin"
+          />
         </el-form-item>
         <el-form-item label="密码">
-          <el-input v-model="loginForm.password" type="password" placeholder="请输入密码" show-password />
+          <el-input
+            v-model="loginForm.password"
+            type="password"
+            placeholder="请输入密码"
+            show-password
+            @keyup.enter="handleLogin"
+          />
         </el-form-item>
       </el-form>
       <template #footer>
