@@ -3,7 +3,9 @@ package http
 import (
 	"SWPUCAT/internal/application/announcement"
 	"SWPUCAT/internal/application/checkin"
+	domaincheckin "SWPUCAT/internal/domain/checkin"
 	"SWPUCAT/internal/domain/shared"
+	"errors"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -23,8 +25,12 @@ func (h *CheckinHandler) ClockIn(c *gin.Context) {
 
 	dto, err := h.checkinSvc.ClockIn(c.Request.Context(), userID)
 	if err != nil {
-		if err == shared.ErrConflict {
+		if errors.Is(err, domaincheckin.ErrAlreadyClockedIn) {
 			Conflict(c, "already clocked in today")
+			return
+		}
+		if errors.Is(err, shared.ErrForbidden) {
+			Forbidden(c, "account is disabled")
 			return
 		}
 		InternalError(c, "clock in failed")
@@ -39,8 +45,12 @@ func (h *CheckinHandler) ClockOut(c *gin.Context) {
 
 	dto, err := h.checkinSvc.ClockOut(c.Request.Context(), userID)
 	if err != nil {
-		if err == shared.ErrConflict {
+		if errors.Is(err, domaincheckin.ErrNotClockedIn) {
 			Conflict(c, "not clocked in")
+			return
+		}
+		if errors.Is(err, shared.ErrForbidden) {
+			Forbidden(c, "account is disabled")
 			return
 		}
 		InternalError(c, "clock out failed")
@@ -54,7 +64,14 @@ func (h *CheckinHandler) GetRecords(c *gin.Context) {
 	userID := GetUserID(c)
 
 	limitStr := c.DefaultQuery("limit", "10")
-	limit, _ := strconv.Atoi(limitStr)
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit < 1 {
+		BadRequest(c, "limit must be a positive integer")
+		return
+	}
+	if limit > 100 {
+		limit = 100
+	}
 
 	records, err := h.checkinSvc.GetRecords(c.Request.Context(), userID, limit)
 	if err != nil {

@@ -57,23 +57,13 @@ func NewCheckinService(
 func (s *CheckinService) ClockIn(ctx context.Context, userID int64) (*CheckinRecordDTO, error) {
 	today := time.Now().Format("2006-01-02")
 
-	lastRecord, _ := s.checkinRepo.GetLastByUserAndDate(ctx, userID, today)
-	if lastRecord != nil && lastRecord.Type == checkin.CheckinTypeIn {
-		return nil, checkin.ErrAlreadyClockedIn
-	}
-
 	record, err := checkin.NewCheckinRecord(userID, checkin.CheckinTypeIn)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.checkinRepo.Create(ctx, record); err != nil {
+	record.Date = today
+	if err := s.checkinRepo.CreateTransition(ctx, record); err != nil {
 		return nil, err
-	}
-
-	u, err := s.userRepo.FindByID(ctx, userID)
-	if err == nil {
-		u.IncrementCheckinCount()
-		s.userRepo.Update(ctx, u)
 	}
 
 	s.publisher.Publish(checkin.NewClockedIn(record.ID, userID))
@@ -89,16 +79,12 @@ func (s *CheckinService) ClockIn(ctx context.Context, userID int64) (*CheckinRec
 func (s *CheckinService) ClockOut(ctx context.Context, userID int64) (*CheckinRecordDTO, error) {
 	today := time.Now().Format("2006-01-02")
 
-	lastRecord, _ := s.checkinRepo.GetLastByUserAndDate(ctx, userID, today)
-	if lastRecord == nil || lastRecord.Type != checkin.CheckinTypeIn {
-		return nil, checkin.ErrNotClockedIn
-	}
-
 	record, err := checkin.NewCheckinRecord(userID, checkin.CheckinTypeOut)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.checkinRepo.Create(ctx, record); err != nil {
+	record.Date = today
+	if err := s.checkinRepo.CreateTransition(ctx, record); err != nil {
 		return nil, err
 	}
 
@@ -118,7 +104,9 @@ func (s *CheckinService) GetRecords(ctx context.Context, userID int64, limit int
 		return nil, err
 	}
 	if limit > 0 && len(records) > limit {
-		records = records[len(records)-limit:]
+		// The repository returns newest records first. Keep that order and take
+		// the newest page instead of accidentally returning the oldest tail.
+		records = records[:limit]
 	}
 	result := make([]CheckinRecordDTO, 0, len(records))
 	for _, r := range records {
