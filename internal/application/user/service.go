@@ -41,14 +41,19 @@ type InvitationCodeRepository interface {
 	Update(ctx context.Context, code *invitation.InvitationCode) error
 }
 
+type RegistrationRepository interface {
+	CreateUserAndUseInvitation(ctx context.Context, u *user.User, invitationID int64) error
+}
+
 type UserApplicationService struct {
-	userRepo     user.Repository
-	hasher       PasswordHasher
-	jwtSvc       JWTService
-	publisher    shared.EventPublisher
-	emailSvc     EmailService
-	codeRepo     VerificationCodeRepository
-	invitationRepo InvitationCodeRepository
+	userRepo         user.Repository
+	hasher           PasswordHasher
+	jwtSvc           JWTService
+	publisher        shared.EventPublisher
+	emailSvc         EmailService
+	codeRepo         VerificationCodeRepository
+	invitationRepo   InvitationCodeRepository
+	registrationRepo RegistrationRepository
 }
 
 func NewUserApplicationService(
@@ -59,15 +64,17 @@ func NewUserApplicationService(
 	emailSvc EmailService,
 	codeRepo VerificationCodeRepository,
 	invitationRepo InvitationCodeRepository,
+	registrationRepo RegistrationRepository,
 ) *UserApplicationService {
 	return &UserApplicationService{
-		userRepo:       userRepo,
-		hasher:         hasher,
-		jwtSvc:         jwtSvc,
-		publisher:      publisher,
-		emailSvc:       emailSvc,
-		codeRepo:       codeRepo,
-		invitationRepo: invitationRepo,
+		userRepo:         userRepo,
+		hasher:           hasher,
+		jwtSvc:           jwtSvc,
+		publisher:        publisher,
+		emailSvc:         emailSvc,
+		codeRepo:         codeRepo,
+		invitationRepo:   invitationRepo,
+		registrationRepo: registrationRepo,
 	}
 }
 
@@ -158,15 +165,10 @@ func (s *UserApplicationService) Register(ctx context.Context, req RegisterReque
 	u := user.NewUserWithStudentID(studentID, req.Email, nickname, user.PasswordHash(hashedPassword))
 	u.Role = role
 
-	if err := s.userRepo.Create(ctx, u); err != nil {
-		return nil, err
+	if s.registrationRepo == nil {
+		return nil, fmt.Errorf("registration transaction is not configured")
 	}
-
-	// Mark invitation code as used
-	if err := invCode.Use(u.ID); err != nil {
-		return nil, err
-	}
-	if err := s.invitationRepo.Update(ctx, invCode); err != nil {
+	if err := s.registrationRepo.CreateUserAndUseInvitation(ctx, u, invCode.ID); err != nil {
 		return nil, err
 	}
 

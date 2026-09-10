@@ -47,6 +47,7 @@ func main() {
 	approvalRepo := repository.NewApprovalRepo(db)
 	codeRepo := repository.NewVerificationCodeRepo(db)
 	invitationRepo := repository.NewInvitationRepo(db)
+	registrationRepo := repository.NewRegistrationRepo(db)
 	settingsRepo := repository.NewSettingsRepo(db)
 
 	// Initialize infrastructure services
@@ -60,7 +61,7 @@ func main() {
 	emailSvc := email.NewSMTPService(&cfg.Email)
 
 	// Initialize application services
-	userSvc := user.NewUserApplicationService(userRepo, hasher, jwtSvc, publisher, emailSvc, codeRepo, invitationRepo)
+	userSvc := user.NewUserApplicationService(userRepo, hasher, jwtSvc, publisher, emailSvc, codeRepo, invitationRepo, registrationRepo)
 	annSvc := announcement.NewAnnouncementService(annRepo, publisher, userRepo, emailSvc)
 	invitationSvc := invitation.NewInvitationService(invitationRepo, userRepo)
 	checkinSvc := checkin.NewCheckinService(checkinRepo, userRepo, publisher, settingsRepo)

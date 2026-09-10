@@ -17,27 +17,36 @@ func NewUserRepo(db *gorm.DB) *UserRepo {
 }
 
 func (r *UserRepo) Create(ctx context.Context, u *user.User) error {
-	model := &database.UserModel{
-		ID:           u.ID,
-		Username:     string(u.Username),
-		StudentID:    string(u.StudentID),
-		Email:        u.Email,
-		PasswordHash: string(u.PasswordHash),
-		Nickname:     string(u.Nickname),
-		Avatar:       u.Avatar,
-		Role:         string(u.Role),
-		CheckinCount: u.CheckinCount,
-	}
+	model := newUserModel(u)
 	if err := r.db.WithContext(ctx).Create(model).Error; err != nil {
 		return err
 	}
+	assignPersistedUser(u, model)
+	return nil
+}
+
+func newUserModel(u *user.User) *database.UserModel {
+	return &database.UserModel{
+		ID:            u.ID,
+		Username:      string(u.Username),
+		StudentID:     string(u.StudentID),
+		Email:         u.Email,
+		PasswordHash:  string(u.PasswordHash),
+		Nickname:      string(u.Nickname),
+		Avatar:        u.Avatar,
+		TechDirection: u.TechDirection,
+		Role:          string(u.Role),
+		CheckinCount:  u.CheckinCount,
+	}
+}
+
+func assignPersistedUser(u *user.User, model *database.UserModel) {
 	u.ID = model.ID
 	u.CreatedAt = model.CreatedAt
 	u.UpdatedAt = model.UpdatedAt
 	if u.JoinedAt.IsZero() {
 		u.JoinedAt = model.CreatedAt
 	}
-	return nil
 }
 
 func (r *UserRepo) FindByID(ctx context.Context, id int64) (*user.User, error) {
