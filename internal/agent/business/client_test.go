@@ -3,11 +3,43 @@ package business
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 )
+
+func TestCreateAnnouncementDraftSendsJSONAndIdentity(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/announcement-drafts" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer token" || r.Header.Get("X-Agent-Internal-Secret") != "secret" {
+			t.Fatalf("identity headers were not forwarded")
+		}
+		if r.Header.Get("Content-Type") != "application/json" {
+			t.Fatalf("content type = %q", r.Header.Get("Content-Type"))
+		}
+		body, _ := io.ReadAll(r.Body)
+		var request AnnouncementDraftRequest
+		if err := json.Unmarshal(body, &request); err != nil || request.Title != "公告" || request.EmailRequested {
+			t.Fatalf("unexpected request body: %s", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"created","data":{"id":5,"status":"draft","title":"公告","content":"正文"}}`))
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "secret", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithRequestContext(context.Background(), RequestContext{Authorization: "Bearer token"})
+	draft, err := client.CreateAnnouncementDraft(ctx, AnnouncementDraftRequest{Title: "公告", Content: "正文"})
+	if err != nil || draft.ID != 5 || draft.Status != "draft" {
+		t.Fatalf("CreateAnnouncementDraft() = %+v, err=%v", draft, err)
+	}
+}
 
 func TestClientForwardsIdentityAndIdempotencyKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

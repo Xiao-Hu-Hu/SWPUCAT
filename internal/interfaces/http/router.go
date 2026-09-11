@@ -9,22 +9,23 @@ import (
 )
 
 type Router struct {
-	engine              *gin.Engine
-	jwtSvc              *auth.JWTService
-	authzSvc            *authorization.Service
-	authHandler         *AuthHandler
-	userHandler         *UserHandler
-	dashboardHandler    *DashboardHandler
-	annHandler          *AnnouncementHandler
-	checkinHandler      *CheckinHandler
-	knowledgeHandler    *KnowledgeHandler
-	approvalHandler     *ApprovalHandler
-	invitationHandler   *InvitationHandler
-	agentHandler        *AgentHandler
-	reportHandler       *ReportHandler
-	evaluationHandler   *EvaluationHandler
-	notificationHandler *NotificationHandler
-	teamQueryHandler    *TeamQueryHandler
+	engine                   *gin.Engine
+	jwtSvc                   *auth.JWTService
+	authzSvc                 *authorization.Service
+	authHandler              *AuthHandler
+	userHandler              *UserHandler
+	dashboardHandler         *DashboardHandler
+	annHandler               *AnnouncementHandler
+	checkinHandler           *CheckinHandler
+	knowledgeHandler         *KnowledgeHandler
+	approvalHandler          *ApprovalHandler
+	invitationHandler        *InvitationHandler
+	agentHandler             *AgentHandler
+	reportHandler            *ReportHandler
+	evaluationHandler        *EvaluationHandler
+	notificationHandler      *NotificationHandler
+	teamQueryHandler         *TeamQueryHandler
+	announcementDraftHandler *AnnouncementDraftHandler
 }
 
 func NewRouter(
@@ -43,6 +44,7 @@ func NewRouter(
 	evaluationHandler *EvaluationHandler,
 	notificationHandler *NotificationHandler,
 	teamQueryHandler *TeamQueryHandler,
+	announcementDraftHandler *AnnouncementDraftHandler,
 ) *Router {
 	engine := gin.Default()
 
@@ -55,22 +57,23 @@ func NewRouter(
 	}))
 
 	return &Router{
-		engine:              engine,
-		jwtSvc:              jwtSvc,
-		authzSvc:            authzSvc,
-		authHandler:         authHandler,
-		userHandler:         userHandler,
-		dashboardHandler:    dashboardHandler,
-		annHandler:          annHandler,
-		checkinHandler:      checkinHandler,
-		knowledgeHandler:    knowledgeHandler,
-		approvalHandler:     approvalHandler,
-		invitationHandler:   invitationHandler,
-		agentHandler:        agentHandler,
-		reportHandler:       reportHandler,
-		evaluationHandler:   evaluationHandler,
-		notificationHandler: notificationHandler,
-		teamQueryHandler:    teamQueryHandler,
+		engine:                   engine,
+		jwtSvc:                   jwtSvc,
+		authzSvc:                 authzSvc,
+		authHandler:              authHandler,
+		userHandler:              userHandler,
+		dashboardHandler:         dashboardHandler,
+		annHandler:               annHandler,
+		checkinHandler:           checkinHandler,
+		knowledgeHandler:         knowledgeHandler,
+		approvalHandler:          approvalHandler,
+		invitationHandler:        invitationHandler,
+		agentHandler:             agentHandler,
+		reportHandler:            reportHandler,
+		evaluationHandler:        evaluationHandler,
+		notificationHandler:      notificationHandler,
+		teamQueryHandler:         teamQueryHandler,
+		announcementDraftHandler: announcementDraftHandler,
 	}
 }
 
@@ -112,6 +115,15 @@ func (r *Router) Setup() *gin.Engine {
 			protected.PUT("/announcements/:id", RBACMiddleware("captain", "super_admin"), r.annHandler.Update)
 			protected.DELETE("/announcements/:id", RBACMiddleware("captain", "super_admin"), r.annHandler.Delete)
 			protected.POST("/announcements/:id/notify", RBACMiddleware("captain", "super_admin"), r.annHandler.Notify)
+
+			// Agent-generated announcement drafts. The Agent may create a draft;
+			// only a manager can edit, confirm, publish, or discard it.
+			protected.POST("/announcement-drafts", RBACMiddleware("captain", "super_admin"), r.announcementDraftHandler.Create)
+			protected.GET("/announcement-drafts/:id", RBACMiddleware("captain", "super_admin"), r.announcementDraftHandler.Get)
+			protected.PUT("/announcement-drafts/:id", RBACMiddleware("captain", "super_admin"), r.announcementDraftHandler.Update)
+			protected.POST("/announcement-drafts/:id/confirm", RBACMiddleware("captain", "super_admin"), r.announcementDraftHandler.Confirm)
+			protected.POST("/announcement-drafts/:id/publish", RBACMiddleware("captain", "super_admin"), r.announcementDraftHandler.Publish)
+			protected.POST("/announcement-drafts/:id/discard", RBACMiddleware("captain", "super_admin"), r.announcementDraftHandler.Discard)
 
 			// Checkin
 			protected.POST("/checkin/clock-in", r.checkinHandler.ClockIn)

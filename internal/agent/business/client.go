@@ -261,6 +261,33 @@ type ReportAsset struct {
 	Note            string `json:"note,omitempty"`
 }
 
+type AnnouncementDraftRequest struct {
+	Title          string         `json:"title"`
+	Content        string         `json:"content"`
+	Pinned         bool           `json:"pinned"`
+	Source         map[string]any `json:"source,omitempty"`
+	RecipientIDs   []int64        `json:"recipient_ids,omitempty"`
+	EmailRequested bool           `json:"email_requested"`
+}
+
+type AnnouncementDraft struct {
+	ID              int64   `json:"id"`
+	Status          string  `json:"status"`
+	Title           string  `json:"title"`
+	Content         string  `json:"content"`
+	Pinned          bool    `json:"pinned"`
+	SourceJSON      string  `json:"source_json,omitempty"`
+	RecipientIDs    []int64 `json:"recipient_ids"`
+	EmailRequested  bool    `json:"email_requested"`
+	EmailResultJSON string  `json:"email_result_json,omitempty"`
+	AnnouncementID  int64   `json:"announcement_id,omitempty"`
+	CreatedBy       int64   `json:"created_by"`
+	CreatedAt       string  `json:"created_at,omitempty"`
+	UpdatedAt       string  `json:"updated_at,omitempty"`
+	ConfirmedAt     string  `json:"confirmed_at,omitempty"`
+	PublishedAt     string  `json:"published_at,omitempty"`
+}
+
 func (c *Client) CheckinStatus(ctx context.Context) (CheckinStatus, error) {
 	var result CheckinStatus
 	err := c.do(ctx, http.MethodGet, "/api/checkin/status", nil, nil, &result)
@@ -352,6 +379,12 @@ func (c *Client) GetReportVersion(ctx context.Context, reportID int64, version i
 	return result, err
 }
 
+func (c *Client) CreateAnnouncementDraft(ctx context.Context, req AnnouncementDraftRequest) (AnnouncementDraft, error) {
+	var result AnnouncementDraft
+	err := c.doJSON(ctx, http.MethodPost, "/api/announcement-drafts", nil, nil, req, &result)
+	return result, err
+}
+
 type apiResponse struct {
 	Code    int             `json:"code"`
 	Message string          `json:"message"`
@@ -359,15 +392,30 @@ type apiResponse struct {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, query url.Values, extraHeaders map[string]string, output any) error {
+	return c.doWithBody(ctx, method, path, query, extraHeaders, nil, output)
+}
+
+func (c *Client) doJSON(ctx context.Context, method, path string, query url.Values, extraHeaders map[string]string, payload any, output any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("encode business API request: %w", err)
+	}
+	return c.doWithBody(ctx, method, path, query, extraHeaders, body, output)
+}
+
+func (c *Client) doWithBody(ctx context.Context, method, path string, query url.Values, extraHeaders map[string]string, body []byte, output any) error {
 	requestURL := c.baseURL + path
 	if len(query) > 0 {
 		requestURL += "?" + query.Encode()
 	}
-	req, err := http.NewRequestWithContext(ctx, method, requestURL, bytes.NewReader(nil))
+	req, err := http.NewRequestWithContext(ctx, method, requestURL, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Accept", "application/json")
+	if len(body) > 0 {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if identity := RequestContextFrom(ctx); identity.Authorization != "" {
 		req.Header.Set("Authorization", identity.Authorization)
 	}
@@ -382,7 +430,7 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 		return fmt.Errorf("business API request: %w", err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if err != nil {
 		return fmt.Errorf("read business API response: %w", err)
 	}
@@ -390,7 +438,7 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 		return fmt.Errorf("business API returned HTTP %d", resp.StatusCode)
 	}
 	var envelope apiResponse
-	if err := json.Unmarshal(body, &envelope); err != nil {
+	if err := json.Unmarshal(responseBody, &envelope); err != nil {
 		return fmt.Errorf("decode business API response: %w", err)
 	}
 	if envelope.Code != 0 {

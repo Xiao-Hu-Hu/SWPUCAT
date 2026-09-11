@@ -2,6 +2,7 @@ package main
 
 import (
 	"SWPUCAT/internal/application/announcement"
+	announcementdraftapp "SWPUCAT/internal/application/announcementdraft"
 	"SWPUCAT/internal/application/approval"
 	"SWPUCAT/internal/application/authorization"
 	"SWPUCAT/internal/application/checkin"
@@ -53,6 +54,7 @@ func main() {
 	reportRepo := repository.NewReportRepo(db)
 	evaluationRepo := repository.NewEvaluationRepo(db)
 	notificationRepo := repository.NewNotificationRepo(db)
+	announcementDraftRepo := repository.NewAnnouncementDraftRepo(db)
 	approvalRepo := repository.NewApprovalRepo(db)
 	codeRepo := repository.NewVerificationCodeRepo(db)
 	invitationRepo := repository.NewInvitationRepo(db)
@@ -72,6 +74,7 @@ func main() {
 	// Initialize application services
 	userSvc := user.NewUserApplicationService(userRepo, hasher, jwtSvc, publisher, emailSvc, codeRepo, invitationRepo, registrationRepo)
 	annSvc := announcement.NewAnnouncementService(annRepo, publisher, userRepo, emailSvc)
+	announcementDraftSvc := announcementdraftapp.NewService(announcementDraftRepo, annSvc)
 	invitationSvc := invitation.NewInvitationService(invitationRepo, userRepo)
 	notificationSvc := notificationapp.NewService(notificationRepo, userRepo, reportRepo)
 	checkinSvc := checkin.NewCheckinService(checkinRepo, userRepo, publisher, settingsRepo, notificationSvc)
@@ -101,6 +104,7 @@ func main() {
 	evaluationHandler := httpInterface.NewEvaluationHandler(evaluationSvc)
 	notificationHandler := httpInterface.NewNotificationHandler(notificationSvc)
 	teamQueryHandler := httpInterface.NewTeamQueryHandler(teamQuerySvc)
+	announcementDraftHandler := httpInterface.NewAnnouncementDraftHandler(announcementDraftSvc)
 
 	// Initialize router
 	router := httpInterface.NewRouter(
@@ -119,6 +123,7 @@ func main() {
 		evaluationHandler,
 		notificationHandler,
 		teamQueryHandler,
+		announcementDraftHandler,
 	)
 
 	// Setup routes

@@ -42,6 +42,14 @@ type reportMaterialsInput struct {
 	Limit    int    `json:"limit,omitempty" jsonschema_description:"单页材料数，默认 8，最大 8"`
 }
 
+type announcementDraftInput struct {
+	Title        string  `json:"title" jsonschema_description:"公告标题，最多 256 个字符"`
+	Content      string  `json:"content" jsonschema_description:"公告正文，支持 Markdown"`
+	Pinned       bool    `json:"pinned,omitempty" jsonschema_description:"是否置顶"`
+	RecipientIDs []int64 `json:"recipient_ids,omitempty" jsonschema_description:"可选的成员 ID 列表；仅保存为草稿收件人，不会自动发邮件"`
+	SourceNote   string  `json:"source_note,omitempty" jsonschema_description:"可选的生成依据或说明"`
+}
+
 type reportMaterial struct {
 	ReportID     int64          `json:"report_id"`
 	Version      int            `json:"version"`
@@ -266,8 +274,35 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
+	announcementDraftTool, err := toolutils.InferTool[announcementDraftInput, string](
+		"draft_announcement",
+		"根据队长要求生成公告草稿并保存供人工审核。只能创建草稿，不能确认、发布、置顶或发送邮件。",
+		func(ctx context.Context, input announcementDraftInput) (string, error) {
+			identity := business.RequestContextFrom(ctx)
+			if identity.Role != "captain" && identity.Role != "super_admin" {
+				return "", fmt.Errorf("captain or super_admin role is required")
+			}
+			title, content := strings.TrimSpace(input.Title), strings.TrimSpace(input.Content)
+			if title == "" || content == "" {
+				return "", fmt.Errorf("title and content are required")
+			}
+			draft, err := r.client.CreateAnnouncementDraft(ctx, business.AnnouncementDraftRequest{
+				Title: title, Content: content, Pinned: input.Pinned,
+				Source:       map[string]any{"generated_by": "agent", "note": strings.TrimSpace(input.SourceNote)},
+				RecipientIDs: input.RecipientIDs, EmailRequested: false,
+			})
+			if err != nil {
+				return "", err
+			}
+			return marshal(draft)
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
 	result := []tool.BaseTool{statusTool, knowledgeTool, recommendTool, teamQueryTool, statsTool, reportTool}
 	if r.writeEnabled {
+		result = append(result, announcementDraftTool)
 		clockInTool, err := toolutils.InferTool[emptyInput, string](
 			"clock_in",
 			"为当前登录成员打卡上班；只有工具返回成功后才能向用户确认。",
