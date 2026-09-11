@@ -49,19 +49,22 @@ type ReportModel struct {
 func (ReportModel) TableName() string { return "reports" }
 
 type ReportVersionModel struct {
-	ID           int64  `gorm:"primaryKey;autoIncrement"`
-	ReportID     int64  `gorm:"not null;index"`
-	Version      int    `gorm:"not null"`
-	Status       string `gorm:"size:16;not null;default:draft"`
-	Title        string `gorm:"size:256;not null;default:''"`
-	BodyMarkdown string `gorm:"type:text;not null;default:''"`
-	ContentHash  string `gorm:"size:128;not null;default:''"`
-	ParseStatus  string `gorm:"size:16;not null;default:pending;index"`
-	ParseError   string `gorm:"size:512;not null;default:''"`
-	CreatedBy    int64  `gorm:"not null"`
-	SubmittedBy  *int64 `gorm:"index"`
-	SubmittedAt  *time.Time
-	CreatedAt    time.Time `gorm:"not null;default:current_timestamp"`
+	ID            int64      `gorm:"primaryKey;autoIncrement"`
+	ReportID      int64      `gorm:"not null;index"`
+	Version       int        `gorm:"not null"`
+	Status        string     `gorm:"size:16;not null;default:draft"`
+	Title         string     `gorm:"size:256;not null;default:''"`
+	BodyMarkdown  string     `gorm:"type:text;not null;default:''"`
+	ContentHash   string     `gorm:"size:128;not null;default:''"`
+	ParseStatus   string     `gorm:"size:16;not null;default:pending;index"`
+	ParseError    string     `gorm:"size:512;not null;default:''"`
+	ParserVersion string     `gorm:"size:32;not null;default:''"`
+	ParsedJSON    string     `gorm:"type:jsonb;not null;default:'{}'"`
+	ParsedAt      *time.Time `gorm:"index"`
+	CreatedBy     int64      `gorm:"not null"`
+	SubmittedBy   *int64     `gorm:"index"`
+	SubmittedAt   *time.Time
+	CreatedAt     time.Time `gorm:"not null;default:current_timestamp"`
 }
 
 func (ReportVersionModel) TableName() string { return "report_versions" }
