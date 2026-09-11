@@ -35,3 +35,28 @@ func TestSnapshotInvalidationIsExplicit(t *testing.T) {
 		t.Fatal("invalidated snapshot was changed again")
 	}
 }
+
+func TestDraftRequiresReviewBeforePublishAndSupportsReturnForRevision(t *testing.T) {
+	draft, err := NewDraft(7, 4, 9, DraftAudienceCaptain, "八月考评", "总结", "model-x", "prompt-v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := draft.Publish(); err != ErrSnapshotChanged {
+		t.Fatalf("published an unreviewed draft: %v", err)
+	}
+	if err := draft.Review(true); err != nil || draft.Status != DraftStatusReviewed {
+		t.Fatalf("review transition failed: err=%v status=%s", err, draft.Status)
+	}
+	if err := draft.Review(false); err != nil || draft.Status != DraftStatusDraft {
+		t.Fatalf("rejection did not return draft for revision: err=%v status=%s", err, draft.Status)
+	}
+	if err := draft.Review(true); err != nil {
+		t.Fatalf("second review transition failed: %v", err)
+	}
+	if err := draft.Publish(); err != nil || draft.Status != DraftStatusPublished || draft.PublishedAt == nil {
+		t.Fatalf("publish transition failed: err=%v status=%s", err, draft.Status)
+	}
+	if err := draft.Invalidate(); err != ErrSnapshotChanged {
+		t.Fatalf("published draft was invalidated: %v", err)
+	}
+}

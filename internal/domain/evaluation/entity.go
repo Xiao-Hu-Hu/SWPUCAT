@@ -36,6 +36,23 @@ const (
 	DataUnknown  DataState = "unknown"
 )
 
+type DraftStatus string
+
+const (
+	DraftStatusDraft       DraftStatus = "draft"
+	DraftStatusReviewed    DraftStatus = "reviewed"
+	DraftStatusPublished   DraftStatus = "published"
+	DraftStatusInvalidated DraftStatus = "invalidated"
+)
+
+type DraftAudience string
+
+const (
+	DraftAudienceCaptain DraftAudience = "captain"
+	DraftAudienceTeam    DraftAudience = "team"
+	DraftAudiencePrivate DraftAudience = "private"
+)
+
 var (
 	ErrInvalidSnapshot = errors.New("invalid evaluation snapshot")
 	ErrSnapshotChanged = errors.New("evaluation snapshot is immutable")
@@ -93,6 +110,78 @@ type ReportInput struct {
 	VersionID     int64
 	DataState     DataState
 	UnknownReason string
+}
+
+type Draft struct {
+	ID              int64
+	SnapshotID      int64
+	PeriodID        int64
+	Status          DraftStatus
+	Audience        DraftAudience
+	Title           string
+	SummaryMarkdown string
+	Model           string
+	PromptVersion   string
+	CreatedBy       int64
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	PublishedAt     *time.Time
+	Members         []DraftMember
+}
+
+type DraftMember struct {
+	DraftID         int64
+	UserID          int64
+	DisplayName     string
+	CommentMarkdown string
+	Recommendation  string
+	EvidenceJSON    string
+	ManualOverride  bool
+	UpdatedAt       time.Time
+}
+
+func NewDraft(snapshotID, periodID, createdBy int64, audience DraftAudience, title, summary, model, promptVersion string) (*Draft, error) {
+	if snapshotID <= 0 || periodID <= 0 || createdBy <= 0 || audience != DraftAudienceCaptain && audience != DraftAudienceTeam && audience != DraftAudiencePrivate {
+		return nil, ErrInvalidSnapshot
+	}
+	now := time.Now()
+	return &Draft{SnapshotID: snapshotID, PeriodID: periodID, Status: DraftStatusDraft, Audience: audience, Title: strings.TrimSpace(title), SummaryMarkdown: summary, Model: strings.TrimSpace(model), PromptVersion: strings.TrimSpace(promptVersion), CreatedBy: createdBy, CreatedAt: now, UpdatedAt: now, Members: make([]DraftMember, 0)}, nil
+}
+
+func (d *Draft) Review(approved bool) error {
+	if d == nil {
+		return ErrSnapshotChanged
+	}
+	switch {
+	case approved && d.Status == DraftStatusDraft:
+		d.Status = DraftStatusReviewed
+	case !approved && d.Status == DraftStatusReviewed:
+		d.Status = DraftStatusDraft
+	default:
+		return ErrSnapshotChanged
+	}
+	d.UpdatedAt = time.Now()
+	return nil
+}
+
+func (d *Draft) Publish() error {
+	if d == nil || d.Status != DraftStatusReviewed {
+		return ErrSnapshotChanged
+	}
+	now := time.Now()
+	d.Status = DraftStatusPublished
+	d.PublishedAt = &now
+	d.UpdatedAt = now
+	return nil
+}
+
+func (d *Draft) Invalidate() error {
+	if d == nil || d.Status == DraftStatusInvalidated || d.Status == DraftStatusPublished {
+		return ErrSnapshotChanged
+	}
+	d.Status = DraftStatusInvalidated
+	d.UpdatedAt = time.Now()
+	return nil
 }
 
 func NewSnapshot(periodID int64, periodKey string, startsOn, endsOn time.Time, timezone string, cutoffAt time.Time, rosterVersion int64, ruleVersion, sourceWatermark string, createdBy int64, attendance []AttendanceInput, reports []ReportInput) (*Snapshot, error) {

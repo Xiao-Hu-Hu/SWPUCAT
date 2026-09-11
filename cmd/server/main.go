@@ -6,6 +6,7 @@ import (
 	"SWPUCAT/internal/application/authorization"
 	"SWPUCAT/internal/application/checkin"
 	"SWPUCAT/internal/application/dashboard"
+	evaluationapp "SWPUCAT/internal/application/evaluation"
 	"SWPUCAT/internal/application/invitation"
 	"SWPUCAT/internal/application/knowledge"
 	reportapp "SWPUCAT/internal/application/report"
@@ -48,6 +49,7 @@ func main() {
 	checkinRepo := repository.NewCheckinRepo(db)
 	knowledgeRepo := repository.NewKnowledgeRepo(db)
 	reportRepo := repository.NewReportRepo(db)
+	evaluationRepo := repository.NewEvaluationRepo(db)
 	approvalRepo := repository.NewApprovalRepo(db)
 	codeRepo := repository.NewVerificationCodeRepo(db)
 	invitationRepo := repository.NewInvitationRepo(db)
@@ -71,6 +73,7 @@ func main() {
 	checkinSvc := checkin.NewCheckinService(checkinRepo, userRepo, publisher, settingsRepo)
 	knowledgeSvc := knowledge.NewKnowledgeService(knowledgeRepo, publisher)
 	reportSvc := reportapp.NewService(reportRepo)
+	evaluationSvc := evaluationapp.NewService(evaluationRepo)
 	approvalSvc := approval.NewApprovalService(approvalRepo, knowledgeRepo, publisher)
 	dashboardSvc := dashboard.NewDashboardService(userRepo, checkinRepo, annRepo, knowledgeRepo)
 	authzSvc := authorization.NewService(userRepo)
@@ -90,6 +93,7 @@ func main() {
 	}
 	agentHandler := httpInterface.NewAgentHandler(agentClient)
 	reportHandler := httpInterface.NewReportHandler(reportSvc)
+	evaluationHandler := httpInterface.NewEvaluationHandler(evaluationSvc)
 
 	// Initialize router
 	router := httpInterface.NewRouter(
@@ -105,6 +109,7 @@ func main() {
 		invitationHandler,
 		agentHandler,
 		reportHandler,
+		evaluationHandler,
 	)
 
 	// Setup routes

@@ -22,6 +22,7 @@ type Router struct {
 	invitationHandler *InvitationHandler
 	agentHandler      *AgentHandler
 	reportHandler     *ReportHandler
+	evaluationHandler *EvaluationHandler
 }
 
 func NewRouter(
@@ -37,6 +38,7 @@ func NewRouter(
 	invitationHandler *InvitationHandler,
 	agentHandler *AgentHandler,
 	reportHandler *ReportHandler,
+	evaluationHandler *EvaluationHandler,
 ) *Router {
 	engine := gin.Default()
 
@@ -62,6 +64,7 @@ func NewRouter(
 		invitationHandler: invitationHandler,
 		agentHandler:      agentHandler,
 		reportHandler:     reportHandler,
+		evaluationHandler: evaluationHandler,
 	}
 }
 
@@ -163,6 +166,15 @@ func (r *Router) Setup() *gin.Engine {
 			protected.POST("/reports/:id/versions/:version/assets", r.reportHandler.AttachAsset)
 			protected.POST("/reports/:id/versions/:version/check", r.reportHandler.CheckQuality)
 			protected.POST("/reports/:id/versions/:version/quality/:finding/decision", r.reportHandler.DecideQuality)
+
+			// Captain evaluations are always bound to an immutable evidence
+			// snapshot. Only managers can edit, review, or publish a draft.
+			protected.POST("/evaluations/drafts", RBACMiddleware("captain", "super_admin"), r.evaluationHandler.CreateDraft)
+			protected.GET("/evaluations/:id", RBACMiddleware("captain", "super_admin"), r.evaluationHandler.GetDraft)
+			protected.PUT("/evaluations/:id/draft", RBACMiddleware("captain", "super_admin"), r.evaluationHandler.UpdateDraft)
+			protected.POST("/evaluations/:id/review", RBACMiddleware("captain", "super_admin"), r.evaluationHandler.ReviewDraft)
+			protected.POST("/evaluations/:id/publish", RBACMiddleware("captain", "super_admin"), r.evaluationHandler.PublishDraft)
+			protected.PUT("/evaluations/:id/members/:user_id", RBACMiddleware("captain", "super_admin"), r.evaluationHandler.SaveMemberComment)
 		}
 	}
 
