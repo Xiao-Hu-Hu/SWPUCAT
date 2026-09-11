@@ -306,7 +306,7 @@ async function handleDownloadFile(id: number, name: string) {
       <div class="card">
         <div class="card-header">
           <h3>分类</h3>
-          <el-button v-if="authStore.isCaptain" size="small" @click="showCategoryDialog = true">
+          <el-button v-if="authStore.isCaptain || authStore.isSuperAdmin" size="small" @click="showCategoryDialog = true">
             <el-icon><Plus /></el-icon>
           </el-button>
         </div>
@@ -328,7 +328,7 @@ async function handleDownloadFile(id: number, name: string) {
             <span>{{ cat.name }}</span>
             <span class="count">{{ cat.count }}</span>
             <el-button
-              v-if="authStore.isCaptain && !cat.is_system"
+              v-if="(authStore.isCaptain || authStore.isSuperAdmin) && !cat.is_system"
               size="small"
               type="danger"
               link

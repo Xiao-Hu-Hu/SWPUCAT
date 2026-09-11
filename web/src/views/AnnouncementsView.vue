@@ -276,7 +276,7 @@ async function handleDelete(id: number) {
     <div class="card">
       <div class="card-header">
         <h3>公告管理</h3>
-        <el-button v-if="authStore.isCaptain" type="primary" @click="openCreate">
+        <el-button v-if="authStore.isCaptain || authStore.isSuperAdmin" type="primary" @click="openCreate">
           <el-icon><Plus /></el-icon> 发布公告
         </el-button>
       </div>
@@ -317,7 +317,7 @@ async function handleDelete(id: number) {
           </div>
           <div class="ann-content markdown-body" v-html="renderMarkdown(ann.content)"></div>
           <div class="ann-footer">
-            <div class="ann-actions" v-if="authStore.isCaptain">
+            <div class="ann-actions" v-if="authStore.isCaptain || authStore.isSuperAdmin">
               <el-button size="small" @click="openEdit(ann)">编辑</el-button>
               <el-button size="small" type="success" @click="openNotify(ann)">通知</el-button>
               <el-button size="small" type="danger" @click="handleDelete(ann.id)">删除</el-button>
