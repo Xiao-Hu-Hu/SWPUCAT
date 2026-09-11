@@ -14,6 +14,7 @@ vendor/
 *.out
 coverage.out
 .gocache/
+.tmp-go-cache/
 
 # IDE
 .idea/
