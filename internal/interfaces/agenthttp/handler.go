@@ -23,7 +23,7 @@ func (h *Handler) Health(c *gin.Context) {
 }
 
 func (h *Handler) Chat(c *gin.Context) {
-	if h.internalSecret != "" && c.GetHeader("X-Agent-Internal-Secret") != h.internalSecret {
+	if h.engine.Enabled() && (h.internalSecret == "" || c.GetHeader("X-Agent-Internal-Secret") != h.internalSecret) {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "invalid internal secret"})
 		return
 	}

@@ -52,6 +52,9 @@ func (a *AgentConfig) Validate() error {
 	if a.WorkerConcurrency < 1 || a.WorkerConcurrency > 16 {
 		return fmt.Errorf("agent.worker_concurrency must be between 1 and 16")
 	}
+	if a.WriteEnabled && !a.Enabled {
+		return fmt.Errorf("agent.write_enabled requires agent.enabled=true")
+	}
 	if a.Enabled {
 		if strings.TrimSpace(a.LLMProvider) == "" {
 			return fmt.Errorf("agent.llm_provider is required when agent is enabled")

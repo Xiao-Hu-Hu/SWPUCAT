@@ -94,8 +94,10 @@ services:
       CSA_AGENT_WORKER_CONCURRENCY: ${CSA_AGENT_WORKER_CONCURRENCY:-1}
       CSA_SERVER_MODE: ${CSA_SERVER_MODE:-release}
       TZ: ${TZ:-Asia/Shanghai}
-    ports:
-      - "8090:8090"
+    # Agent is an internal service. The server reaches it over the Compose
+    # network; do not expose the model/tool endpoint on the host interface.
+    expose:
+      - "8090"
     command: ["./agent"]
 
   web:
