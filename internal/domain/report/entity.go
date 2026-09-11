@@ -101,23 +101,26 @@ type Report struct {
 }
 
 type ReportVersion struct {
-	ID            int64
-	ReportID      int64
-	Version       int
-	Status        VersionStatus
-	Title         string
-	BodyMarkdown  string
-	ContentHash   string
-	ParseStatus   ParseStatus
-	ParseError    string
-	ParserVersion string
-	ParsedJSON    string
-	ParsedAt      *time.Time
-	CreatedBy     int64
-	SubmittedBy   int64
-	SubmittedAt   *time.Time
-	CreatedAt     time.Time
-	Assets        []ReportAsset
+	ID               int64
+	ReportID         int64
+	Version          int
+	Status           VersionStatus
+	Title            string
+	BodyMarkdown     string
+	ContentHash      string
+	ParseStatus      ParseStatus
+	ParseError       string
+	ParserVersion    string
+	ParsedJSON       string
+	ParsedAt         *time.Time
+	QualityStatus    string
+	QualityJSON      string
+	QualityCheckedAt *time.Time
+	CreatedBy        int64
+	SubmittedBy      int64
+	SubmittedAt      *time.Time
+	CreatedAt        time.Time
+	Assets           []ReportAsset
 }
 
 type ReportAsset struct {

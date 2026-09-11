@@ -1,6 +1,7 @@
 package reportapp
 
 import (
+	"SWPUCAT/internal/application/reportcheck"
 	"SWPUCAT/internal/application/reportparse"
 	domain "SWPUCAT/internal/domain/report"
 	"SWPUCAT/internal/domain/shared"
@@ -85,20 +86,23 @@ type ReportDTO struct {
 }
 
 type VersionDTO struct {
-	ID            int64       `json:"id"`
-	ReportID      int64       `json:"report_id"`
-	Version       int         `json:"version"`
-	Status        string      `json:"status"`
-	Title         string      `json:"title"`
-	BodyMarkdown  string      `json:"body_markdown"`
-	ContentHash   string      `json:"content_hash"`
-	ParseStatus   string      `json:"parse_status"`
-	ParseError    string      `json:"parse_error,omitempty"`
-	ParserVersion string      `json:"parser_version,omitempty"`
-	ParsedJSON    interface{} `json:"parsed_json,omitempty"`
-	SubmittedAt   string      `json:"submitted_at,omitempty"`
-	CreatedAt     string      `json:"created_at"`
-	Assets        []AssetDTO  `json:"assets,omitempty"`
+	ID               int64       `json:"id"`
+	ReportID         int64       `json:"report_id"`
+	Version          int         `json:"version"`
+	Status           string      `json:"status"`
+	Title            string      `json:"title"`
+	BodyMarkdown     string      `json:"body_markdown"`
+	ContentHash      string      `json:"content_hash"`
+	ParseStatus      string      `json:"parse_status"`
+	ParseError       string      `json:"parse_error,omitempty"`
+	ParserVersion    string      `json:"parser_version,omitempty"`
+	ParsedJSON       interface{} `json:"parsed_json,omitempty"`
+	QualityStatus    string      `json:"quality_status,omitempty"`
+	QualityJSON      interface{} `json:"quality_json,omitempty"`
+	QualityCheckedAt string      `json:"quality_checked_at,omitempty"`
+	SubmittedAt      string      `json:"submitted_at,omitempty"`
+	CreatedAt        string      `json:"created_at"`
+	Assets           []AssetDTO  `json:"assets,omitempty"`
 }
 
 type AssetDTO struct {
@@ -337,6 +341,58 @@ func (s *Service) AttachAsset(ctx context.Context, reportID int64, versionNumber
 	return toAssetDTO(asset), nil
 }
 
+func (s *Service) CheckQuality(ctx context.Context, reportID int64, versionNumber int, viewerID int64, manager bool) (*VersionDTO, error) {
+	parent, err := s.repo.FindReportByID(ctx, reportID)
+	if err != nil {
+		return nil, err
+	}
+	if !canAccess(parent, viewerID, manager) {
+		return nil, shared.ErrForbidden
+	}
+	version, err := s.repo.FindVersion(ctx, reportID, versionNumber)
+	if err != nil {
+		return nil, err
+	}
+	parsed := reportparse.Parse(version.BodyMarkdown)
+	quality := reportcheck.Check(parsed.Report)
+	data, err := json.Marshal(quality)
+	if err != nil {
+		return nil, err
+	}
+	status := "ready"
+	if parsed.Status == reportparse.ParseFailed {
+		status = "failed"
+	}
+	now := time.Now()
+	if err := s.repo.UpdateVersionQuality(ctx, version.ID, status, string(data), &now); err != nil {
+		return nil, err
+	}
+	version.QualityStatus, version.QualityJSON, version.QualityCheckedAt = status, string(data), &now
+	return toVersionDTO(version), nil
+}
+
+func (s *Service) DecideQuality(ctx context.Context, reportID int64, versionNumber, findingIndex int, viewerID int64, manager, accepted bool, note string) error {
+	parent, err := s.repo.FindReportByID(ctx, reportID)
+	if err != nil {
+		return err
+	}
+	if !canAccess(parent, viewerID, manager) {
+		return shared.ErrForbidden
+	}
+	version, err := s.repo.FindVersion(ctx, reportID, versionNumber)
+	if err != nil {
+		return err
+	}
+	if findingIndex < 0 || findingIndex >= 1000 {
+		return shared.ErrValidation
+	}
+	decision := "rejected"
+	if accepted {
+		decision = "accepted"
+	}
+	return s.repo.SaveQualityDecision(ctx, version.ID, findingIndex, decision, strings.TrimSpace(note), viewerID)
+}
+
 func canAccess(item *domain.Report, viewerID int64, manager bool) bool {
 	return item != nil && (manager || item.AuthorID == viewerID)
 }
@@ -357,7 +413,7 @@ func toReportDTO(item *domain.Report) *ReportDTO {
 }
 
 func toVersionDTO(item *domain.ReportVersion) *VersionDTO {
-	dto := &VersionDTO{ID: item.ID, ReportID: item.ReportID, Version: item.Version, Status: string(item.Status), Title: item.Title, BodyMarkdown: item.BodyMarkdown, ContentHash: item.ContentHash, ParseStatus: string(item.ParseStatus), ParseError: item.ParseError, ParserVersion: item.ParserVersion, CreatedAt: item.CreatedAt.Format(time.RFC3339), Assets: make([]AssetDTO, 0, len(item.Assets))}
+	dto := &VersionDTO{ID: item.ID, ReportID: item.ReportID, Version: item.Version, Status: string(item.Status), Title: item.Title, BodyMarkdown: item.BodyMarkdown, ContentHash: item.ContentHash, ParseStatus: string(item.ParseStatus), ParseError: item.ParseError, ParserVersion: item.ParserVersion, QualityStatus: item.QualityStatus, CreatedAt: item.CreatedAt.Format(time.RFC3339), Assets: make([]AssetDTO, 0, len(item.Assets))}
 	if item.ParsedJSON != "" {
 		var parsed interface{}
 		if json.Unmarshal([]byte(item.ParsedJSON), &parsed) == nil {
@@ -366,6 +422,15 @@ func toVersionDTO(item *domain.ReportVersion) *VersionDTO {
 	}
 	if item.SubmittedAt != nil {
 		dto.SubmittedAt = item.SubmittedAt.Format(time.RFC3339)
+	}
+	if item.QualityJSON != "" {
+		var quality interface{}
+		if json.Unmarshal([]byte(item.QualityJSON), &quality) == nil {
+			dto.QualityJSON = quality
+		}
+	}
+	if item.QualityCheckedAt != nil {
+		dto.QualityCheckedAt = item.QualityCheckedAt.Format(time.RFC3339)
 	}
 	for _, asset := range item.Assets {
 		dto.Assets = append(dto.Assets, *toAssetDTO(&asset))

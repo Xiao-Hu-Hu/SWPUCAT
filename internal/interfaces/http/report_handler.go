@@ -198,6 +198,44 @@ func (h *ReportHandler) AttachAsset(c *gin.Context) {
 	Created(c, item)
 }
 
+func (h *ReportHandler) CheckQuality(c *gin.Context) {
+	reportID, version, ok := reportVersionParams(c)
+	if !ok {
+		return
+	}
+	item, err := h.service.CheckQuality(c.Request.Context(), reportID, version, GetUserID(c), IsCaptain(c))
+	if err != nil {
+		handleReportError(c, err)
+		return
+	}
+	Success(c, item)
+}
+
+func (h *ReportHandler) DecideQuality(c *gin.Context) {
+	reportID, version, ok := reportVersionParams(c)
+	if !ok {
+		return
+	}
+	findingIndex, err := strconv.Atoi(c.Param("finding"))
+	if err != nil || findingIndex < 0 {
+		BadRequest(c, "invalid finding index")
+		return
+	}
+	var req struct {
+		Accepted bool   `json:"accepted"`
+		Note     string `json:"note,omitempty"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid quality decision request")
+		return
+	}
+	if err := h.service.DecideQuality(c.Request.Context(), reportID, version, findingIndex, GetUserID(c), IsCaptain(c), req.Accepted, req.Note); err != nil {
+		handleReportError(c, err)
+		return
+	}
+	Success(c, nil)
+}
+
 func reportIDParam(c *gin.Context, label string) (int64, bool) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {

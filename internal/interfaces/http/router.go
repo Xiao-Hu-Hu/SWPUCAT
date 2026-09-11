@@ -161,6 +161,8 @@ func (r *Router) Setup() *gin.Engine {
 			protected.POST("/reports/:id/versions/:version/submit", r.reportHandler.SubmitVersion)
 			protected.POST("/reports/:id/versions/:version/review", RBACMiddleware("captain", "super_admin"), r.reportHandler.ReviewVersion)
 			protected.POST("/reports/:id/versions/:version/assets", r.reportHandler.AttachAsset)
+			protected.POST("/reports/:id/versions/:version/check", r.reportHandler.CheckQuality)
+			protected.POST("/reports/:id/versions/:version/quality/:finding/decision", r.reportHandler.DecideQuality)
 		}
 	}
 

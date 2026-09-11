@@ -1,6 +1,9 @@
 package report
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type Repository interface {
 	CreatePeriod(ctx context.Context, period *ReportPeriod) error
@@ -14,6 +17,8 @@ type Repository interface {
 	CreateVersion(ctx context.Context, version *ReportVersion, expectedCurrent int) error
 	FindVersion(ctx context.Context, reportID int64, version int) (*ReportVersion, error)
 	UpdateVersion(ctx context.Context, version *ReportVersion) error
+	UpdateVersionQuality(ctx context.Context, versionID int64, status, resultJSON string, checkedAt *time.Time) error
+	SaveQualityDecision(ctx context.Context, versionID int64, findingIndex int, decision, note string, decidedBy int64) error
 	UpdateReportStatus(ctx context.Context, reportID int64, status ReportStatus) error
 	AttachAsset(ctx context.Context, asset *ReportAsset) error
 }

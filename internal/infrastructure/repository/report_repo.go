@@ -4,6 +4,7 @@ import (
 	"SWPUCAT/internal/domain/report"
 	"SWPUCAT/internal/infrastructure/database"
 	"context"
+	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -186,6 +187,7 @@ func (r *ReportRepo) UpdateVersion(ctx context.Context, version *report.ReportVe
 		"status": string(version.Status), "title": version.Title, "body_markdown": version.BodyMarkdown,
 		"content_hash": version.ContentHash, "parse_status": string(version.ParseStatus), "parse_error": version.ParseError,
 		"parser_version": version.ParserVersion, "parsed_json": version.ParsedJSON, "parsed_at": version.ParsedAt,
+		"quality_status": version.QualityStatus, "quality_json": version.QualityJSON, "quality_checked_at": version.QualityCheckedAt,
 		"submitted_by": nil, "submitted_at": version.SubmittedAt,
 	}
 	if version.SubmittedBy > 0 {
@@ -199,6 +201,27 @@ func (r *ReportRepo) UpdateVersion(ctx context.Context, version *report.ReportVe
 		return gorm.ErrRecordNotFound
 	}
 	return nil
+}
+
+func (r *ReportRepo) UpdateVersionQuality(ctx context.Context, versionID int64, status, resultJSON string, checkedAt *time.Time) error {
+	result := r.db.WithContext(ctx).Model(&database.ReportVersionModel{}).Where("id = ?", versionID).Updates(map[string]interface{}{
+		"quality_status": status, "quality_json": resultJSON, "quality_checked_at": checkedAt,
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func (r *ReportRepo) SaveQualityDecision(ctx context.Context, versionID int64, findingIndex int, decision, note string, decidedBy int64) error {
+	if versionID <= 0 || findingIndex < 0 || decidedBy <= 0 || (decision != "accepted" && decision != "rejected") {
+		return report.ErrInvalidVersion
+	}
+	model := &database.ReportQualityDecisionModel{ReportVersionID: versionID, FindingIndex: findingIndex, Decision: decision, Note: note, DecidedBy: decidedBy}
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "report_version_id"}, {Name: "finding_index"}}, DoUpdates: clause.AssignmentColumns([]string{"decision", "note", "decided_by", "decided_at"})}).Create(model).Error
 }
 
 func (r *ReportRepo) UpdateReportStatus(ctx context.Context, reportID int64, status report.ReportStatus) error {
@@ -244,6 +267,7 @@ func toDomainReportVersion(model *database.ReportVersionModel) *report.ReportVer
 	return &report.ReportVersion{ID: model.ID, ReportID: model.ReportID, Version: model.Version, Status: report.VersionStatus(model.Status),
 		Title: model.Title, BodyMarkdown: model.BodyMarkdown, ContentHash: model.ContentHash, ParseStatus: report.ParseStatus(model.ParseStatus),
 		ParseError: model.ParseError, ParserVersion: model.ParserVersion, ParsedJSON: model.ParsedJSON, ParsedAt: model.ParsedAt,
+		QualityStatus: model.QualityStatus, QualityJSON: model.QualityJSON, QualityCheckedAt: model.QualityCheckedAt,
 		CreatedBy: model.CreatedBy, SubmittedBy: submittedBy, SubmittedAt: model.SubmittedAt, CreatedAt: model.CreatedAt, Assets: make([]report.ReportAsset, 0)}
 }
 
