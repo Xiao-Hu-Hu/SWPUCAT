@@ -27,6 +27,14 @@ type statsInput struct {
 	Period string `json:"period,omitempty" jsonschema_description:"统计周期，只能是 today、week 或 month"`
 }
 
+type teamQueryInput struct {
+	Period       string   `json:"period,omitempty" jsonschema_description:"统计周期，只能是 today、week 或 month"`
+	PeriodID     int64    `json:"period_id,omitempty" jsonschema_description:"月报周期 ID；需要结合月报状态筛选时必须提供"`
+	MinHours     *float64 `json:"min_hours,omitempty" jsonschema_description:"可选的最低工时阈值，只筛选低于该值的成员"`
+	ReportStatus string   `json:"report_status,omitempty" jsonschema_description:"可选月报状态：missing、draft、submitted 或 reviewed"`
+	Limit        int      `json:"limit,omitempty" jsonschema_description:"最大返回成员数，默认 100，最大 200"`
+}
+
 type reportMaterialsInput struct {
 	PeriodID int64  `json:"period_id" jsonschema_description:"报告周期 ID，必须由用户明确提供"`
 	Scope    string `json:"scope,omitempty" jsonschema_description:"材料范围，只能是 mine 或 team；team 仅队长可用"`
@@ -83,6 +91,37 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 				return "", err
 			}
 			return marshal(status)
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	teamQueryTool, err := toolutils.InferTool[teamQueryInput, string](
+		"query_team_members",
+		"将队长的自然语言组合查询转换为受限条件，后端确定性计算打卡和月报状态；不能生成或执行 SQL，也不会自动发送通知。",
+		func(ctx context.Context, input teamQueryInput) (string, error) {
+			identity := business.RequestContextFrom(ctx)
+			if identity.Role != "captain" && identity.Role != "super_admin" {
+				return "", fmt.Errorf("captain or super_admin role is required")
+			}
+			period := strings.TrimSpace(input.Period)
+			if period == "" {
+				period = "week"
+			}
+			if period != "today" && period != "week" && period != "month" {
+				return "", fmt.Errorf("period must be today, week, or month")
+			}
+			if input.MinHours != nil && (*input.MinHours < 0 || *input.MinHours > 10000) {
+				return "", fmt.Errorf("min_hours is out of range")
+			}
+			if input.ReportStatus != "" && input.ReportStatus != "missing" && input.ReportStatus != "draft" && input.ReportStatus != "submitted" && input.ReportStatus != "reviewed" {
+				return "", fmt.Errorf("invalid report_status")
+			}
+			result, err := r.client.QueryTeam(ctx, period, input.PeriodID, input.MinHours, input.ReportStatus, input.Limit)
+			if err != nil {
+				return "", err
+			}
+			return marshal(result)
 		},
 	)
 	if err != nil {
@@ -227,7 +266,7 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
-	result := []tool.BaseTool{statusTool, knowledgeTool, recommendTool, statsTool, reportTool}
+	result := []tool.BaseTool{statusTool, knowledgeTool, recommendTool, teamQueryTool, statsTool, reportTool}
 	if r.writeEnabled {
 		clockInTool, err := toolutils.InferTool[emptyInput, string](
 			"clock_in",

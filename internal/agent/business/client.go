@@ -209,6 +209,26 @@ type CheckinStat struct {
 	Anomalies    []string `json:"anomalies,omitempty"`
 }
 
+type TeamQueryMember struct {
+	UserID          int64    `json:"user_id"`
+	Nickname        string   `json:"nickname"`
+	TotalHours      float64  `json:"total_hours"`
+	Days            int      `json:"days"`
+	AttendanceState string   `json:"attendance_state"`
+	Anomalies       []string `json:"anomalies,omitempty"`
+	ReportState     string   `json:"report_state,omitempty"`
+	Reasons         []string `json:"reasons"`
+}
+
+type TeamQueryResult struct {
+	Period       string            `json:"period"`
+	PeriodID     int64             `json:"period_id,omitempty"`
+	MinHours     *float64          `json:"min_hours,omitempty"`
+	ReportStatus string            `json:"report_status,omitempty"`
+	Limit        int               `json:"limit"`
+	Members      []TeamQueryMember `json:"members"`
+}
+
 type Report struct {
 	ID             int64  `json:"id"`
 	PeriodID       int64  `json:"period_id"`
@@ -288,6 +308,26 @@ func (c *Client) CheckinStats(ctx context.Context, period string) ([]CheckinStat
 	params.Set("period", period)
 	var result []CheckinStat
 	err := c.do(ctx, http.MethodGet, "/api/checkin/stats", params, nil, &result)
+	return result, err
+}
+
+func (c *Client) QueryTeam(ctx context.Context, period string, periodID int64, minHours *float64, reportStatus string, limit int) (TeamQueryResult, error) {
+	params := url.Values{}
+	params.Set("period", period)
+	if periodID > 0 {
+		params.Set("period_id", fmt.Sprintf("%d", periodID))
+	}
+	if minHours != nil {
+		params.Set("min_hours", fmt.Sprintf("%g", *minHours))
+	}
+	if reportStatus != "" {
+		params.Set("report_status", reportStatus)
+	}
+	if limit > 0 {
+		params.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	var result TeamQueryResult
+	err := c.do(ctx, http.MethodGet, "/api/analysis/team", params, nil, &result)
 	return result, err
 }
 

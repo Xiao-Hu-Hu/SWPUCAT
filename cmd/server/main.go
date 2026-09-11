@@ -11,6 +11,7 @@ import (
 	"SWPUCAT/internal/application/knowledge"
 	notificationapp "SWPUCAT/internal/application/notification"
 	reportapp "SWPUCAT/internal/application/report"
+	teamqueryapp "SWPUCAT/internal/application/teamquery"
 	"SWPUCAT/internal/application/user"
 	"SWPUCAT/internal/infrastructure/agentclient"
 	"SWPUCAT/internal/infrastructure/auth"
@@ -77,6 +78,7 @@ func main() {
 	knowledgeSvc := knowledge.NewKnowledgeService(knowledgeRepo, publisher)
 	reportSvc := reportapp.NewService(reportRepo)
 	evaluationSvc := evaluationapp.NewService(evaluationRepo, notificationSvc)
+	teamQuerySvc := teamqueryapp.NewService(checkinSvc, reportSvc)
 	approvalSvc := approval.NewApprovalService(approvalRepo, knowledgeRepo, publisher)
 	dashboardSvc := dashboard.NewDashboardService(userRepo, checkinRepo, annRepo, knowledgeRepo)
 	authzSvc := authorization.NewService(userRepo)
@@ -98,6 +100,7 @@ func main() {
 	reportHandler := httpInterface.NewReportHandler(reportSvc)
 	evaluationHandler := httpInterface.NewEvaluationHandler(evaluationSvc)
 	notificationHandler := httpInterface.NewNotificationHandler(notificationSvc)
+	teamQueryHandler := httpInterface.NewTeamQueryHandler(teamQuerySvc)
 
 	// Initialize router
 	router := httpInterface.NewRouter(
@@ -115,6 +118,7 @@ func main() {
 		reportHandler,
 		evaluationHandler,
 		notificationHandler,
+		teamQueryHandler,
 	)
 
 	// Setup routes

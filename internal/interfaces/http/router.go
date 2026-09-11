@@ -24,6 +24,7 @@ type Router struct {
 	reportHandler       *ReportHandler
 	evaluationHandler   *EvaluationHandler
 	notificationHandler *NotificationHandler
+	teamQueryHandler    *TeamQueryHandler
 }
 
 func NewRouter(
@@ -41,6 +42,7 @@ func NewRouter(
 	reportHandler *ReportHandler,
 	evaluationHandler *EvaluationHandler,
 	notificationHandler *NotificationHandler,
+	teamQueryHandler *TeamQueryHandler,
 ) *Router {
 	engine := gin.Default()
 
@@ -68,6 +70,7 @@ func NewRouter(
 		reportHandler:       reportHandler,
 		evaluationHandler:   evaluationHandler,
 		notificationHandler: notificationHandler,
+		teamQueryHandler:    teamQueryHandler,
 	}
 }
 
@@ -191,6 +194,10 @@ func (r *Router) Setup() *gin.Engine {
 			protected.POST("/notifications/:id/read", r.notificationHandler.MarkRead)
 			protected.GET("/notifications/preferences", r.notificationHandler.GetPreferences)
 			protected.PUT("/notifications/preferences", r.notificationHandler.UpdatePreferences)
+
+			// Manager-only structured team query; the backend performs the
+			// deterministic filtering and never executes model-generated SQL.
+			protected.GET("/analysis/team", RBACMiddleware("captain", "super_admin"), r.teamQueryHandler.Query)
 		}
 	}
 
