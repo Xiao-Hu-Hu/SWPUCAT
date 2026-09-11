@@ -5,7 +5,7 @@ import { knowledgeApi } from '@/api/knowledge'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { UploadFile, UploadUserFile } from 'element-plus'
-import { marked } from 'marked'
+import { renderMarkdown } from '@/utils/markdown'
 
 const authStore = useAuthStore()
 const uploading = ref(false)
@@ -250,7 +250,8 @@ async function handleUploadFile() {
   } catch (err: any) {
     if (disposed) return
     if (err?.code === 'ERR_CANCELED') {
-      ElMessage.info(uploadPhase.value === 'saving'
+      const phase: string = uploadPhase.value
+      ElMessage.info(phase === 'saving'
         ? '已停止等待，正在刷新列表以确认文件是否已保存' : '已停止上传请求')
       shouldRefresh = true
     } else if (err?.code === 'ECONNABORTED') {
@@ -272,10 +273,6 @@ function openPreview(item: { name: string; description: string }) {
   showPreviewDialog.value = true
 }
 
-function renderMarkdown(md: string): string {
-  return marked.parse(md) as string
-}
-
 async function handleDownloadFile(id: number, name: string) {
   if (downloading.value[id] !== undefined) return
   downloading.value[id] = 0
@@ -283,7 +280,8 @@ async function handleDownloadFile(id: number, name: string) {
     const res = await knowledgeApi.downloadFile(id, (percent) => {
       downloading.value[id] = percent
     })
-    const url = window.URL.createObjectURL(new Blob([res]))
+    const blob = res instanceof Blob ? res : (res as any).data
+    const url = window.URL.createObjectURL(blob instanceof Blob ? blob : new Blob([blob]))
     const link = document.createElement('a')
     link.href = url
     link.setAttribute('download', name)

@@ -40,6 +40,22 @@ func (r *AnnouncementDraftRepo) FindByID(ctx context.Context, id int64) (*announ
 	return toDomainAnnouncementDraft(&model), nil
 }
 
+func (r *AnnouncementDraftRepo) List(ctx context.Context, status announcementdraft.Status) ([]*announcementdraft.Draft, error) {
+	var models []database.AnnouncementDraftModel
+	query := r.db.WithContext(ctx).Order("updated_at DESC, id DESC")
+	if status != "" {
+		query = query.Where("status = ?", string(status))
+	}
+	if err := query.Find(&models).Error; err != nil {
+		return nil, err
+	}
+	result := make([]*announcementdraft.Draft, 0, len(models))
+	for i := range models {
+		result = append(result, toDomainAnnouncementDraft(&models[i]))
+	}
+	return result, nil
+}
+
 func (r *AnnouncementDraftRepo) Update(ctx context.Context, draft *announcementdraft.Draft, actorID int64, expectedStatus announcementdraft.Status) error {
 	if draft == nil || draft.ID <= 0 || actorID <= 0 {
 		return announcementdraft.ErrInvalidDraft

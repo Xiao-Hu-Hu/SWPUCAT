@@ -95,6 +95,22 @@ func (s *Service) Get(ctx context.Context, id int64) (*DraftDTO, error) {
 	return toDTO(draft), nil
 }
 
+func (s *Service) List(ctx context.Context, status string) ([]DraftDTO, error) {
+	status = strings.TrimSpace(status)
+	if status != "" && status != string(announcementdraft.StatusDraft) && status != string(announcementdraft.StatusConfirmed) && status != string(announcementdraft.StatusPublished) && status != string(announcementdraft.StatusDiscarded) {
+		return nil, shared.ErrValidation
+	}
+	drafts, err := s.repo.List(ctx, announcementdraft.Status(status))
+	if err != nil {
+		return nil, err
+	}
+	result := make([]DraftDTO, 0, len(drafts))
+	for _, draft := range drafts {
+		result = append(result, *toDTO(draft))
+	}
+	return result, nil
+}
+
 func (s *Service) Update(ctx context.Context, actorID, id int64, req UpdateRequest) (*DraftDTO, error) {
 	draft, err := s.repo.FindByID(ctx, id)
 	if err != nil {

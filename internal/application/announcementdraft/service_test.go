@@ -25,6 +25,14 @@ func (r *fakeAnnouncementDraftRepo) FindByID(_ context.Context, _ int64) (*annou
 	return &copy, nil
 }
 
+func (r *fakeAnnouncementDraftRepo) List(_ context.Context, _ announcementdraft.Status) ([]*announcementdraft.Draft, error) {
+	if r.draft == nil {
+		return nil, nil
+	}
+	copy := *r.draft
+	return []*announcementdraft.Draft{&copy}, nil
+}
+
 func (r *fakeAnnouncementDraftRepo) Update(_ context.Context, draft *announcementdraft.Draft, _ int64, expected announcementdraft.Status) error {
 	if r.draft.Status != expected {
 		return announcementdraft.ErrInvalidDraft
@@ -83,5 +91,20 @@ func TestServiceRejectsEmailDraftWithoutRecipients(t *testing.T) {
 	service := NewService(&fakeAnnouncementDraftRepo{}, &fakeAnnouncementPublisher{})
 	if _, err := service.Create(context.Background(), 7, CreateRequest{Title: "通知", Content: "正文", EmailRequested: true}); err == nil {
 		t.Fatal("accepted email draft without recipients")
+	}
+}
+
+func TestServiceListsDraftsByState(t *testing.T) {
+	repo := &fakeAnnouncementDraftRepo{}
+	service := NewService(repo, &fakeAnnouncementPublisher{})
+	if _, err := service.Create(context.Background(), 7, CreateRequest{Title: "通知", Content: "正文"}); err != nil {
+		t.Fatal(err)
+	}
+	items, err := service.List(context.Background(), "draft")
+	if err != nil || len(items) != 1 || items[0].Status != string(announcementdraft.StatusDraft) {
+		t.Fatalf("List() = %+v, err=%v", items, err)
+	}
+	if _, err := service.List(context.Background(), "unknown"); err == nil {
+		t.Fatal("accepted unknown draft status")
 	}
 }

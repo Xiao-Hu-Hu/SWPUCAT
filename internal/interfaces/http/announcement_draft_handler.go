@@ -49,6 +49,15 @@ func (h *AnnouncementDraftHandler) Get(c *gin.Context) {
 	Success(c, item)
 }
 
+func (h *AnnouncementDraftHandler) List(c *gin.Context) {
+	items, err := h.service.List(c.Request.Context(), c.Query("status"))
+	if err != nil {
+		handleAnnouncementDraftError(c, err)
+		return
+	}
+	Success(c, items)
+}
+
 func (h *AnnouncementDraftHandler) Update(c *gin.Context) {
 	id, ok := announcementDraftIDParam(c)
 	if !ok {

@@ -119,6 +119,7 @@ func (r *Router) Setup() *gin.Engine {
 			// Agent-generated announcement drafts. The Agent may create a draft;
 			// only a manager can edit, confirm, publish, or discard it.
 			protected.POST("/announcement-drafts", RBACMiddleware("captain", "super_admin"), r.announcementDraftHandler.Create)
+			protected.GET("/announcement-drafts", RBACMiddleware("captain", "super_admin"), r.announcementDraftHandler.List)
 			protected.GET("/announcement-drafts/:id", RBACMiddleware("captain", "super_admin"), r.announcementDraftHandler.Get)
 			protected.PUT("/announcement-drafts/:id", RBACMiddleware("captain", "super_admin"), r.announcementDraftHandler.Update)
 			protected.POST("/announcement-drafts/:id/confirm", RBACMiddleware("captain", "super_admin"), r.announcementDraftHandler.Confirm)

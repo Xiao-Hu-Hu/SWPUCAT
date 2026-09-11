@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { announcementApi } from '@/api/announcement'
+import { announcementDraftApi, type AnnouncementDraft } from '@/api/announcementDraft'
 import { memberApi } from '@/api/member'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { marked } from 'marked'
+import { renderMarkdown } from '@/utils/markdown'
 
 const authStore = useAuthStore()
+const drafts = ref<AnnouncementDraft[]>([])
 const announcements = ref<Array<{
   id: number
   title: string
@@ -19,6 +21,7 @@ const announcements = ref<Array<{
 
 const showDialog = ref(false)
 const editingId = ref<number | null>(null)
+const editingDraftId = ref<number | null>(null)
 const form = ref({ title: '', content: '', pinned: false })
 
 const showDetail = ref(false)
@@ -58,6 +61,7 @@ const paginatedAnnouncements = computed(() => {
 
 onMounted(async () => {
   await loadAnnouncements()
+  if (authStore.isCaptain || authStore.isSuperAdmin) await loadDrafts()
 })
 
 async function loadAnnouncements() {
@@ -69,25 +73,39 @@ async function loadAnnouncements() {
   }
 }
 
+async function loadDrafts() {
+  try {
+    const res = await announcementDraftApi.list()
+    drafts.value = res.data || []
+  } catch {
+    drafts.value = []
+  }
+}
+
 function openCreate() {
   editingId.value = null
+  editingDraftId.value = null
   form.value = { title: '', content: '', pinned: false }
   showDialog.value = true
 }
 
 function openEdit(ann: typeof announcements.value[0]) {
   editingId.value = ann.id
+  editingDraftId.value = null
   form.value = { title: ann.title, content: ann.content, pinned: ann.pinned }
+  showDialog.value = true
+}
+
+function openDraftEdit(draft: AnnouncementDraft) {
+  editingId.value = null
+  editingDraftId.value = draft.id
+  form.value = { title: draft.title, content: draft.content, pinned: draft.pinned }
   showDialog.value = true
 }
 
 function openDetail(ann: typeof announcements.value[0]) {
   detailAnn.value = ann
   showDetail.value = true
-}
-
-function renderMarkdown(content: string) {
-  return marked(content || '', { breaks: true })
 }
 
 async function openNotify(ann: typeof announcements.value[0]) {
@@ -147,7 +165,12 @@ function handleMemberToggle(group: GradeGroup) {
 
 async function handleSubmit() {
   try {
-    if (editingId.value) {
+    if (editingDraftId.value) {
+      await announcementDraftApi.update(editingDraftId.value, form.value.title, form.value.content, form.value.pinned)
+      ElMessage.success('草稿已保存')
+      showDialog.value = false
+      await loadDrafts()
+    } else if (editingId.value) {
       await announcementApi.update(editingId.value, form.value.title, form.value.content, form.value.pinned)
       ElMessage.success('更新成功')
       showDialog.value = false
@@ -169,6 +192,39 @@ async function handleSubmit() {
     }
   } catch {
     ElMessage.error('操作失败')
+  }
+}
+
+async function confirmDraft(draft: AnnouncementDraft) {
+  try {
+    await ElMessageBox.confirm('确认后仍需再次点击发布，确认保存这份公告草稿吗？', '确认草稿', { type: 'warning' })
+    await announcementDraftApi.confirm(draft.id)
+    ElMessage.success('草稿已确认，可发布')
+    await loadDrafts()
+  } catch {
+    // Cancelled or failed; the dialog keeps the page quiet.
+  }
+}
+
+async function publishDraft(draft: AnnouncementDraft) {
+  try {
+    await ElMessageBox.confirm('发布后将生成正式公告，是否继续？', '发布公告', { type: 'warning' })
+    await announcementDraftApi.publish(draft.id)
+    ElMessage.success('公告已发布')
+    await Promise.all([loadDrafts(), loadAnnouncements()])
+  } catch {
+    // Cancelled or failed.
+  }
+}
+
+async function discardDraft(draft: AnnouncementDraft) {
+  try {
+    await ElMessageBox.confirm('确定放弃这份公告草稿吗？', '放弃草稿', { type: 'warning' })
+    await announcementDraftApi.discard(draft.id)
+    ElMessage.success('草稿已放弃')
+    await loadDrafts()
+  } catch {
+    // Cancelled or failed.
   }
 }
 
@@ -225,6 +281,28 @@ async function handleDelete(id: number) {
         </el-button>
       </div>
 
+      <section v-if="authStore.isCaptain || authStore.isSuperAdmin" class="draft-section">
+        <div class="section-title">
+          <span>待审核草稿</span>
+          <el-tag size="small" type="info">{{ drafts.length }}</el-tag>
+        </div>
+        <div v-if="drafts.length" class="draft-list">
+          <div v-for="draft in drafts" :key="draft.id" class="draft-item">
+            <div class="draft-main">
+              <strong>{{ draft.title }}</strong>
+              <span class="draft-time">更新于 {{ draft.updated_at }}</span>
+            </div>
+            <div class="draft-actions">
+              <el-button size="small" :disabled="draft.status !== 'draft'" @click="openDraftEdit(draft)">编辑</el-button>
+              <el-button size="small" type="success" :disabled="draft.status !== 'draft'" @click="confirmDraft(draft)">确认</el-button>
+              <el-button size="small" type="primary" :disabled="draft.status !== 'confirmed'" @click="publishDraft(draft)">发布</el-button>
+              <el-button size="small" type="danger" text @click="discardDraft(draft)">放弃</el-button>
+            </div>
+          </div>
+        </div>
+        <el-empty v-else :image-size="48" description="暂无待审核草稿" />
+      </section>
+
       <div class="announcements-list">
         <div v-for="ann in paginatedAnnouncements" :key="ann.id" class="announcement-item">
           <div class="ann-header">
@@ -265,7 +343,7 @@ async function handleDelete(id: number) {
     </div>
 
     <!-- Create / Edit Dialog -->
-    <el-dialog v-model="showDialog" :title="editingId ? '编辑公告' : '发布公告'" width="600px">
+    <el-dialog v-model="showDialog" :title="editingDraftId ? '编辑公告草稿' : (editingId ? '编辑公告' : '发布公告')" width="600px">
       <el-form :model="form" label-width="80px">
         <el-form-item label="标题">
           <el-input v-model="form.title" placeholder="请输入公告标题" />
@@ -357,6 +435,68 @@ async function handleDelete(id: number) {
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--text);
+}
+
+.draft-section {
+  margin-bottom: 1.25rem;
+  padding: 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-deep);
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  color: var(--text);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.draft-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.draft-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.draft-main {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.draft-main strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 0.875rem;
+}
+
+.draft-time {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.draft-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.25rem;
 }
 
 /* Card list */
@@ -600,5 +740,21 @@ async function handleDelete(id: number) {
 
 .member-checkbox {
   font-size: 0.875rem;
+}
+
+@media (max-width: 640px) {
+  .draft-item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .draft-main {
+    width: 100%;
+  }
+
+  .draft-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
 }
 </style>
