@@ -198,6 +198,38 @@ type CheckinStat struct {
 	Anomalies    []string `json:"anomalies,omitempty"`
 }
 
+type Report struct {
+	ID             int64  `json:"id"`
+	PeriodID       int64  `json:"period_id"`
+	ReportType     string `json:"report_type"`
+	AuthorID       int64  `json:"author_id"`
+	AuthorName     string `json:"author_name"`
+	Status         string `json:"status"`
+	Visibility     string `json:"visibility"`
+	CurrentVersion int    `json:"current_version"`
+}
+
+type ReportVersion struct {
+	ID           int64          `json:"id"`
+	ReportID     int64          `json:"report_id"`
+	Version      int            `json:"version"`
+	Status       string         `json:"status"`
+	Title        string         `json:"title"`
+	BodyMarkdown string         `json:"body_markdown"`
+	ParseStatus  string         `json:"parse_status"`
+	ParseError   string         `json:"parse_error,omitempty"`
+	ParsedJSON   map[string]any `json:"parsed_json,omitempty"`
+	Assets       []ReportAsset  `json:"assets,omitempty"`
+}
+
+type ReportAsset struct {
+	ReportVersionID int64  `json:"report_version_id"`
+	KnowledgeItemID int64  `json:"knowledge_item_id"`
+	AssetRole       string `json:"asset_role"`
+	Locator         string `json:"locator,omitempty"`
+	Note            string `json:"note,omitempty"`
+}
+
 func (c *Client) CheckinStatus(ctx context.Context) (CheckinStatus, error) {
 	var result CheckinStatus
 	err := c.do(ctx, http.MethodGet, "/api/checkin/status", nil, nil, &result)
@@ -237,6 +269,27 @@ func (c *Client) CheckinStats(ctx context.Context, period string) ([]CheckinStat
 	params.Set("period", period)
 	var result []CheckinStat
 	err := c.do(ctx, http.MethodGet, "/api/checkin/stats", params, nil, &result)
+	return result, err
+}
+
+func (c *Client) ListReports(ctx context.Context, periodID int64, status string) ([]Report, error) {
+	params := url.Values{}
+	if periodID > 0 {
+		params.Set("period_id", fmt.Sprintf("%d", periodID))
+	}
+	if status != "" {
+		params.Set("status", status)
+	}
+	params.Set("page", "1")
+	params.Set("page_size", "100")
+	var result []Report
+	err := c.do(ctx, http.MethodGet, "/api/reports", params, nil, &result)
+	return result, err
+}
+
+func (c *Client) GetReportVersion(ctx context.Context, reportID int64, version int) (ReportVersion, error) {
+	var result ReportVersion
+	err := c.do(ctx, http.MethodGet, fmt.Sprintf("/api/reports/%d/versions/%d", reportID, version), nil, nil, &result)
 	return result, err
 }
 

@@ -63,6 +63,34 @@ func TestBuildKnowledgeSourcesOmitsStorageDetailsAndBoundsContent(t *testing.T) 
 	}
 }
 
+func TestClientReadsReportMaterialsThroughProtectedAPI(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/reports":
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":[{"id":11,"period_id":4,"author_id":7,"author_name":"成员","status":"submitted","current_version":2}]}`))
+		case "/api/reports/11/versions/2":
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"id":21,"report_id":11,"version":2,"status":"submitted","title":"月报","body_markdown":"## 成果\\n完成","parse_status":"ready","parsed_json":{"sections":[]}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithRequestContext(context.Background(), RequestContext{Authorization: "Bearer token"})
+	reports, err := client.ListReports(ctx, 4, "submitted")
+	if err != nil || len(reports) != 1 || reports[0].CurrentVersion != 2 {
+		t.Fatalf("ListReports() = %+v, err=%v", reports, err)
+	}
+	version, err := client.GetReportVersion(ctx, 11, 2)
+	if err != nil || version.ParseStatus != "ready" || version.ParsedJSON == nil {
+		t.Fatalf("GetReportVersion() = %+v, err=%v", version, err)
+	}
+}
+
 func TestKnowledgeSourceCollectorDeduplicatesAndReturnsExcerpts(t *testing.T) {
 	collector := NewKnowledgeSourceCollector()
 	items := []KnowledgeItem{{ID: 7, Name: "guide", Description: string(make([]rune, 800))}}
