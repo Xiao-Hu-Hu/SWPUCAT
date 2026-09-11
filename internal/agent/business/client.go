@@ -69,6 +69,17 @@ type KnowledgeItem struct {
 	CreatedAt    string `json:"created_at"`
 }
 
+type KnowledgeRecommendation struct {
+	ItemID          int64    `json:"item_id"`
+	Name            string   `json:"name"`
+	Description     string   `json:"description,omitempty"`
+	URL             string   `json:"url,omitempty"`
+	CategoryName    string   `json:"category_name"`
+	SummaryMarkdown string   `json:"summary_markdown,omitempty"`
+	Tags            []string `json:"tags,omitempty"`
+	Reason          string   `json:"reason"`
+}
+
 // KnowledgeSource is the safe, user-facing projection of a knowledge item.
 // It deliberately excludes FileKey and other storage details.
 type KnowledgeSource struct {
@@ -261,6 +272,14 @@ func (c *Client) SearchKnowledge(ctx context.Context, query string) ([]Knowledge
 	params.Set("search", query)
 	var result []KnowledgeItem
 	err := c.do(ctx, http.MethodGet, "/api/knowledge/items", params, nil, &result)
+	return result, err
+}
+
+func (c *Client) RecommendKnowledge(ctx context.Context, query string) ([]KnowledgeRecommendation, error) {
+	params := url.Values{}
+	params.Set("q", query)
+	var result []KnowledgeRecommendation
+	err := c.do(ctx, http.MethodGet, "/api/knowledge/recommendations", params, nil, &result)
 	return result, err
 }
 

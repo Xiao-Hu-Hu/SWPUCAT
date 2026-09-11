@@ -4,6 +4,12 @@ import (
 	"SWPUCAT/internal/domain/knowledge"
 	"SWPUCAT/internal/domain/shared"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -24,6 +30,46 @@ type UploadFileRequest struct {
 
 type CreateCategoryRequest struct {
 	Name string `json:"name" validate:"required,max=64"`
+}
+
+type CreateInsightRequest struct {
+	SummaryMarkdown string     `json:"summary_markdown"`
+	Tags            []string   `json:"tags,omitempty"`
+	Model           string     `json:"model,omitempty"`
+	PromptVersion   string     `json:"prompt_version,omitempty"`
+	ReviewDueAt     *time.Time `json:"review_due_at,omitempty"`
+}
+
+type InsightDTO struct {
+	ID                int64    `json:"id"`
+	KnowledgeItemID   int64    `json:"knowledge_item_id"`
+	SourceFingerprint string   `json:"source_fingerprint"`
+	Status            string   `json:"status"`
+	SummaryMarkdown   string   `json:"summary_markdown"`
+	Tags              []string `json:"tags"`
+	Model             string   `json:"model,omitempty"`
+	PromptVersion     string   `json:"prompt_version,omitempty"`
+	ReviewDueAt       string   `json:"review_due_at,omitempty"`
+	CreatedBy         int64    `json:"created_by"`
+	ReviewedBy        int64    `json:"reviewed_by,omitempty"`
+	CreatedAt         string   `json:"created_at"`
+	UpdatedAt         string   `json:"updated_at"`
+}
+
+type RecommendationDTO struct {
+	ItemID          int64    `json:"item_id"`
+	Name            string   `json:"name"`
+	Description     string   `json:"description,omitempty"`
+	URL             string   `json:"url,omitempty"`
+	CategoryName    string   `json:"category_name"`
+	SummaryMarkdown string   `json:"summary_markdown,omitempty"`
+	Tags            []string `json:"tags,omitempty"`
+	Reason          string   `json:"reason"`
+}
+
+type RecommendationFeedbackRequest struct {
+	Helpful bool   `json:"helpful"`
+	Note    string `json:"note,omitempty"`
 }
 
 type KnowledgeItemDTO struct {
@@ -144,6 +190,184 @@ func (s *KnowledgeService) ListUserItems(ctx context.Context, userID int64) ([]K
 		result = append(result, *toItemDTO(item))
 	}
 	return result, nil
+}
+
+func (s *KnowledgeService) CreateInsight(ctx context.Context, actorID, itemID int64, req CreateInsightRequest) (*InsightDTO, error) {
+	item, err := s.repo.FindItemByID(ctx, itemID)
+	if err != nil {
+		return nil, err
+	}
+	if item.EffectiveStatus() != knowledge.ItemStatusApproved {
+		return nil, shared.ErrConflict
+	}
+	tagsJSON, err := marshalTags(req.Tags)
+	if err != nil {
+		return nil, err
+	}
+	insight, err := knowledge.NewInsight(item.ID, actorID, knowledgeSourceFingerprint(item), req.SummaryMarkdown, tagsJSON, req.Model, req.PromptVersion, req.ReviewDueAt)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.CreateInsight(ctx, insight); err != nil {
+		return nil, err
+	}
+	return toInsightDTO(insight), nil
+}
+
+func (s *KnowledgeService) GetInsight(ctx context.Context, itemID, viewerID int64, canReview bool) (*InsightDTO, error) {
+	item, err := s.repo.FindItemByID(ctx, itemID)
+	if err != nil {
+		return nil, err
+	}
+	if !item.IsVisibleTo(viewerID, canReview) {
+		return nil, shared.ErrForbidden
+	}
+	insight, err := s.repo.FindInsightByItemID(ctx, itemID)
+	if err != nil {
+		return nil, err
+	}
+	if insight.Status != knowledge.InsightInvalidated && insight.SourceFingerprint != knowledgeSourceFingerprint(item) {
+		expected := insight.Status
+		if invalidateErr := insight.Invalidate(); invalidateErr == nil {
+			if updateErr := s.repo.UpdateInsight(ctx, insight, expected); updateErr != nil {
+				return nil, updateErr
+			}
+		}
+	}
+	return toInsightDTO(insight), nil
+}
+
+func (s *KnowledgeService) PublishInsight(ctx context.Context, actorID, insightID int64) (*InsightDTO, error) {
+	insight, err := s.findInsightByID(ctx, insightID)
+	if err != nil {
+		return nil, err
+	}
+	item, err := s.repo.FindItemByID(ctx, insight.KnowledgeItemID)
+	if err != nil {
+		return nil, err
+	}
+	if insight.SourceFingerprint != knowledgeSourceFingerprint(item) {
+		expected := insight.Status
+		if invalidateErr := insight.Invalidate(); invalidateErr == nil {
+			_ = s.repo.UpdateInsight(ctx, insight, expected)
+		}
+		return nil, shared.ErrConflict
+	}
+	expected := insight.Status
+	if err := insight.Publish(actorID); err != nil {
+		return nil, err
+	}
+	if err := s.repo.UpdateInsight(ctx, insight, expected); err != nil {
+		return nil, err
+	}
+	return toInsightDTO(insight), nil
+}
+
+func (s *KnowledgeService) InvalidateInsight(ctx context.Context, insightID int64) error {
+	insight, err := s.findInsightByID(ctx, insightID)
+	if err != nil {
+		return err
+	}
+	expected := insight.Status
+	if err := insight.Invalidate(); err != nil {
+		return err
+	}
+	return s.repo.UpdateInsight(ctx, insight, expected)
+}
+
+func (s *KnowledgeService) ListDueInsights(ctx context.Context, now time.Time, page, pageSize int) ([]InsightDTO, error) {
+	items, err := s.repo.ListDueInsights(ctx, now, page, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]InsightDTO, 0, len(items))
+	for _, item := range items {
+		result = append(result, *toInsightDTO(item))
+	}
+	return result, nil
+}
+
+func (s *KnowledgeService) Recommend(ctx context.Context, userID int64, query string) ([]RecommendationDTO, error) {
+	query = strings.TrimSpace(query)
+	if userID <= 0 || query == "" || len([]rune(query)) > 128 {
+		return nil, shared.ErrValidation
+	}
+	approved := knowledge.ItemStatusApproved
+	items, err := s.repo.FindItems(ctx, knowledge.ItemFilter{Search: query, Status: &approved, Page: 1, PageSize: 20})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]RecommendationDTO, 0, len(items))
+	for _, item := range items {
+		recommendation := RecommendationDTO{ItemID: item.ID, Name: item.Name, Description: item.Description, URL: item.URL, CategoryName: item.CategoryName, Reason: "名称、说明或分类与需求匹配"}
+		if insight, insightErr := s.repo.FindInsightByItemID(ctx, item.ID); insightErr == nil && insight.Status == knowledge.InsightPublished && insight.SourceFingerprint == knowledgeSourceFingerprint(item) {
+			recommendation.SummaryMarkdown = insight.SummaryMarkdown
+			recommendation.Tags, _ = parseTags(insight.TagsJSON)
+		}
+		result = append(result, recommendation)
+	}
+	return result, nil
+}
+
+func (s *KnowledgeService) SaveRecommendationFeedback(ctx context.Context, userID, itemID int64, req RecommendationFeedbackRequest) error {
+	if userID <= 0 || itemID <= 0 || len([]rune(req.Note)) > 512 {
+		return shared.ErrValidation
+	}
+	return s.repo.SaveRecommendationFeedback(ctx, &knowledge.RecommendationFeedback{UserID: userID, KnowledgeItemID: itemID, Helpful: req.Helpful, Note: strings.TrimSpace(req.Note), CreatedAt: time.Now()})
+}
+
+func (s *KnowledgeService) findInsightByID(ctx context.Context, insightID int64) (*knowledge.Insight, error) {
+	if insightID <= 0 {
+		return nil, shared.ErrValidation
+	}
+	return s.repo.FindInsightByID(ctx, insightID)
+}
+
+func knowledgeSourceFingerprint(item *knowledge.KnowledgeItem) string {
+	payload := strings.Join([]string{item.Name, item.Description, item.URL, item.FileKey, fmt.Sprintf("%d", item.CategoryID)}, "\x00")
+	digest := sha256.Sum256([]byte(payload))
+	return hex.EncodeToString(digest[:])
+}
+
+func marshalTags(tags []string) (string, error) {
+	seen := make(map[string]struct{}, len(tags))
+	clean := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		tag = strings.TrimSpace(tag)
+		if tag == "" || len([]rune(tag)) > 32 {
+			continue
+		}
+		if _, ok := seen[tag]; !ok {
+			seen[tag] = struct{}{}
+			clean = append(clean, tag)
+		}
+	}
+	sort.Strings(clean)
+	if len(clean) > 20 {
+		clean = clean[:20]
+	}
+	data, err := json.Marshal(clean)
+	if err != nil {
+		return "", shared.ErrValidation
+	}
+	return string(data), nil
+}
+
+func parseTags(value string) ([]string, error) {
+	var tags []string
+	if err := json.Unmarshal([]byte(value), &tags); err != nil {
+		return nil, err
+	}
+	return tags, nil
+}
+
+func toInsightDTO(item *knowledge.Insight) *InsightDTO {
+	tags, _ := parseTags(item.TagsJSON)
+	dto := &InsightDTO{ID: item.ID, KnowledgeItemID: item.KnowledgeItemID, SourceFingerprint: item.SourceFingerprint, Status: string(item.Status), SummaryMarkdown: item.SummaryMarkdown, Tags: tags, Model: item.Model, PromptVersion: item.PromptVersion, CreatedBy: item.CreatedBy, ReviewedBy: item.ReviewedBy, CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: item.UpdatedAt.Format(time.RFC3339)}
+	if item.ReviewDueAt != nil {
+		dto.ReviewDueAt = item.ReviewDueAt.Format(time.RFC3339)
+	}
+	return dto
 }
 
 func (s *KnowledgeService) ApproveItem(ctx context.Context, itemID, reviewerID int64, reviewerName string) error {

@@ -2,6 +2,7 @@ package http
 
 import (
 	"SWPUCAT/internal/application/knowledge"
+	knowledgedomain "SWPUCAT/internal/domain/knowledge"
 	"SWPUCAT/internal/domain/shared"
 	"SWPUCAT/internal/infrastructure/storage"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
@@ -394,4 +396,118 @@ func (h *KnowledgeHandler) DownloadFile(c *gin.Context) {
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, item.Name, encodedName))
 	c.Header("Content-Type", "application/octet-stream")
 	c.File(filePath)
+}
+
+func (h *KnowledgeHandler) CreateInsight(c *gin.Context) {
+	itemID, ok := parseKnowledgeID(c, "id")
+	if !ok {
+		return
+	}
+	var req knowledge.CreateInsightRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid knowledge insight request")
+		return
+	}
+	item, err := h.knowledgeSvc.CreateInsight(c.Request.Context(), GetUserID(c), itemID, req)
+	if err != nil {
+		handleKnowledgeInsightError(c, err)
+		return
+	}
+	Created(c, item)
+}
+
+func (h *KnowledgeHandler) GetInsight(c *gin.Context) {
+	itemID, ok := parseKnowledgeID(c, "id")
+	if !ok {
+		return
+	}
+	item, err := h.knowledgeSvc.GetInsight(c.Request.Context(), itemID, GetUserID(c), IsCaptain(c))
+	if err != nil {
+		handleKnowledgeInsightError(c, err)
+		return
+	}
+	Success(c, item)
+}
+
+func (h *KnowledgeHandler) PublishInsight(c *gin.Context) {
+	insightID, ok := parseKnowledgeID(c, "id")
+	if !ok {
+		return
+	}
+	item, err := h.knowledgeSvc.PublishInsight(c.Request.Context(), GetUserID(c), insightID)
+	if err != nil {
+		handleKnowledgeInsightError(c, err)
+		return
+	}
+	Success(c, item)
+}
+
+func (h *KnowledgeHandler) InvalidateInsight(c *gin.Context) {
+	insightID, ok := parseKnowledgeID(c, "id")
+	if !ok {
+		return
+	}
+	if err := h.knowledgeSvc.InvalidateInsight(c.Request.Context(), insightID); err != nil {
+		handleKnowledgeInsightError(c, err)
+		return
+	}
+	Success(c, nil)
+}
+
+func (h *KnowledgeHandler) ListDueInsights(c *gin.Context) {
+	items, err := h.knowledgeSvc.ListDueInsights(c.Request.Context(), time.Now(), positiveQueryInt(c, "page", 1), positiveQueryInt(c, "page_size", 20))
+	if err != nil {
+		handleKnowledgeInsightError(c, err)
+		return
+	}
+	Success(c, items)
+}
+
+func (h *KnowledgeHandler) Recommend(c *gin.Context) {
+	query := c.Query("q")
+	items, err := h.knowledgeSvc.Recommend(c.Request.Context(), GetUserID(c), query)
+	if err != nil {
+		handleKnowledgeInsightError(c, err)
+		return
+	}
+	Success(c, items)
+}
+
+func (h *KnowledgeHandler) RecommendationFeedback(c *gin.Context) {
+	itemID, ok := parseKnowledgeID(c, "id")
+	if !ok {
+		return
+	}
+	var req knowledge.RecommendationFeedbackRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid recommendation feedback")
+		return
+	}
+	if err := h.knowledgeSvc.SaveRecommendationFeedback(c.Request.Context(), GetUserID(c), itemID, req); err != nil {
+		handleKnowledgeInsightError(c, err)
+		return
+	}
+	Success(c, nil)
+}
+
+func parseKnowledgeID(c *gin.Context, name string) (int64, bool) {
+	id, err := strconv.ParseInt(c.Param(name), 10, 64)
+	if err != nil || id <= 0 {
+		BadRequest(c, "invalid knowledge id")
+		return 0, false
+	}
+	return id, true
+}
+
+func handleKnowledgeInsightError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, shared.ErrForbidden):
+		Forbidden(c, "not allowed to access this knowledge insight")
+	case errors.Is(err, shared.ErrConflict):
+		Conflict(c, "knowledge source changed or insight state conflicts")
+	case errors.Is(err, shared.ErrValidation), errors.Is(err, knowledgedomain.ErrInvalidInsight):
+		BadRequest(c, "invalid knowledge insight request")
+	default:
+		NotFound(c, "knowledge insight not found")
+	}
 }

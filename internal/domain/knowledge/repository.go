@@ -1,6 +1,7 @@
 package knowledge
 
 import "context"
+import "time"
 
 type Repository interface {
 	CreateItem(ctx context.Context, item *KnowledgeItem) error
@@ -16,6 +17,13 @@ type Repository interface {
 	FindCategoryByID(ctx context.Context, id int64) (*Category, error)
 	DeleteCategory(ctx context.Context, id int64) error
 	CountItemsByCategory(ctx context.Context, categoryID int64) (int64, error)
+
+	CreateInsight(ctx context.Context, insight *Insight) error
+	FindInsightByItemID(ctx context.Context, itemID int64) (*Insight, error)
+	FindInsightByID(ctx context.Context, insightID int64) (*Insight, error)
+	UpdateInsight(ctx context.Context, insight *Insight, expectedStatus InsightStatus) error
+	ListDueInsights(ctx context.Context, now time.Time, page, pageSize int) ([]*Insight, error)
+	SaveRecommendationFeedback(ctx context.Context, feedback *RecommendationFeedback) error
 }
 
 type ItemFilter struct {

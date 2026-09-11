@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type KnowledgeRepo struct {
@@ -234,6 +235,85 @@ func (r *KnowledgeRepo) CountItemsByCategory(ctx context.Context, categoryID int
 	return count, err
 }
 
+func (r *KnowledgeRepo) CreateInsight(ctx context.Context, insight *knowledge.Insight) error {
+	if insight == nil {
+		return knowledge.ErrInvalidInsight
+	}
+	model := &database.KnowledgeItemInsightModel{ID: insight.ID, KnowledgeItemID: insight.KnowledgeItemID, SourceFingerprint: insight.SourceFingerprint, Status: string(insight.Status), SummaryMarkdown: insight.SummaryMarkdown, TagsJSON: insight.TagsJSON, Model: insight.Model, PromptVersion: insight.PromptVersion, ReviewDueAt: insight.ReviewDueAt, CreatedBy: insight.CreatedBy, CreatedAt: insight.CreatedAt, UpdatedAt: insight.UpdatedAt}
+	if err := r.db.WithContext(ctx).Create(model).Error; err != nil {
+		return err
+	}
+	insight.ID, insight.CreatedAt, insight.UpdatedAt = model.ID, model.CreatedAt, model.UpdatedAt
+	return nil
+}
+
+func (r *KnowledgeRepo) FindInsightByItemID(ctx context.Context, itemID int64) (*knowledge.Insight, error) {
+	var model database.KnowledgeItemInsightModel
+	if err := r.db.WithContext(ctx).Where("knowledge_item_id = ?", itemID).Order("created_at DESC, id DESC").First(&model).Error; err != nil {
+		return nil, err
+	}
+	return toDomainKnowledgeInsight(&model), nil
+}
+
+func (r *KnowledgeRepo) FindInsightByID(ctx context.Context, insightID int64) (*knowledge.Insight, error) {
+	var model database.KnowledgeItemInsightModel
+	if err := r.db.WithContext(ctx).First(&model, insightID).Error; err != nil {
+		return nil, err
+	}
+	return toDomainKnowledgeInsight(&model), nil
+}
+
+func (r *KnowledgeRepo) UpdateInsight(ctx context.Context, insight *knowledge.Insight, expectedStatus knowledge.InsightStatus) error {
+	if insight == nil || insight.ID <= 0 {
+		return knowledge.ErrInvalidInsight
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var previous database.KnowledgeItemInsightModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&previous, insight.ID).Error; err != nil {
+			return err
+		}
+		if knowledge.InsightStatus(previous.Status) != expectedStatus {
+			return knowledge.ErrInvalidInsight
+		}
+		result := tx.Model(&database.KnowledgeItemInsightModel{}).Where("id = ? AND status = ?", insight.ID, string(expectedStatus)).Updates(map[string]interface{}{
+			"status": string(insight.Status), "summary_markdown": insight.SummaryMarkdown, "tags_json": insight.TagsJSON, "reviewed_by": insight.ReviewedBy, "reviewed_at": insight.ReviewedAt, "updated_at": insight.UpdatedAt,
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return knowledge.ErrInvalidInsight
+		}
+		return nil
+	})
+}
+
+func (r *KnowledgeRepo) ListDueInsights(ctx context.Context, now time.Time, page, pageSize int) ([]*knowledge.Insight, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	var models []database.KnowledgeItemInsightModel
+	if err := r.db.WithContext(ctx).Where("status = ? AND review_due_at IS NOT NULL AND review_due_at <= ?", string(knowledge.InsightPublished), now).Order("review_due_at ASC, id ASC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&models).Error; err != nil {
+		return nil, err
+	}
+	items := make([]*knowledge.Insight, 0, len(models))
+	for i := range models {
+		items = append(items, toDomainKnowledgeInsight(&models[i]))
+	}
+	return items, nil
+}
+
+func (r *KnowledgeRepo) SaveRecommendationFeedback(ctx context.Context, feedback *knowledge.RecommendationFeedback) error {
+	if feedback == nil || feedback.UserID <= 0 || feedback.KnowledgeItemID <= 0 {
+		return knowledge.ErrInvalidInsight
+	}
+	model := &database.KnowledgeRecommendationFeedbackModel{UserID: feedback.UserID, KnowledgeItemID: feedback.KnowledgeItemID, Helpful: feedback.Helpful, Note: feedback.Note, CreatedAt: feedback.CreatedAt}
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "user_id"}, {Name: "knowledge_item_id"}}, DoUpdates: clause.AssignmentColumns([]string{"helpful", "note", "created_at"})}).Create(model).Error
+}
+
 func toDomainKnowledgeItem(model *database.KnowledgeItemModel) *knowledge.KnowledgeItem {
 	item := &knowledge.KnowledgeItem{
 		ID:           model.ID,
@@ -259,4 +339,12 @@ func toDomainKnowledgeItem(model *database.KnowledgeItemModel) *knowledge.Knowle
 	}
 	item.SetStatus(item.EffectiveStatus())
 	return item
+}
+
+func toDomainKnowledgeInsight(model *database.KnowledgeItemInsightModel) *knowledge.Insight {
+	var reviewedBy int64
+	if model.ReviewedBy != nil {
+		reviewedBy = *model.ReviewedBy
+	}
+	return &knowledge.Insight{ID: model.ID, KnowledgeItemID: model.KnowledgeItemID, SourceFingerprint: model.SourceFingerprint, Status: knowledge.InsightStatus(model.Status), SummaryMarkdown: model.SummaryMarkdown, TagsJSON: model.TagsJSON, Model: model.Model, PromptVersion: model.PromptVersion, ReviewDueAt: model.ReviewDueAt, CreatedBy: model.CreatedBy, ReviewedBy: reviewedBy, ReviewedAt: model.ReviewedAt, CreatedAt: model.CreatedAt, UpdatedAt: model.UpdatedAt}
 }

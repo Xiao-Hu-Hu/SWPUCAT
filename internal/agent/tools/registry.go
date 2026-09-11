@@ -19,6 +19,10 @@ type searchInput struct {
 	Query string `json:"query" jsonschema_description:"要搜索的知识库关键词或问题"`
 }
 
+type recommendInput struct {
+	Need string `json:"need" jsonschema_description:"成员想学习或使用的主题、技术方向或任务需求"`
+}
+
 type statsInput struct {
 	Period string `json:"period,omitempty" jsonschema_description:"统计周期，只能是 today、week 或 month"`
 }
@@ -79,6 +83,29 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 				return "", err
 			}
 			return marshal(status)
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	recommendTool, err := toolutils.InferTool[recommendInput, string](
+		"recommend_knowledge",
+		"根据成员主动描述的学习或工作需求推荐已审核的知识库资料；推荐结果只来自当前可见资源，并附带推荐依据。",
+		func(ctx context.Context, input recommendInput) (string, error) {
+			need := strings.TrimSpace(input.Need)
+			if need == "" {
+				return "", fmt.Errorf("need is required")
+			}
+			items, err := r.client.RecommendKnowledge(ctx, need)
+			if err != nil {
+				return "", err
+			}
+			for _, item := range items {
+				if collector := business.KnowledgeSourceCollectorFrom(ctx); collector != nil {
+					collector.Add([]business.KnowledgeItem{{ID: item.ItemID, Name: item.Name, Description: item.Description, URL: item.URL, CategoryName: item.CategoryName}})
+				}
+			}
+			return marshal(items)
 		},
 	)
 	if err != nil {
@@ -200,7 +227,7 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
-	result := []tool.BaseTool{statusTool, knowledgeTool, statsTool, reportTool}
+	result := []tool.BaseTool{statusTool, knowledgeTool, recommendTool, statsTool, reportTool}
 	if r.writeEnabled {
 		clockInTool, err := toolutils.InferTool[emptyInput, string](
 			"clock_in",
