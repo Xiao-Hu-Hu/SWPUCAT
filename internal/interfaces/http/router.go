@@ -21,6 +21,7 @@ type Router struct {
 	approvalHandler   *ApprovalHandler
 	invitationHandler *InvitationHandler
 	agentHandler      *AgentHandler
+	reportHandler     *ReportHandler
 }
 
 func NewRouter(
@@ -35,6 +36,7 @@ func NewRouter(
 	approvalHandler *ApprovalHandler,
 	invitationHandler *InvitationHandler,
 	agentHandler *AgentHandler,
+	reportHandler *ReportHandler,
 ) *Router {
 	engine := gin.Default()
 
@@ -59,6 +61,7 @@ func NewRouter(
 		approvalHandler:   approvalHandler,
 		invitationHandler: invitationHandler,
 		agentHandler:      agentHandler,
+		reportHandler:     reportHandler,
 	}
 }
 
@@ -144,6 +147,20 @@ func (r *Router) Setup() *gin.Engine {
 			// Agent assistant. JWT middleware above resolves the user and role;
 			// the handler forwards that identity to the private Agent service.
 			protected.POST("/agent/chat", r.agentHandler.Chat)
+
+			// Monthly reports. Drafts and versions remain private to their author
+			// unless a captain/super admin is reviewing them.
+			protected.GET("/report-periods", r.reportHandler.ListPeriods)
+			protected.POST("/report-periods", RBACMiddleware("captain", "super_admin"), r.reportHandler.CreatePeriod)
+			protected.POST("/report-periods/:id/members", RBACMiddleware("captain", "super_admin"), r.reportHandler.AddPeriodMember)
+			protected.POST("/reports", r.reportHandler.CreateReport)
+			protected.GET("/reports", r.reportHandler.ListReports)
+			protected.GET("/reports/:id", r.reportHandler.GetReport)
+			protected.POST("/reports/:id/versions", r.reportHandler.CreateVersion)
+			protected.GET("/reports/:id/versions/:version", r.reportHandler.GetVersion)
+			protected.POST("/reports/:id/versions/:version/submit", r.reportHandler.SubmitVersion)
+			protected.POST("/reports/:id/versions/:version/review", RBACMiddleware("captain", "super_admin"), r.reportHandler.ReviewVersion)
+			protected.POST("/reports/:id/versions/:version/assets", r.reportHandler.AttachAsset)
 		}
 	}
 

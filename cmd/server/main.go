@@ -8,6 +8,7 @@ import (
 	"SWPUCAT/internal/application/dashboard"
 	"SWPUCAT/internal/application/invitation"
 	"SWPUCAT/internal/application/knowledge"
+	reportapp "SWPUCAT/internal/application/report"
 	"SWPUCAT/internal/application/user"
 	"SWPUCAT/internal/infrastructure/agentclient"
 	"SWPUCAT/internal/infrastructure/auth"
@@ -46,6 +47,7 @@ func main() {
 	annRepo := repository.NewAnnouncementRepo(db)
 	checkinRepo := repository.NewCheckinRepo(db)
 	knowledgeRepo := repository.NewKnowledgeRepo(db)
+	reportRepo := repository.NewReportRepo(db)
 	approvalRepo := repository.NewApprovalRepo(db)
 	codeRepo := repository.NewVerificationCodeRepo(db)
 	invitationRepo := repository.NewInvitationRepo(db)
@@ -68,6 +70,7 @@ func main() {
 	invitationSvc := invitation.NewInvitationService(invitationRepo, userRepo)
 	checkinSvc := checkin.NewCheckinService(checkinRepo, userRepo, publisher, settingsRepo)
 	knowledgeSvc := knowledge.NewKnowledgeService(knowledgeRepo, publisher)
+	reportSvc := reportapp.NewService(reportRepo)
 	approvalSvc := approval.NewApprovalService(approvalRepo, knowledgeRepo, publisher)
 	dashboardSvc := dashboard.NewDashboardService(userRepo, checkinRepo, annRepo, knowledgeRepo)
 	authzSvc := authorization.NewService(userRepo)
@@ -86,6 +89,7 @@ func main() {
 		log.Fatalf("Failed to initialize agent client: %v", err)
 	}
 	agentHandler := httpInterface.NewAgentHandler(agentClient)
+	reportHandler := httpInterface.NewReportHandler(reportSvc)
 
 	// Initialize router
 	router := httpInterface.NewRouter(
@@ -100,6 +104,7 @@ func main() {
 		approvalHandler,
 		invitationHandler,
 		agentHandler,
+		reportHandler,
 	)
 
 	// Setup routes

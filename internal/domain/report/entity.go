@@ -101,20 +101,23 @@ type Report struct {
 }
 
 type ReportVersion struct {
-	ID           int64
-	ReportID     int64
-	Version      int
-	Status       VersionStatus
-	Title        string
-	BodyMarkdown string
-	ContentHash  string
-	ParseStatus  ParseStatus
-	ParseError   string
-	CreatedBy    int64
-	SubmittedBy  int64
-	SubmittedAt  *time.Time
-	CreatedAt    time.Time
-	Assets       []ReportAsset
+	ID            int64
+	ReportID      int64
+	Version       int
+	Status        VersionStatus
+	Title         string
+	BodyMarkdown  string
+	ContentHash   string
+	ParseStatus   ParseStatus
+	ParseError    string
+	ParserVersion string
+	ParsedJSON    string
+	ParsedAt      *time.Time
+	CreatedBy     int64
+	SubmittedBy   int64
+	SubmittedAt   *time.Time
+	CreatedAt     time.Time
+	Assets        []ReportAsset
 }
 
 type ReportAsset struct {
@@ -142,7 +145,7 @@ func NewReportPeriod(periodKey string, startsOn, endsOn time.Time, timezone stri
 }
 
 func (p *ReportPeriod) AddMember(member PeriodMember) error {
-	if p == nil || member.UserID <= 0 || member.Exempt && strings.TrimSpace(member.ExemptionReason) == "" {
+	if p == nil || p.Status != PeriodStatusOpen || member.UserID <= 0 || member.Exempt && strings.TrimSpace(member.ExemptionReason) == "" || member.EffectiveFrom != nil && member.EffectiveUntil != nil && member.EffectiveFrom.After(*member.EffectiveUntil) {
 		return ErrInvalidPeriod
 	}
 	for _, existing := range p.Members {
@@ -226,7 +229,7 @@ func (v *ReportVersion) Invalidate(reason string) error {
 }
 
 func (v *ReportVersion) AttachAsset(asset ReportAsset) error {
-	if v == nil || asset.KnowledgeItemID <= 0 || strings.TrimSpace(asset.AssetRole) == "" {
+	if v == nil || v.Status != VersionStatusDraft || asset.KnowledgeItemID <= 0 || strings.TrimSpace(asset.AssetRole) == "" {
 		return ErrInvalidVersion
 	}
 	for _, existing := range v.Assets {
