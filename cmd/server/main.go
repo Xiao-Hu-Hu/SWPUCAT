@@ -9,6 +9,7 @@ import (
 	evaluationapp "SWPUCAT/internal/application/evaluation"
 	"SWPUCAT/internal/application/invitation"
 	"SWPUCAT/internal/application/knowledge"
+	notificationapp "SWPUCAT/internal/application/notification"
 	reportapp "SWPUCAT/internal/application/report"
 	"SWPUCAT/internal/application/user"
 	"SWPUCAT/internal/infrastructure/agentclient"
@@ -50,6 +51,7 @@ func main() {
 	knowledgeRepo := repository.NewKnowledgeRepo(db)
 	reportRepo := repository.NewReportRepo(db)
 	evaluationRepo := repository.NewEvaluationRepo(db)
+	notificationRepo := repository.NewNotificationRepo(db)
 	approvalRepo := repository.NewApprovalRepo(db)
 	codeRepo := repository.NewVerificationCodeRepo(db)
 	invitationRepo := repository.NewInvitationRepo(db)
@@ -70,10 +72,11 @@ func main() {
 	userSvc := user.NewUserApplicationService(userRepo, hasher, jwtSvc, publisher, emailSvc, codeRepo, invitationRepo, registrationRepo)
 	annSvc := announcement.NewAnnouncementService(annRepo, publisher, userRepo, emailSvc)
 	invitationSvc := invitation.NewInvitationService(invitationRepo, userRepo)
-	checkinSvc := checkin.NewCheckinService(checkinRepo, userRepo, publisher, settingsRepo)
+	notificationSvc := notificationapp.NewService(notificationRepo, userRepo, reportRepo)
+	checkinSvc := checkin.NewCheckinService(checkinRepo, userRepo, publisher, settingsRepo, notificationSvc)
 	knowledgeSvc := knowledge.NewKnowledgeService(knowledgeRepo, publisher)
 	reportSvc := reportapp.NewService(reportRepo)
-	evaluationSvc := evaluationapp.NewService(evaluationRepo)
+	evaluationSvc := evaluationapp.NewService(evaluationRepo, notificationSvc)
 	approvalSvc := approval.NewApprovalService(approvalRepo, knowledgeRepo, publisher)
 	dashboardSvc := dashboard.NewDashboardService(userRepo, checkinRepo, annRepo, knowledgeRepo)
 	authzSvc := authorization.NewService(userRepo)
@@ -94,6 +97,7 @@ func main() {
 	agentHandler := httpInterface.NewAgentHandler(agentClient)
 	reportHandler := httpInterface.NewReportHandler(reportSvc)
 	evaluationHandler := httpInterface.NewEvaluationHandler(evaluationSvc)
+	notificationHandler := httpInterface.NewNotificationHandler(notificationSvc)
 
 	// Initialize router
 	router := httpInterface.NewRouter(
@@ -110,6 +114,7 @@ func main() {
 		agentHandler,
 		reportHandler,
 		evaluationHandler,
+		notificationHandler,
 	)
 
 	// Setup routes
@@ -134,6 +139,24 @@ func main() {
 			} else {
 				log.Printf("AutoClockOut completed for %s", yesterday)
 			}
+		}
+	}()
+
+	// Run database-backed report due reminders. The unique notification key
+	// makes startup catch-up and hourly retries safe without a broker.
+	go func() {
+		run := func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := notificationSvc.RunReportDueReminders(ctx, time.Now(), 48*time.Hour); err != nil {
+				log.Printf("report due reminder run failed: %v", err)
+			}
+		}
+		run()
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			run()
 		}
 	}()
 

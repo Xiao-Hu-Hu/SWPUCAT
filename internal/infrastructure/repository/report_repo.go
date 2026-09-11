@@ -67,6 +67,37 @@ func (r *ReportRepo) ListPeriods(ctx context.Context) ([]*report.ReportPeriod, e
 	return periods, nil
 }
 
+// ListDuePeriods returns open periods whose deadline falls inside the reminder
+// window, including the complete roster needed for reminder generation.
+func (r *ReportRepo) ListDuePeriods(ctx context.Context, from, until time.Time) ([]*report.ReportPeriod, error) {
+	var models []database.ReportPeriodModel
+	if err := r.db.WithContext(ctx).Where("status = ? AND due_at IS NOT NULL AND due_at > ? AND due_at <= ?", string(report.PeriodStatusOpen), from, until).Order("due_at ASC, id ASC").Find(&models).Error; err != nil {
+		return nil, err
+	}
+	periods := make([]*report.ReportPeriod, 0, len(models))
+	for i := range models {
+		period := toDomainReportPeriod(&models[i])
+		var members []database.ReportPeriodMemberModel
+		if err := r.db.WithContext(ctx).Where("period_id = ?", period.ID).Order("user_id").Find(&members).Error; err != nil {
+			return nil, err
+		}
+		period.Members = make([]report.PeriodMember, 0, len(members))
+		for j := range members {
+			period.Members = append(period.Members, toDomainPeriodMember(&members[j]))
+		}
+		periods = append(periods, period)
+	}
+	return periods, nil
+}
+
+// ListPendingReportMemberIDs keeps reminders focused on members who still
+// have no submitted or reviewed monthly report for the period.
+func (r *ReportRepo) ListPendingReportMemberIDs(ctx context.Context, periodID int64) ([]int64, error) {
+	var ids []int64
+	err := r.db.WithContext(ctx).Table("report_period_members AS rpm").Joins("LEFT JOIN reports AS reports ON reports.period_id = rpm.period_id AND reports.author_id = rpm.user_id AND reports.report_type = ?", string(report.ReportTypeMonthly)).Where("rpm.period_id = ? AND rpm.required = TRUE AND rpm.exempt = FALSE AND (reports.id IS NULL OR reports.status = ?)", periodID, string(report.ReportStatusDraft)).Order("rpm.user_id ASC").Pluck("rpm.user_id", &ids).Error
+	return ids, err
+}
+
 func (r *ReportRepo) AddPeriodMember(ctx context.Context, member *report.PeriodMember) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var period database.ReportPeriodModel

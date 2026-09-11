@@ -5,6 +5,7 @@ import (
 	"SWPUCAT/internal/domain/shared"
 	"context"
 	"encoding/json"
+	"log"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -57,9 +58,22 @@ type MemberDTO struct {
 	ManualOverride  bool   `json:"manual_override"`
 }
 
-type Service struct{ repo domain.Repository }
+type PublishedNotifier interface {
+	NotifyEvaluationPublished(ctx context.Context, draft *domain.Draft) error
+}
 
-func NewService(repo domain.Repository) *Service { return &Service{repo: repo} }
+type Service struct {
+	repo     domain.Repository
+	notifier PublishedNotifier
+}
+
+func NewService(repo domain.Repository, notifiers ...PublishedNotifier) *Service {
+	service := &Service{repo: repo}
+	if len(notifiers) > 0 {
+		service.notifier = notifiers[0]
+	}
+	return service
+}
 
 func (s *Service) CreateDraft(ctx context.Context, actorID int64, req CreateDraftRequest) (*DraftDTO, error) {
 	snapshot, err := s.repo.FindSnapshotByID(ctx, req.SnapshotID)
@@ -164,6 +178,11 @@ func (s *Service) PublishDraft(ctx context.Context, id, actorID int64) (*DraftDT
 	}
 	if err := s.repo.UpdateDraft(ctx, draft, actorID, expectedStatus); err != nil {
 		return nil, err
+	}
+	if s.notifier != nil {
+		if err := s.notifier.NotifyEvaluationPublished(ctx, draft); err != nil {
+			log.Printf("evaluation publication notification failed for draft %d: %v", draft.ID, err)
+		}
 	}
 	return toDraftDTO(draft), nil
 }

@@ -34,6 +34,33 @@ type AnnouncementModel struct {
 	UpdatedAt  time.Time `gorm:"not null;default:current_timestamp"`
 }
 
+type NotificationModel struct {
+	ID               int64      `gorm:"primaryKey;autoIncrement"`
+	RecipientID      int64      `gorm:"not null;index"`
+	NotificationType string     `gorm:"column:notification_type;size:32;not null;index"`
+	Title            string     `gorm:"size:256;not null"`
+	BodyMarkdown     string     `gorm:"type:text;not null;default:''"`
+	EntityType       string     `gorm:"size:32;not null;default:''"`
+	EntityID         *int64     `gorm:"index"`
+	DedupeKey        string     `gorm:"size:256;not null"`
+	MetadataJSON     string     `gorm:"column:metadata_json;type:jsonb;not null;default:'{}'"`
+	ReadAt           *time.Time `gorm:"index"`
+	ExpiresAt        *time.Time
+	CreatedAt        time.Time `gorm:"not null;default:current_timestamp;index"`
+}
+
+func (NotificationModel) TableName() string { return "notifications" }
+
+type NotificationPreferenceModel struct {
+	UserID                     int64     `gorm:"primaryKey"`
+	CheckinAnomalyEnabled      bool      `gorm:"not null;default:true"`
+	ReportDueEnabled           bool      `gorm:"not null;default:true"`
+	EvaluationPublishedEnabled bool      `gorm:"not null;default:true"`
+	UpdatedAt                  time.Time `gorm:"not null;default:current_timestamp"`
+}
+
+func (NotificationPreferenceModel) TableName() string { return "notification_preferences" }
+
 func (AnnouncementModel) TableName() string { return "announcements" }
 
 type CheckinRecordModel struct {

@@ -9,20 +9,21 @@ import (
 )
 
 type Router struct {
-	engine            *gin.Engine
-	jwtSvc            *auth.JWTService
-	authzSvc          *authorization.Service
-	authHandler       *AuthHandler
-	userHandler       *UserHandler
-	dashboardHandler  *DashboardHandler
-	annHandler        *AnnouncementHandler
-	checkinHandler    *CheckinHandler
-	knowledgeHandler  *KnowledgeHandler
-	approvalHandler   *ApprovalHandler
-	invitationHandler *InvitationHandler
-	agentHandler      *AgentHandler
-	reportHandler     *ReportHandler
-	evaluationHandler *EvaluationHandler
+	engine              *gin.Engine
+	jwtSvc              *auth.JWTService
+	authzSvc            *authorization.Service
+	authHandler         *AuthHandler
+	userHandler         *UserHandler
+	dashboardHandler    *DashboardHandler
+	annHandler          *AnnouncementHandler
+	checkinHandler      *CheckinHandler
+	knowledgeHandler    *KnowledgeHandler
+	approvalHandler     *ApprovalHandler
+	invitationHandler   *InvitationHandler
+	agentHandler        *AgentHandler
+	reportHandler       *ReportHandler
+	evaluationHandler   *EvaluationHandler
+	notificationHandler *NotificationHandler
 }
 
 func NewRouter(
@@ -39,6 +40,7 @@ func NewRouter(
 	agentHandler *AgentHandler,
 	reportHandler *ReportHandler,
 	evaluationHandler *EvaluationHandler,
+	notificationHandler *NotificationHandler,
 ) *Router {
 	engine := gin.Default()
 
@@ -51,20 +53,21 @@ func NewRouter(
 	}))
 
 	return &Router{
-		engine:            engine,
-		jwtSvc:            jwtSvc,
-		authzSvc:          authzSvc,
-		authHandler:       authHandler,
-		userHandler:       userHandler,
-		dashboardHandler:  dashboardHandler,
-		annHandler:        annHandler,
-		checkinHandler:    checkinHandler,
-		knowledgeHandler:  knowledgeHandler,
-		approvalHandler:   approvalHandler,
-		invitationHandler: invitationHandler,
-		agentHandler:      agentHandler,
-		reportHandler:     reportHandler,
-		evaluationHandler: evaluationHandler,
+		engine:              engine,
+		jwtSvc:              jwtSvc,
+		authzSvc:            authzSvc,
+		authHandler:         authHandler,
+		userHandler:         userHandler,
+		dashboardHandler:    dashboardHandler,
+		annHandler:          annHandler,
+		checkinHandler:      checkinHandler,
+		knowledgeHandler:    knowledgeHandler,
+		approvalHandler:     approvalHandler,
+		invitationHandler:   invitationHandler,
+		agentHandler:        agentHandler,
+		reportHandler:       reportHandler,
+		evaluationHandler:   evaluationHandler,
+		notificationHandler: notificationHandler,
 	}
 }
 
@@ -175,6 +178,12 @@ func (r *Router) Setup() *gin.Engine {
 			protected.POST("/evaluations/:id/review", RBACMiddleware("captain", "super_admin"), r.evaluationHandler.ReviewDraft)
 			protected.POST("/evaluations/:id/publish", RBACMiddleware("captain", "super_admin"), r.evaluationHandler.PublishDraft)
 			protected.PUT("/evaluations/:id/members/:user_id", RBACMiddleware("captain", "super_admin"), r.evaluationHandler.SaveMemberComment)
+
+			// In-app notifications and per-user reminder preferences.
+			protected.GET("/notifications", r.notificationHandler.List)
+			protected.POST("/notifications/:id/read", r.notificationHandler.MarkRead)
+			protected.GET("/notifications/preferences", r.notificationHandler.GetPreferences)
+			protected.PUT("/notifications/preferences", r.notificationHandler.UpdatePreferences)
 		}
 	}
 

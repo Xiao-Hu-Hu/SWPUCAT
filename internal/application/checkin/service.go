@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"sort"
 	"strconv"
@@ -33,11 +34,16 @@ type SettingsRepository interface {
 	Set(ctx context.Context, key, value string) error
 }
 
+type AnomalyNotifier interface {
+	NotifyCheckinAnomaly(ctx context.Context, recipientID int64, scopeKey string, anomalies []string) error
+}
+
 type CheckinService struct {
 	checkinRepo  checkin.Repository
 	userRepo     user.Repository
 	publisher    shared.EventPublisher
 	settingsRepo SettingsRepository
+	notifier     AnomalyNotifier
 }
 
 func NewCheckinService(
@@ -45,13 +51,18 @@ func NewCheckinService(
 	userRepo user.Repository,
 	publisher shared.EventPublisher,
 	settingsRepo SettingsRepository,
+	notifiers ...AnomalyNotifier,
 ) *CheckinService {
-	return &CheckinService{
+	service := &CheckinService{
 		checkinRepo:  checkinRepo,
 		userRepo:     userRepo,
 		publisher:    publisher,
 		settingsRepo: settingsRepo,
 	}
+	if len(notifiers) > 0 {
+		service.notifier = notifiers[0]
+	}
+	return service
 }
 
 func (s *CheckinService) ClockIn(ctx context.Context, userID int64, idempotencyKey string) (*CheckinRecordDTO, error) {
@@ -274,6 +285,24 @@ func (s *CheckinService) GetStatsByPeriod(ctx context.Context, period string) ([
 		}
 		return result[i].Nickname < result[j].Nickname
 	})
+	if s.notifier != nil {
+		for _, stat := range result {
+			anomalies := make([]string, 0, len(stat.Anomalies))
+			for _, anomaly := range stat.Anomalies {
+				// A missing record is not a violation without a configured
+				// schedule; only notify for malformed or incomplete transitions.
+				if anomaly != "no_checkin" {
+					anomalies = append(anomalies, anomaly)
+				}
+			}
+			if len(anomalies) == 0 {
+				continue
+			}
+			if err := s.notifier.NotifyCheckinAnomaly(ctx, stat.UserID, period, anomalies); err != nil {
+				log.Printf("check-in anomaly notification failed for user %d: %v", stat.UserID, err)
+			}
+		}
+	}
 	return result, nil
 }
 
