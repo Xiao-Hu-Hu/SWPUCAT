@@ -22,6 +22,11 @@ type statsInput struct {
 	Period string `json:"period,omitempty" jsonschema_description:"统计周期，只能是 today、week 或 month"`
 }
 
+type knowledgeSearchResult struct {
+	Query   string                     `json:"query"`
+	Sources []business.KnowledgeSource `json:"sources"`
+}
+
 type Registry struct {
 	client       *business.Client
 	writeEnabled bool
@@ -50,14 +55,19 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 		"search_knowledge",
 		"搜索已审核的知识库文件和说明，回答流程问题时优先调用。",
 		func(ctx context.Context, input searchInput) (string, error) {
-			if strings.TrimSpace(input.Query) == "" {
+			query := strings.TrimSpace(input.Query)
+			if query == "" {
 				return "", fmt.Errorf("query is required")
 			}
-			items, err := r.client.SearchKnowledge(ctx, strings.TrimSpace(input.Query))
+			items, err := r.client.SearchKnowledge(ctx, query)
 			if err != nil {
 				return "", err
 			}
-			return marshal(items)
+			sources := business.BuildKnowledgeSources(items)
+			if collector := business.KnowledgeSourceCollectorFrom(ctx); collector != nil {
+				collector.Add(items)
+			}
+			return marshal(knowledgeSearchResult{Query: query, Sources: sources})
 		},
 	)
 	if err != nil {

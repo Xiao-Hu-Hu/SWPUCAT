@@ -24,7 +24,7 @@ func TestChatForwardsIdentityAndDecodesEnvelope(t *testing.T) {
 			t.Fatalf("internal secret = %q", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"answer":"已完成","session_id":"s1"}}`))
+		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"answer":"已完成","session_id":"s1","sources":[{"id":3,"name":"值班流程","category_name":"流程"}]}}`))
 	}))
 	defer server.Close()
 
@@ -38,6 +38,9 @@ func TestChatForwardsIdentityAndDecodesEnvelope(t *testing.T) {
 	}
 	if result.Answer != "已完成" || result.SessionID != "s1" {
 		t.Fatalf("unexpected result: %+v", result)
+	}
+	if len(result.Sources) != 1 || result.Sources[0].ID != 3 {
+		t.Fatalf("sources were not decoded: %+v", result.Sources)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -59,11 +60,132 @@ type CheckinStatus struct {
 
 type KnowledgeItem struct {
 	ID           int64  `json:"id"`
+	Type         string `json:"type"`
 	Name         string `json:"name"`
 	Description  string `json:"description,omitempty"`
 	URL          string `json:"url,omitempty"`
 	CategoryName string `json:"category_name"`
+	Status       string `json:"status"`
 	CreatedAt    string `json:"created_at"`
+}
+
+// KnowledgeSource is the safe, user-facing projection of a knowledge item.
+// It deliberately excludes FileKey and other storage details.
+type KnowledgeSource struct {
+	ID           int64  `json:"id"`
+	Type         string `json:"type"`
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	URL          string `json:"url,omitempty"`
+	CategoryName string `json:"category_name"`
+	CreatedAt    string `json:"created_at,omitempty"`
+}
+
+const (
+	maxKnowledgeSources          = 8
+	maxKnowledgeDescriptionRunes = 4000
+	maxKnowledgeExcerptRunes     = 600
+)
+
+func BuildKnowledgeSources(items []KnowledgeItem) []KnowledgeSource {
+	result := make([]KnowledgeSource, 0, minInt(len(items), maxKnowledgeSources))
+	seen := make(map[int64]struct{}, maxKnowledgeSources)
+	for _, item := range items {
+		if len(result) >= maxKnowledgeSources {
+			break
+		}
+		if item.ID != 0 {
+			if _, ok := seen[item.ID]; ok {
+				continue
+			}
+			seen[item.ID] = struct{}{}
+		}
+		item.Description = truncateRunes(item.Description, maxKnowledgeDescriptionRunes)
+		result = append(result, KnowledgeSource{
+			ID:           item.ID,
+			Type:         item.Type,
+			Name:         item.Name,
+			Description:  item.Description,
+			URL:          item.URL,
+			CategoryName: item.CategoryName,
+			CreatedAt:    item.CreatedAt,
+		})
+	}
+	return result
+}
+
+func KnowledgeSourceExcerpt(source KnowledgeSource) KnowledgeSource {
+	source.Description = truncateRunes(source.Description, maxKnowledgeExcerptRunes)
+	return source
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func truncateRunes(value string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit]) + "…"
+}
+
+type sourceCollectorContextKey struct{}
+
+// KnowledgeSourceCollector deduplicates sources observed during one chat.
+type KnowledgeSourceCollector struct {
+	mu      sync.Mutex
+	sources []KnowledgeSource
+	seen    map[int64]struct{}
+}
+
+func NewKnowledgeSourceCollector() *KnowledgeSourceCollector {
+	return &KnowledgeSourceCollector{seen: make(map[int64]struct{}, maxKnowledgeSources)}
+}
+
+func WithKnowledgeSourceCollector(ctx context.Context, collector *KnowledgeSourceCollector) context.Context {
+	return context.WithValue(ctx, sourceCollectorContextKey{}, collector)
+}
+
+func KnowledgeSourceCollectorFrom(ctx context.Context) *KnowledgeSourceCollector {
+	collector, _ := ctx.Value(sourceCollectorContextKey{}).(*KnowledgeSourceCollector)
+	return collector
+}
+
+func (c *KnowledgeSourceCollector) Add(items []KnowledgeItem) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, source := range BuildKnowledgeSources(items) {
+		if len(c.sources) >= maxKnowledgeSources {
+			return
+		}
+		if source.ID != 0 {
+			if _, ok := c.seen[source.ID]; ok {
+				continue
+			}
+			c.seen[source.ID] = struct{}{}
+		}
+		c.sources = append(c.sources, KnowledgeSourceExcerpt(source))
+	}
+}
+
+func (c *KnowledgeSourceCollector) List() []KnowledgeSource {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]KnowledgeSource(nil), c.sources...)
 }
 
 type CheckinStat struct {

@@ -48,8 +48,19 @@ type ChatRequest struct {
 }
 
 type ChatResponse struct {
-	Answer    string `json:"answer"`
-	SessionID string `json:"session_id"`
+	Answer    string            `json:"answer"`
+	SessionID string            `json:"session_id"`
+	Sources   []KnowledgeSource `json:"sources,omitempty"`
+}
+
+type KnowledgeSource struct {
+	ID           int64  `json:"id"`
+	Type         string `json:"type"`
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	URL          string `json:"url,omitempty"`
+	CategoryName string `json:"category_name"`
+	CreatedAt    string `json:"created_at,omitempty"`
 }
 
 type apiResponse struct {
