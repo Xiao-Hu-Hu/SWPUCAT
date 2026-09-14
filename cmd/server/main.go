@@ -28,6 +28,8 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 func main() {
@@ -39,6 +41,7 @@ func main() {
 	if err := cfg.ValidateForServer(); err != nil {
 		log.Fatalf("Invalid configuration: %v", err)
 	}
+	gin.SetMode(cfg.Server.Mode)
 
 	// Initialize database
 	db, err := database.NewGORM(&cfg.Database)

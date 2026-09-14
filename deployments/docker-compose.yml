@@ -13,7 +13,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test:
+        [
+          "CMD-SHELL",
+          "PGPASSWORD=\"$${POSTGRES_PASSWORD}\" psql -h 127.0.0.1 -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\" -tAc 'SELECT 1' >/dev/null",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -33,6 +37,7 @@ services:
       CSA_DATABASE_DBNAME: ${CSA_DATABASE_DBNAME:?set CSA_DATABASE_DBNAME in .env}
       CSA_DATABASE_SSLMODE: ${CSA_DATABASE_SSLMODE:-disable}
       CSA_MIGRATIONS_DIR: /app/migrations
+      CSA_MIGRATION_BASELINE: ${CSA_MIGRATION_BASELINE:-false}
       TZ: ${TZ:-Asia/Shanghai}
     command: ["./migrate"]
     depends_on:
@@ -105,19 +110,22 @@ services:
     container_name: swpucat-web
     restart: unless-stopped
     working_dir: /app
-    volumes:
-      - ../web:/app
     ports:
       - "3000:3000"
-    command: sh -c "npm install && npm run dev"
+    command: sh -c "npm ci && npm run dev"
     environment:
       NODE_ENV: development
+    volumes:
+      - ../web:/app
+      - web_node_modules:/app/node_modules
 
 volumes:
   postgres_data:
     name: swpucat_postgres_data
   uploads_data:
     name: swpucat_uploads_data
+  web_node_modules:
+    name: swpucat_web_node_modules
 
 networks:
   default:

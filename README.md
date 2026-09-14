@@ -50,7 +50,7 @@ CSA（Computer Science Association）实验室管理系统 — 基于 Vue 3 + Go
 | 层级 | 技术 |
 |------|------|
 | 前端 | Vue 3、TypeScript、Element Plus、ECharts、Pinia、Vue Router、marked |
-| 后端 | Go、Gin、GORM、goldmark |
+| 后端 | Go、Gin、GORM、goldmark、Eino |
 | 数据库 | PostgreSQL 16 |
 | 部署 | Docker Compose、Nginx（可选） |
 
@@ -58,7 +58,9 @@ CSA（Computer Science Association）实验室管理系统 — 基于 Vue 3 + Go
 
 ```
 SWPUCAT/
-├── cmd/server/              # 应用入口
+├── cmd/server/              # 主站应用入口
+├── cmd/agent/               # Eino Agent 入口
+├── cmd/migrate/             # 数据库迁移入口
 ├── internal/
 │   ├── application/         # 应用层（服务、DTO）
 │   │   ├── approval/        # 审批服务
@@ -126,22 +128,29 @@ CSA_DATABASE_PASSWORD=your_secure_password
 CSA_JWT_ACCESS_SECRET=your_random_secret_at_least_32_chars
 CSA_JWT_REFRESH_SECRET=your_random_secret_at_least_32_chars
 
-# 超级管理员密码（建议修改）
-CSA_SUPER_ADMIN_PASSWORD=your_admin_password
+# Agent（启用时必须填写）
+CSA_AGENT_ENABLED=true
+CSA_AGENT_WRITE_ENABLED=false
+CSA_AGENT_INTERNAL_SECRET=your_random_internal_secret_at_least_32_chars
+CSA_LLM_PROVIDER=openai_compatible
+CSA_LLM_MODEL=your_model_id
+CSA_LLM_API_KEY=your_model_api_key
+CSA_LLM_BASE_URL=https://your-provider.example/v1
 ```
 
 ### 3. 启动服务
 
 ```bash
-cd deployments
-docker compose up -d --build
+docker compose --env-file .env -f deployments/docker-compose.yml config --quiet
+docker compose --env-file .env -f deployments/docker-compose.yml up -d --build
+docker compose --env-file .env -f deployments/docker-compose.yml ps -a
 ```
 
 首次启动会自动：
 - 拉取 PostgreSQL、Node、Go 镜像
 - 构建后端服务
 - 执行数据库迁移脚本
-- 安装前端依赖
+- 使用锁文件安装前端依赖
 
 ### 4. 访问系统
 
@@ -151,8 +160,22 @@ docker compose up -d --build
 | 后端 API | http://localhost:8080 |
 
 默认超级管理员账号：
-- 用户名：`admin`（或 `.env` 中配置的 `CSA_SUPER_ADMIN_USERNAME`）
-- 密码：`admin123`（或 `.env` 中配置的 `CSA_SUPER_ADMIN_PASSWORD`）
+- 用户名：`202400000001`
+- 密码：`admin123`
+
+首次登录后应立即修改默认密码。已有数据库继续使用其中的现有账号。
+
+### 5. 升级没有迁移历史的旧数据库
+
+如果数据库里已经存在旧版业务表，但没有 `schema_migrations` 表，请先备份数据库，并在第一次升级时设置：
+
+```ini
+CSA_MIGRATION_BASELINE=true
+```
+
+迁移器会校验旧版 `001` 至 `015` 所需的表和字段，只将这 15 个旧迁移标记为基线，再正常执行 `016` 之后的新迁移。迁移成功后可将该值恢复为 `false`。
+
+如果修改了 `CSA_DATABASE_PASSWORD` 或 `CSA_DATABASE_DBNAME`，已有 PostgreSQL 数据卷不会自动修改数据库角色密码或创建新数据库。必须先在数据库内同步修改，或者在确认测试数据可删除后重新创建数据卷。
 
 ## 部署到生产服务器
 
@@ -197,8 +220,7 @@ nginx -t && systemctl restart nginx
 ```bash
 cd /opt/swpucat
 git pull
-cd deployments
-docker compose up -d --build
+docker compose --env-file .env -f deployments/docker-compose.yml up -d --build
 ```
 
 ## 环境变量说明
@@ -210,13 +232,11 @@ docker compose up -d --build
 | `CSA_DATABASE_HOST` | 数据库主机 | `localhost` |
 | `CSA_DATABASE_PORT` | 数据库端口 | `5432` |
 | `CSA_DATABASE_USER` | 数据库用户 | `csa` |
-| `CSA_DATABASE_PASSWORD` | 数据库密码 | `csa_password` |
+| `CSA_DATABASE_PASSWORD` | 数据库密码，必须通过 `.env` 提供 | - |
 | `CSA_DATABASE_DBNAME` | 数据库名称 | `csa_db` |
+| `CSA_MIGRATION_BASELINE` | 无迁移历史的旧版 `001-015` 数据库首次升级开关 | `false` |
 | `CSA_JWT_ACCESS_SECRET` | JWT 访问密钥 | - |
 | `CSA_JWT_REFRESH_SECRET` | JWT 刷新密钥 | - |
-| `CSA_JWT_ACCESS_EXPIRY` | 访问令牌有效期 | `24h` |
-| `CSA_SUPER_ADMIN_USERNAME` | 超级管理员用户名 | `admin` |
-| `CSA_SUPER_ADMIN_PASSWORD` | 超级管理员密码 | `admin123` |
 | `CSA_STORAGE_UPLOAD_DIR` | 文件上传目录 | `./uploads` |
 | `CSA_STORAGE_MAX_FILE_SIZE` | 最大文件大小 (字节) | `104857600` |
 | `CSA_EMAIL_SMTP_HOST` | SMTP 服务器地址 | - |
@@ -226,6 +246,13 @@ docker compose up -d --build
 | `CSA_EMAIL_FROM` | 发件人地址 | - |
 | `CSA_LOG_LEVEL` | 日志级别 | `debug` |
 | `CSA_LOG_FORMAT` | 日志格式 | `console` |
+| `CSA_AGENT_ENABLED` | 是否启用 Eino Agent | `false` |
+| `CSA_AGENT_WRITE_ENABLED` | 是否注册打卡和公告草稿等写工具 | `false` |
+| `CSA_AGENT_INTERNAL_SECRET` | 主站和 Agent 的内部共享密钥，启用时至少 32 位 | - |
+| `CSA_LLM_PROVIDER` | 模型适配器，目前支持 OpenAI-compatible | `openai_compatible` |
+| `CSA_LLM_MODEL` | 服务商提供的模型 ID | - |
+| `CSA_LLM_API_KEY` | 模型 API Key，仅注入 Agent 容器 | - |
+| `CSA_LLM_BASE_URL` | OpenAI-compatible API 根地址 | - |
 
 ## API 接口
 

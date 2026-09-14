@@ -23,6 +23,35 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );`
 
+const legacyBaselineThrough = "015_add_tech_direction_to_users.sql"
+
+var legacyRequiredRelations = []string{
+	"users",
+	"announcements",
+	"checkin_records",
+	"knowledge_categories",
+	"knowledge_items",
+	"approvals",
+	"settings",
+	"verification_codes",
+	"invitation_codes",
+}
+
+var legacyRequiredColumns = []struct {
+	table  string
+	column string
+}{
+	{table: "users", column: "student_id"},
+	{table: "users", column: "email"},
+	{table: "users", column: "avatar"},
+	{table: "users", column: "tech_direction"},
+	{table: "knowledge_items", column: "rejected"},
+	{table: "knowledge_items", column: "reject_reason"},
+	{table: "knowledge_items", column: "reviewer_id"},
+	{table: "knowledge_items", column: "reviewer_name"},
+	{table: "knowledge_items", column: "description"},
+}
+
 type migration struct {
 	version  string
 	path     string
@@ -160,16 +189,29 @@ func maybeBaseline(db *sql.DB, migrations []migration) error {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil {
 		return err
 	}
-	if count > 0 || os.Getenv("CSA_MIGRATION_BASELINE") != "true" {
+	if count > 0 {
 		return nil
 	}
 
-	var existing bool
-	if err := db.QueryRow(`SELECT to_regclass('public.users') IS NOT NULL AND to_regclass('public.knowledge_items') IS NOT NULL`).Scan(&existing); err != nil {
+	existing, err := hasExistingApplicationSchema(db)
+	if err != nil {
 		return err
 	}
 	if !existing {
-		return fmt.Errorf("CSA_MIGRATION_BASELINE=true requires an existing users and knowledge_items schema")
+		if os.Getenv("CSA_MIGRATION_BASELINE") == "true" {
+			return fmt.Errorf("CSA_MIGRATION_BASELINE=true requires an existing legacy application schema")
+		}
+		return nil
+	}
+	if os.Getenv("CSA_MIGRATION_BASELINE") != "true" {
+		return fmt.Errorf("database contains an existing application schema without migration history; back it up and set CSA_MIGRATION_BASELINE=true to verify and baseline legacy migrations through %s", legacyBaselineThrough)
+	}
+	if err := validateLegacySchema(db); err != nil {
+		return err
+	}
+	legacyMigrations, err := migrationsThrough(migrations, legacyBaselineThrough)
+	if err != nil {
+		return err
 	}
 
 	tx, err := db.Begin()
@@ -177,7 +219,7 @@ func maybeBaseline(db *sql.DB, migrations []migration) error {
 		return err
 	}
 	defer tx.Rollback()
-	for _, item := range migrations {
+	for _, item := range legacyMigrations {
 		if _, err := tx.Exec(`INSERT INTO schema_migrations (version, checksum) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING`, item.version, item.checksum); err != nil {
 			return err
 		}
@@ -185,6 +227,66 @@ func maybeBaseline(db *sql.DB, migrations []migration) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	log.Printf("baselined %d existing migrations; future migrations will run normally", len(migrations))
+	log.Printf("baselined %d legacy migrations through %s; later migrations will run normally", len(legacyMigrations), legacyBaselineThrough)
 	return nil
+}
+
+func hasExistingApplicationSchema(db *sql.DB) (bool, error) {
+	for _, relation := range legacyRequiredRelations {
+		var exists bool
+		if err := db.QueryRow(`SELECT to_regclass($1) IS NOT NULL`, "public."+relation).Scan(&exists); err != nil {
+			return false, err
+		}
+		if exists {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func validateLegacySchema(db *sql.DB) error {
+	missing := make([]string, 0)
+	for _, relation := range legacyRequiredRelations {
+		var exists bool
+		if err := db.QueryRow(`SELECT to_regclass($1) IS NOT NULL`, "public."+relation).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			missing = append(missing, "table "+relation)
+		}
+	}
+	for _, requirement := range legacyRequiredColumns {
+		var exists bool
+		if err := db.QueryRow(`
+			SELECT EXISTS (
+				SELECT 1
+				FROM information_schema.columns
+				WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2
+			)`, requirement.table, requirement.column).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			missing = append(missing, "column "+requirement.table+"."+requirement.column)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("legacy schema cannot be baselined through %s; missing %s", legacyBaselineThrough, strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+func migrationsThrough(migrations []migration, cutoff string) ([]migration, error) {
+	result := make([]migration, 0, len(migrations))
+	found := false
+	for _, item := range migrations {
+		result = append(result, item)
+		if item.version == cutoff {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("legacy baseline cutoff migration %s was not found", cutoff)
+	}
+	return result, nil
 }
