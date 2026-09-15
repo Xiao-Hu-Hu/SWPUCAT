@@ -215,6 +215,39 @@ func TestHybridSearchFusesAndFallsBackToKeyword(t *testing.T) {
 	}
 }
 
+func TestAggregateCandidatesPrefersContentExcerpt(t *testing.T) {
+	items := []Candidate{
+		{ItemID: 13, Name: "七月总结.md", Description: "张三的七月总结", SourceKind: "description", Excerpt: "# 七月总结.md 资料说明：张三的七月总结", Score: 0.78},
+		{ItemID: 13, Name: "七月总结.md", Description: "张三的七月总结", SourceKind: "content", Excerpt: "开始学习 JavaWeb，目前看到 JDBC。", Score: 0.57},
+		{ItemID: 14, Name: "七月总结.md", Description: "李四的七月总结", SourceKind: "description", Excerpt: "# 七月总结.md 资料说明：李四的七月总结", Score: 0.75},
+		{ItemID: 14, Name: "七月总结.md", Description: "李四的七月总结", SourceKind: "content", Excerpt: "上旬备战软件杯，中旬三下乡。", Score: 0.63},
+	}
+
+	results := candidatesToResults(items, "vector", 8)
+	if len(results) != 2 {
+		t.Fatalf("results = %#v", results)
+	}
+	if results[0].ItemID != 13 || results[0].SourceKind != "content" || !strings.Contains(results[0].Excerpt, "JavaWeb") {
+		t.Fatalf("item 13 content was not selected: %#v", results[0])
+	}
+	if results[0].Description != "张三的七月总结" || results[1].SourceKind != "content" || !strings.Contains(results[1].Excerpt, "软件杯") {
+		t.Fatalf("metadata or item 14 content was lost: %#v", results)
+	}
+	// Keep the best chunk score for ranking even though the body excerpt has a
+	// lower score than the synthetic description.
+	if results[0].Score != 0.78 {
+		t.Fatalf("item score = %v, want 0.78", results[0].Score)
+	}
+}
+
+func TestAggregateCandidatesKeepsDescriptionWhenContentMissing(t *testing.T) {
+	items := []Candidate{{ItemID: 21, SourceKind: "description", Excerpt: "用途说明", Score: 0.4}}
+	results := candidatesToResults(items, "keyword", 8)
+	if len(results) != 1 || results[0].SourceKind != "description" || results[0].Excerpt != "用途说明" {
+		t.Fatalf("description fallback = %#v", results)
+	}
+}
+
 func TestSearchRejectsInvalidQuery(t *testing.T) {
 	service, _ := NewService(&fakeRepository{}, nil, nil, nil, testConfig("keyword"))
 	if _, err := service.Search(context.Background(), strings.Repeat("问", maxQueryRunes+1)); !errors.Is(err, ErrInvalidQuery) {

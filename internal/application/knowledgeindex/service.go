@@ -364,6 +364,12 @@ func retryDelay(attempt int) time.Duration {
 }
 
 func fuseCandidates(vector, keyword []Candidate, limit int) ([]SearchResult, error) {
+	// Repositories return chunk-level candidates so both descriptions and
+	// extracted file content remain available.  Collapse each channel before
+	// RRF; otherwise repeated chunks of one item would consume several ranks
+	// and the fused payload could still be the description chunk.
+	vector = aggregateCandidates(vector)
+	keyword = aggregateCandidates(keyword)
 	toRanked := func(items []Candidate) []retrieval.RankedItem {
 		result := make([]retrieval.RankedItem, 0, len(items))
 		for _, item := range items {
@@ -389,6 +395,9 @@ func fuseCandidates(vector, keyword []Candidate, limit int) ([]SearchResult, err
 }
 
 func candidatesToResults(items []Candidate, mode string, limit int) []SearchResult {
+	// Collapse only at the API boundary.  Content is preferred as the excerpt
+	// while the original item description remains in Candidate.Description.
+	items = aggregateCandidates(items)
 	if len(items) > limit {
 		items = items[:limit]
 	}
@@ -413,6 +422,58 @@ func candidateToResult(item Candidate, mode string) SearchResult {
 	}
 	if item.Type == "file" {
 		result.DownloadURL = "/api/knowledge/download/" + strconv.FormatInt(item.ItemID, 10)
+	}
+	return result
+}
+
+// aggregateCandidates collapses chunk-level candidates into one candidate per
+// knowledge item.  A synthetic description chunk can score higher than the
+// actual file body for broad questions (for example, a category summary), so
+// always use the best content chunk as the excerpt when content is available.
+// Keep the maximum score across all chunks for channel ranking.
+func aggregateCandidates(items []Candidate) []Candidate {
+	type aggregate struct {
+		selected Candidate
+		best     float64
+		content  *Candidate
+	}
+
+	entries := make(map[int64]*aggregate, len(items))
+	order := make([]int64, 0, len(items))
+	for _, item := range items {
+		entry, ok := entries[item.ItemID]
+		if !ok {
+			copyItem := item
+			entry = &aggregate{selected: copyItem, best: item.Score}
+			entries[item.ItemID] = entry
+			order = append(order, item.ItemID)
+		} else if item.Score > entry.best {
+			entry.best = item.Score
+			entry.selected = item
+		}
+		if item.Score > entry.best {
+			entry.best = item.Score
+		}
+		if strings.EqualFold(strings.TrimSpace(item.SourceKind), "content") {
+			if entry.content == nil || item.Score > entry.content.Score {
+				content := item
+				entry.content = &content
+			}
+		}
+	}
+
+	result := make([]Candidate, 0, len(order))
+	for _, itemID := range order {
+		entry := entries[itemID]
+		if entry == nil {
+			continue
+		}
+		selected := entry.selected
+		if entry.content != nil {
+			selected = *entry.content
+		}
+		selected.Score = entry.best
+		result = append(result, selected)
 	}
 	return result
 }

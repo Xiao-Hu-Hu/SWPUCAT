@@ -333,18 +333,40 @@ func (r *KnowledgeIndexRepo) KeywordSearch(ctx context.Context, query string, li
 			LEFT JOIN knowledge_categories cat ON cat.id = ki.category_id
 			CROSS JOIN params p
 			WHERE ki.status = 'approved' AND ki.deleted_at IS NULL
-		), ranked AS (
-			SELECT scored.*, ROW_NUMBER() OVER (
-				PARTITION BY item_id ORDER BY score DESC, chunk_id ASC
-			) AS item_rank
+		), eligible AS (
+			-- Use the best-scoring chunk to rank items, but retain all selected
+			-- item chunks below so the service can choose body content over the
+			-- synthetic description chunk.
+			SELECT scored.*
 			FROM scored
+			WHERE score >= 0.04
+		), item_scores AS (
+			SELECT item_id, MAX(score) AS item_score
+			FROM eligible
+			GROUP BY item_id
+		), item_ranked AS (
+			SELECT item_id, item_score,
+			       ROW_NUMBER() OVER (ORDER BY item_score DESC, item_id ASC) AS item_rank
+			FROM item_scores
+		), chunk_ranked AS (
+			SELECT scored.*, ROW_NUMBER() OVER (
+				PARTITION BY scored.item_id, scored.source_kind
+				ORDER BY scored.score DESC, scored.chunk_id ASC
+			) AS kind_rank
+			FROM scored
+			JOIN item_ranked ir ON ir.item_id = scored.item_id
 		)
-		SELECT chunk_id, item_id, type, name, description, url, category_name,
-		       source_kind, excerpt, score
-		FROM ranked
-		WHERE item_rank = 1 AND score >= 0.04
-		ORDER BY score DESC, item_id ASC
-		LIMIT ?`, strings.TrimSpace(query), pattern, limit).Scan(&result).Error
+		SELECT cr.chunk_id, cr.item_id, cr.type, cr.name, cr.description, cr.url,
+		       cr.category_name, cr.source_kind, cr.excerpt, cr.score
+		FROM chunk_ranked cr
+		JOIN item_ranked ir ON ir.item_id = cr.item_id
+		WHERE ir.item_rank <= ?
+		  AND ((cr.source_kind = 'description' AND cr.kind_rank = 1)
+		    OR (cr.source_kind = 'content' AND cr.kind_rank <= 3)
+		    OR (cr.source_kind NOT IN ('description', 'content') AND cr.kind_rank = 1))
+		ORDER BY ir.item_rank ASC,
+		         CASE WHEN cr.source_kind = 'content' THEN 0 ELSE 1 END,
+		         cr.kind_rank ASC, cr.score DESC, cr.chunk_id ASC`, strings.TrimSpace(query), pattern, limit).Scan(&result).Error
 	return result, err
 }
 
@@ -374,19 +396,37 @@ func (r *KnowledgeIndexRepo) VectorSearch(ctx context.Context, vector []float32,
 			  AND kc.embedding IS NOT NULL
 			  AND kc.embedding_model = ?
 			  AND kc.embedding_dimensions = ?
-		), ranked AS (
-			SELECT scored.*, ROW_NUMBER() OVER (
-				PARTITION BY item_id ORDER BY score DESC, chunk_id ASC
-			) AS item_rank
+		), eligible AS (
+			SELECT scored.*
 			FROM scored
 			WHERE score >= ?
+		), item_scores AS (
+			SELECT item_id, MAX(score) AS item_score
+			FROM eligible
+			GROUP BY item_id
+		), item_ranked AS (
+			SELECT item_id, item_score,
+			       ROW_NUMBER() OVER (ORDER BY item_score DESC, item_id ASC) AS item_rank
+			FROM item_scores
+		), chunk_ranked AS (
+			SELECT scored.*, ROW_NUMBER() OVER (
+				PARTITION BY scored.item_id, scored.source_kind
+				ORDER BY scored.score DESC, scored.chunk_id ASC
+			) AS kind_rank
+			FROM scored
+			JOIN item_ranked ir ON ir.item_id = scored.item_id
 		)
-		SELECT chunk_id, item_id, type, name, description, url, category_name,
-		       source_kind, excerpt, score
-		FROM ranked
-		WHERE item_rank = 1
-		ORDER BY score DESC, item_id ASC
-		LIMIT ?`, vectorLiteral(vector), strings.TrimSpace(model), dimensions, minScore, limit).Scan(&result).Error
+		SELECT cr.chunk_id, cr.item_id, cr.type, cr.name, cr.description, cr.url,
+		       cr.category_name, cr.source_kind, cr.excerpt, cr.score
+		FROM chunk_ranked cr
+		JOIN item_ranked ir ON ir.item_id = cr.item_id
+		WHERE ir.item_rank <= ?
+		  AND ((cr.source_kind = 'description' AND cr.kind_rank = 1)
+		    OR (cr.source_kind = 'content' AND cr.kind_rank <= 3)
+		    OR (cr.source_kind NOT IN ('description', 'content') AND cr.kind_rank = 1))
+		ORDER BY ir.item_rank ASC,
+		         CASE WHEN cr.source_kind = 'content' THEN 0 ELSE 1 END,
+		         cr.kind_rank ASC, cr.score DESC, cr.chunk_id ASC`, vectorLiteral(vector), strings.TrimSpace(model), dimensions, minScore, limit).Scan(&result).Error
 	return result, err
 }
 
