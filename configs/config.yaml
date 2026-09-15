@@ -44,3 +44,23 @@ agent:
   max_iterations: 4
   max_tool_calls: 8
   worker_concurrency: 1
+
+embedding:
+  enabled: false
+  provider: openai_compatible
+  model: ""
+  api_key: ""
+  base_url: ""
+  dimensions: 1024
+  batch_size: 16
+  timeout: 30s
+
+retrieval:
+  mode: keyword
+  candidate_limit: 20
+  final_limit: 8
+  min_vector_score: 0.3
+  chunk_runes: 600
+  chunk_overlap_runes: 80
+  max_extracted_runes: 500000
+  worker_interval: 5s

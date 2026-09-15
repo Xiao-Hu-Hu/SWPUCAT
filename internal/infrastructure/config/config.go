@@ -12,14 +12,97 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server"`
-	Database DatabaseConfig `mapstructure:"database"`
-	Redis    RedisConfig    `mapstructure:"redis"`
-	JWT      JWTConfig      `mapstructure:"jwt"`
-	Log      LogConfig      `mapstructure:"log"`
-	Storage  StorageConfig  `mapstructure:"storage"`
-	Email    EmailConfig    `mapstructure:"email"`
-	Agent    AgentConfig    `mapstructure:"agent"`
+	Server    ServerConfig    `mapstructure:"server"`
+	Database  DatabaseConfig  `mapstructure:"database"`
+	Redis     RedisConfig     `mapstructure:"redis"`
+	JWT       JWTConfig       `mapstructure:"jwt"`
+	Log       LogConfig       `mapstructure:"log"`
+	Storage   StorageConfig   `mapstructure:"storage"`
+	Email     EmailConfig     `mapstructure:"email"`
+	Agent     AgentConfig     `mapstructure:"agent"`
+	Embedding EmbeddingConfig `mapstructure:"embedding"`
+	Retrieval RetrievalConfig `mapstructure:"retrieval"`
+}
+
+type EmbeddingConfig struct {
+	Enabled    bool          `mapstructure:"enabled"`
+	Provider   string        `mapstructure:"provider"`
+	Model      string        `mapstructure:"model"`
+	APIKey     string        `mapstructure:"api_key"`
+	BaseURL    string        `mapstructure:"base_url"`
+	Dimensions int           `mapstructure:"dimensions"`
+	BatchSize  int           `mapstructure:"batch_size"`
+	Timeout    time.Duration `mapstructure:"timeout"`
+}
+
+func (e EmbeddingConfig) Validate() error {
+	if !e.Enabled {
+		return nil
+	}
+	if e.Provider != "openai" && e.Provider != "openai_compatible" {
+		return fmt.Errorf("embedding.provider must be openai or openai_compatible")
+	}
+	if strings.TrimSpace(e.Model) == "" {
+		return fmt.Errorf("embedding.model is required when embedding is enabled")
+	}
+	if strings.TrimSpace(e.APIKey) == "" {
+		return fmt.Errorf("embedding.api_key is required when embedding is enabled")
+	}
+	if strings.TrimSpace(e.BaseURL) == "" {
+		return fmt.Errorf("embedding.base_url is required when embedding is enabled")
+	}
+	if e.Dimensions < 8 || e.Dimensions > 8192 {
+		return fmt.Errorf("embedding.dimensions must be between 8 and 8192")
+	}
+	if e.BatchSize < 1 || e.BatchSize > 128 {
+		return fmt.Errorf("embedding.batch_size must be between 1 and 128")
+	}
+	if e.Timeout <= 0 {
+		return fmt.Errorf("embedding.timeout must be positive")
+	}
+	return nil
+}
+
+type RetrievalConfig struct {
+	Mode              string        `mapstructure:"mode"`
+	CandidateLimit    int           `mapstructure:"candidate_limit"`
+	FinalLimit        int           `mapstructure:"final_limit"`
+	MinVectorScore    float64       `mapstructure:"min_vector_score"`
+	ChunkRunes        int           `mapstructure:"chunk_runes"`
+	ChunkOverlapRunes int           `mapstructure:"chunk_overlap_runes"`
+	MaxExtractedRunes int           `mapstructure:"max_extracted_runes"`
+	WorkerInterval    time.Duration `mapstructure:"worker_interval"`
+}
+
+func (r RetrievalConfig) Validate(embeddingEnabled bool) error {
+	if r.Mode != "keyword" && r.Mode != "vector" && r.Mode != "hybrid" {
+		return fmt.Errorf("retrieval.mode must be keyword, vector, or hybrid")
+	}
+	if (r.Mode == "vector" || r.Mode == "hybrid") && !embeddingEnabled {
+		return fmt.Errorf("retrieval.mode %s requires embedding.enabled=true", r.Mode)
+	}
+	if r.CandidateLimit < 1 || r.CandidateLimit > 100 {
+		return fmt.Errorf("retrieval.candidate_limit must be between 1 and 100")
+	}
+	if r.FinalLimit < 1 || r.FinalLimit > r.CandidateLimit {
+		return fmt.Errorf("retrieval.final_limit must be between 1 and candidate_limit")
+	}
+	if r.MinVectorScore < -1 || r.MinVectorScore > 1 {
+		return fmt.Errorf("retrieval.min_vector_score must be between -1 and 1")
+	}
+	if r.ChunkRunes < 128 || r.ChunkRunes > 4000 {
+		return fmt.Errorf("retrieval.chunk_runes must be between 128 and 4000")
+	}
+	if r.ChunkOverlapRunes < 0 || r.ChunkOverlapRunes >= r.ChunkRunes {
+		return fmt.Errorf("retrieval.chunk_overlap_runes must be non-negative and less than chunk_runes")
+	}
+	if r.MaxExtractedRunes < r.ChunkRunes || r.MaxExtractedRunes > 5000000 {
+		return fmt.Errorf("retrieval.max_extracted_runes must be between chunk_runes and 5000000")
+	}
+	if r.WorkerInterval <= 0 || r.WorkerInterval > time.Hour {
+		return fmt.Errorf("retrieval.worker_interval must be positive and at most one hour")
+	}
+	return nil
 }
 
 type AgentConfig struct {
@@ -93,6 +176,12 @@ func (c *Config) ValidateForServer() error {
 	}
 	if c.Database.MaxOpenConns < 1 || c.Database.MaxIdleConns < 0 || c.Database.MaxIdleConns > c.Database.MaxOpenConns {
 		return fmt.Errorf("database connection pool limits are invalid")
+	}
+	if err := c.Embedding.Validate(); err != nil {
+		return err
+	}
+	if err := c.Retrieval.Validate(c.Embedding.Enabled); err != nil {
+		return err
 	}
 	return nil
 }
@@ -233,6 +322,22 @@ func Load() (*Config, error) {
 	viper.SetDefault("agent.max_iterations", 4)
 	viper.SetDefault("agent.max_tool_calls", 8)
 	viper.SetDefault("agent.worker_concurrency", 1)
+	viper.SetDefault("embedding.enabled", false)
+	viper.SetDefault("embedding.provider", "openai_compatible")
+	viper.SetDefault("embedding.model", "")
+	viper.SetDefault("embedding.api_key", "")
+	viper.SetDefault("embedding.base_url", "")
+	viper.SetDefault("embedding.dimensions", 1024)
+	viper.SetDefault("embedding.batch_size", 16)
+	viper.SetDefault("embedding.timeout", 30*time.Second)
+	viper.SetDefault("retrieval.mode", "keyword")
+	viper.SetDefault("retrieval.candidate_limit", 20)
+	viper.SetDefault("retrieval.final_limit", 8)
+	viper.SetDefault("retrieval.min_vector_score", 0.3)
+	viper.SetDefault("retrieval.chunk_runes", 600)
+	viper.SetDefault("retrieval.chunk_overlap_runes", 80)
+	viper.SetDefault("retrieval.max_extracted_runes", 500000)
+	viper.SetDefault("retrieval.worker_interval", 5*time.Second)
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
@@ -276,6 +381,22 @@ func Load() (*Config, error) {
 	applyIntEnv("CSA_AGENT_MAX_ITERATIONS", &cfg.Agent.MaxIterations)
 	applyIntEnv("CSA_AGENT_MAX_TOOL_CALLS", &cfg.Agent.MaxToolCalls)
 	applyIntEnv("CSA_AGENT_WORKER_CONCURRENCY", &cfg.Agent.WorkerConcurrency)
+	applyBoolEnv("CSA_EMBEDDING_ENABLED", &cfg.Embedding.Enabled)
+	applyStringEnv("CSA_EMBEDDING_PROVIDER", &cfg.Embedding.Provider)
+	applyStringEnv("CSA_EMBEDDING_MODEL", &cfg.Embedding.Model)
+	applyStringEnv("CSA_EMBEDDING_API_KEY", &cfg.Embedding.APIKey)
+	applyStringEnv("CSA_EMBEDDING_BASE_URL", &cfg.Embedding.BaseURL)
+	applyIntEnv("CSA_EMBEDDING_DIMENSIONS", &cfg.Embedding.Dimensions)
+	applyIntEnv("CSA_EMBEDDING_BATCH_SIZE", &cfg.Embedding.BatchSize)
+	applyDurationEnv("CSA_EMBEDDING_TIMEOUT", &cfg.Embedding.Timeout)
+	applyStringEnv("CSA_RETRIEVAL_MODE", &cfg.Retrieval.Mode)
+	applyIntEnv("CSA_RETRIEVAL_CANDIDATE_LIMIT", &cfg.Retrieval.CandidateLimit)
+	applyIntEnv("CSA_RETRIEVAL_FINAL_LIMIT", &cfg.Retrieval.FinalLimit)
+	applyFloat64Env("CSA_RETRIEVAL_MIN_VECTOR_SCORE", &cfg.Retrieval.MinVectorScore)
+	applyIntEnv("CSA_RETRIEVAL_CHUNK_RUNES", &cfg.Retrieval.ChunkRunes)
+	applyIntEnv("CSA_RETRIEVAL_CHUNK_OVERLAP_RUNES", &cfg.Retrieval.ChunkOverlapRunes)
+	applyIntEnv("CSA_RETRIEVAL_MAX_EXTRACTED_RUNES", &cfg.Retrieval.MaxExtractedRunes)
+	applyDurationEnv("CSA_RETRIEVAL_WORKER_INTERVAL", &cfg.Retrieval.WorkerInterval)
 	applyStringEnv("CSA_STORAGE_UPLOAD_DIR", &cfg.Storage.UploadDir)
 	applyInt64Env("CSA_STORAGE_MAX_FILE_SIZE", &cfg.Storage.MaxFileSize)
 	applyIntEnv("CSA_SERVER_PORT", &cfg.Server.Port)
@@ -305,6 +426,14 @@ func applyIntEnv(key string, target *int) {
 func applyInt64Env(key string, target *int64) {
 	if value, ok := os.LookupEnv(key); ok && value != "" {
 		if parsed, err := strconv.ParseInt(value, 10, 64); err == nil {
+			*target = parsed
+		}
+	}
+}
+
+func applyFloat64Env(key string, target *float64) {
+	if value, ok := os.LookupEnv(key); ok && value != "" {
+		if parsed, err := strconv.ParseFloat(value, 64); err == nil {
 			*target = parsed
 		}
 	}
