@@ -6,10 +6,12 @@ import (
 	"SWPUCAT/internal/application/approval"
 	"SWPUCAT/internal/application/authorization"
 	"SWPUCAT/internal/application/checkin"
+	conversationapp "SWPUCAT/internal/application/conversation"
 	"SWPUCAT/internal/application/dashboard"
 	evaluationapp "SWPUCAT/internal/application/evaluation"
 	"SWPUCAT/internal/application/invitation"
 	"SWPUCAT/internal/application/knowledge"
+	"SWPUCAT/internal/application/knowledgeindex"
 	notificationapp "SWPUCAT/internal/application/notification"
 	reportapp "SWPUCAT/internal/application/report"
 	teamqueryapp "SWPUCAT/internal/application/teamquery"
@@ -22,12 +24,17 @@ import (
 	"SWPUCAT/internal/infrastructure/event"
 	"SWPUCAT/internal/infrastructure/repository"
 	"SWPUCAT/internal/infrastructure/storage"
+	"SWPUCAT/internal/infrastructure/textextract"
 	httpInterface "SWPUCAT/internal/interfaces/http"
+	"SWPUCAT/internal/retrieval"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 )
@@ -54,6 +61,7 @@ func main() {
 	annRepo := repository.NewAnnouncementRepo(db)
 	checkinRepo := repository.NewCheckinRepo(db)
 	knowledgeRepo := repository.NewKnowledgeRepo(db)
+	knowledgeIndexRepo := repository.NewKnowledgeIndexRepo(db)
 	reportRepo := repository.NewReportRepo(db)
 	evaluationRepo := repository.NewEvaluationRepo(db)
 	notificationRepo := repository.NewNotificationRepo(db)
@@ -63,6 +71,7 @@ func main() {
 	invitationRepo := repository.NewInvitationRepo(db)
 	registrationRepo := repository.NewRegistrationRepo(db)
 	settingsRepo := repository.NewSettingsRepo(db)
+	conversationRepo := repository.NewConversationRepo(db)
 
 	// Initialize infrastructure services
 	jwtSvc := auth.NewJWTService(&cfg.JWT)
@@ -73,6 +82,49 @@ func main() {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
 	emailSvc := email.NewSMTPService(&cfg.Email)
+	var embedder knowledgeindex.Embedder
+	if cfg.Embedding.Enabled {
+		embedder, err = retrieval.NewEmbeddingClient(retrieval.EmbeddingClientConfig{
+			BaseURL: cfg.Embedding.BaseURL, APIKey: cfg.Embedding.APIKey,
+			Model: cfg.Embedding.Model, Dimensions: cfg.Embedding.Dimensions,
+			Timeout: cfg.Embedding.Timeout, MaxBatchSize: cfg.Embedding.BatchSize,
+		})
+		if err != nil {
+			log.Fatalf("Failed to initialize embedding client: %v", err)
+		}
+	}
+	extractionLimits := textextract.DefaultLimits()
+	extractionLimits.MaxTextBytes = int64(cfg.Retrieval.MaxExtractedRunes) * utf8.UTFMax
+	documentExtractor := textextract.New(extractionLimits)
+	knowledgeIndexSvc, err := knowledgeindex.NewService(
+		knowledgeIndexRepo,
+		embedder,
+		knowledgeindex.ExtractFunc(func(ctx context.Context, filename string, source io.Reader) (string, error) {
+			result, err := documentExtractor.Extract(ctx, filename, source)
+			return result.Text, err
+		}),
+		knowledgeindex.OpenFunc(func(ctx context.Context, fileKey string) (io.ReadCloser, error) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			path, err := localStorage.Get(fileKey)
+			if err != nil {
+				return nil, err
+			}
+			return os.Open(path)
+		}),
+		knowledgeindex.Config{
+			Mode: cfg.Retrieval.Mode, CandidateLimit: cfg.Retrieval.CandidateLimit,
+			FinalLimit: cfg.Retrieval.FinalLimit, MinVectorScore: cfg.Retrieval.MinVectorScore,
+			ChunkRunes: cfg.Retrieval.ChunkRunes, ChunkOverlapRunes: cfg.Retrieval.ChunkOverlapRunes,
+			MaxChunks:         cfg.Retrieval.MaxChunks,
+			MaxExtractedRunes: cfg.Retrieval.MaxExtractedRunes, WorkerInterval: cfg.Retrieval.WorkerInterval,
+			EmbeddingModel: cfg.Embedding.Model, EmbeddingDimensions: cfg.Embedding.Dimensions,
+		},
+	)
+	if err != nil {
+		log.Fatalf("Failed to initialize knowledge retrieval: %v", err)
+	}
 
 	// Initialize application services
 	userSvc := user.NewUserApplicationService(userRepo, hasher, jwtSvc, publisher, emailSvc, codeRepo, invitationRepo, registrationRepo)
@@ -88,6 +140,7 @@ func main() {
 	approvalSvc := approval.NewApprovalService(approvalRepo, knowledgeRepo, publisher)
 	dashboardSvc := dashboard.NewDashboardService(userRepo, checkinRepo, annRepo, knowledgeRepo)
 	authzSvc := authorization.NewService(userRepo)
+	conversationSvc := conversationapp.NewService(conversationRepo)
 
 	// Initialize handlers
 	authHandler := httpInterface.NewAuthHandler(userSvc)
@@ -95,14 +148,14 @@ func main() {
 	dashboardHandler := httpInterface.NewDashboardHandler(dashboardSvc)
 	annHandler := httpInterface.NewAnnouncementHandler(annSvc)
 	checkinHandler := httpInterface.NewCheckinHandler(checkinSvc, annSvc)
-	knowledgeHandler := httpInterface.NewKnowledgeHandler(knowledgeSvc, localStorage)
+	knowledgeHandler := httpInterface.NewKnowledgeHandler(knowledgeSvc, localStorage, knowledgeIndexSvc)
 	approvalHandler := httpInterface.NewApprovalHandler(approvalSvc)
 	invitationHandler := httpInterface.NewInvitationHandler(invitationSvc)
 	agentClient, err := agentclient.NewClient(cfg.Agent.BaseURL, cfg.Agent.InternalSecret, cfg.Agent.LLMTimeout+15*time.Second)
 	if err != nil {
 		log.Fatalf("Failed to initialize agent client: %v", err)
 	}
-	agentHandler := httpInterface.NewAgentHandler(agentClient)
+	agentHandler := httpInterface.NewAgentHandler(agentClient, conversationSvc, knowledgeIndexSvc)
 	reportHandler := httpInterface.NewReportHandler(reportSvc)
 	evaluationHandler := httpInterface.NewEvaluationHandler(evaluationSvc)
 	notificationHandler := httpInterface.NewNotificationHandler(notificationSvc)
@@ -131,6 +184,8 @@ func main() {
 
 	// Setup routes
 	engine := router.Setup()
+
+	go knowledgeIndexSvc.Run(context.Background(), log.Printf)
 
 	// Schedule midnight auto clock-out
 	go func() {

@@ -139,6 +139,7 @@ type ApprovalModel struct {
 	FileName     string `gorm:"size:256;not null"`
 	FileSize     string `gorm:"size:32"`
 	FileKey      string `gorm:"size:256"`
+	Description  string `gorm:"type:text;not null;default:''"`
 	CategoryID   int64  `gorm:"not null"`
 	UploaderID   int64  `gorm:"not null;index"`
 	UploaderName string `gorm:"size:32;not null"`

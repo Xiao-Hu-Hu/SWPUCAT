@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/smtp"
+	"strconv"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
@@ -38,7 +39,7 @@ func (s *SMTPService) SendVerificationCode(to string, code string) error {
 	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s",
 		s.from, to, subject, body)
 
-	addr := fmt.Sprintf("%s:%d", s.host, s.port)
+	addr := smtpAddress(s.host, s.port)
 	log.Printf("[SMTP] Connecting to %s", addr)
 
 	// Connect to SMTP server
@@ -142,7 +143,7 @@ func (s *SMTPService) SendAnnouncementNotification(to string, title string, cont
 	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
 		s.from, to, subject, body)
 
-	addr := fmt.Sprintf("%s:%d", s.host, s.port)
+	addr := smtpAddress(s.host, s.port)
 	log.Printf("[SMTP-Notify] Connecting to %s, recipient=%s", addr, to)
 
 	conn, err := net.Dial("tcp", addr)
@@ -204,4 +205,8 @@ func (s *SMTPService) SendAnnouncementNotification(to string, title string, cont
 	}
 	log.Printf("[SMTP-Notify] Successfully sent to %s", to)
 	return nil
+}
+
+func smtpAddress(host string, port int) string {
+	return net.JoinHostPort(host, strconv.Itoa(port))
 }

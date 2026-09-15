@@ -81,6 +81,7 @@ services:
       CSA_RETRIEVAL_MIN_VECTOR_SCORE: ${CSA_RETRIEVAL_MIN_VECTOR_SCORE:-0.3}
       CSA_RETRIEVAL_CHUNK_RUNES: ${CSA_RETRIEVAL_CHUNK_RUNES:-600}
       CSA_RETRIEVAL_CHUNK_OVERLAP_RUNES: ${CSA_RETRIEVAL_CHUNK_OVERLAP_RUNES:-80}
+      CSA_RETRIEVAL_MAX_CHUNKS: ${CSA_RETRIEVAL_MAX_CHUNKS:-10000}
       CSA_RETRIEVAL_MAX_EXTRACTED_RUNES: ${CSA_RETRIEVAL_MAX_EXTRACTED_RUNES:-500000}
       CSA_RETRIEVAL_WORKER_INTERVAL: ${CSA_RETRIEVAL_WORKER_INTERVAL:-5s}
       TZ: ${TZ:-Asia/Shanghai}
@@ -91,6 +92,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      agent:
+        condition: service_healthy
 
   agent:
     image: swpucat-server
@@ -119,6 +122,12 @@ services:
     # network; do not expose the model/tool endpoint on the host interface.
     expose:
       - "8090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8090/healthz >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
     command: ["./agent"]
 
   web:

@@ -2,6 +2,7 @@ package agentclient
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +24,13 @@ func TestChatForwardsIdentityAndDecodesEnvelope(t *testing.T) {
 		if got := r.Header.Get("X-Agent-Internal-Secret"); got != "secret" {
 			t.Fatalf("internal secret = %q", got)
 		}
+		var request ChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if !request.HistoryProvided || len(request.History) != 1 || len(request.KnowledgeContext) != 1 {
+			t.Fatalf("durable context was not forwarded: %+v", request)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"answer":"已完成","session_id":"s1","sources":[{"id":3,"name":"值班流程","category_name":"流程"}]}}`))
 	}))
@@ -32,7 +40,11 @@ func TestChatForwardsIdentityAndDecodesEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := client.Chat(context.Background(), ChatRequest{Message: "打卡"}, "Bearer token", "req-1")
+	result, err := client.Chat(context.Background(), ChatRequest{
+		Message: "打卡", HistoryProvided: true,
+		History:          []HistoryMessage{{Role: "user", Content: "之前的问题"}},
+		KnowledgeContext: []KnowledgeSource{{ID: 3, Name: "值班流程", Excerpt: "正文"}},
+	}, "Bearer token", "req-1")
 	if err != nil {
 		t.Fatal(err)
 	}

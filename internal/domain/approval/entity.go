@@ -7,6 +7,7 @@ type Approval struct {
 	FileName     string
 	FileSize     string
 	FileKey      string
+	Description  string
 	CategoryID   int64
 	UploaderID   int64
 	UploaderName string
@@ -16,11 +17,12 @@ type Approval struct {
 	CreatedAt    time.Time
 }
 
-func NewApproval(fileName, fileSize, fileKey string, categoryID, uploaderID int64, uploaderName string) *Approval {
+func NewApproval(fileName, fileSize, fileKey, description string, categoryID, uploaderID int64, uploaderName string) *Approval {
 	return &Approval{
 		FileName:     fileName,
 		FileSize:     fileSize,
 		FileKey:      fileKey,
+		Description:  description,
 		CategoryID:   categoryID,
 		UploaderID:   uploaderID,
 		UploaderName: uploaderName,

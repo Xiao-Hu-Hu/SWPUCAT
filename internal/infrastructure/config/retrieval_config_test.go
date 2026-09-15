@@ -14,6 +14,7 @@ func validRetrievalConfig() RetrievalConfig {
 		MinVectorScore:    0.3,
 		ChunkRunes:        600,
 		ChunkOverlapRunes: 80,
+		MaxChunks:         10000,
 		MaxExtractedRunes: 500000,
 		WorkerInterval:    5 * time.Second,
 	}
@@ -31,6 +32,50 @@ func TestEmbeddingConfigValidate(t *testing.T) {
 	cfg.Model = ""
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "model") {
 		t.Fatalf("missing model should fail, got %v", err)
+	}
+}
+
+func TestAgentConfigRequiresValidLLMBaseURL(t *testing.T) {
+	base := AgentConfig{
+		Enabled:           true,
+		Port:              8090,
+		LLMProvider:       "openai_compatible",
+		LLMModel:          "chat-model",
+		LLMAPIKey:         "secret",
+		LLMTimeout:        time.Minute,
+		MaxIterations:     4,
+		MaxToolCalls:      8,
+		WorkerConcurrency: 1,
+		InternalSecret:    strings.Repeat("s", 32),
+	}
+
+	for _, tc := range []struct {
+		name    string
+		baseURL string
+	}{
+		{name: "missing", baseURL: ""},
+		{name: "wrong scheme", baseURL: "ftp://example.test/v1"},
+		{name: "missing host", baseURL: "https:///v1"},
+		{name: "malformed", baseURL: "://example.test/v1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := base
+			cfg.LLMBaseURL = tc.baseURL
+			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "llm_base_url") {
+				t.Fatalf("invalid base URL should fail validation, got %v", err)
+			}
+		})
+	}
+
+	for _, provider := range []string{"openai", "openai_compatible"} {
+		t.Run(provider, func(t *testing.T) {
+			cfg := base
+			cfg.LLMProvider = provider
+			cfg.LLMBaseURL = "https://example.test/v1"
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("valid %s config rejected: %v", provider, err)
+			}
+		})
 	}
 }
 
@@ -53,5 +98,10 @@ func TestRetrievalConfigRejectsUnsafeChunkLimits(t *testing.T) {
 	cfg.ChunkOverlapRunes = cfg.ChunkRunes
 	if err := cfg.Validate(true); err == nil {
 		t.Fatal("overlap equal to chunk size should fail")
+	}
+	cfg = validRetrievalConfig()
+	cfg.ChunkOverlapRunes = 301
+	if err := cfg.Validate(true); err == nil {
+		t.Fatal("overlap above half the chunk size should fail")
 	}
 }

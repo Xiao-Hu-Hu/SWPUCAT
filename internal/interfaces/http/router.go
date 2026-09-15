@@ -137,6 +137,7 @@ func (r *Router) Setup() *gin.Engine {
 
 			// Knowledge
 			protected.GET("/knowledge/items", r.knowledgeHandler.ListItems)
+			protected.GET("/knowledge/search", r.knowledgeHandler.Search)
 			protected.GET("/knowledge/items/pending", RBACMiddleware("captain", "super_admin"), r.knowledgeHandler.ListPendingItems)
 			protected.GET("/knowledge/items/my", r.knowledgeHandler.ListUserItems)
 			protected.GET("/knowledge/items/:id", r.knowledgeHandler.GetItem)

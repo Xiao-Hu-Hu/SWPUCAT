@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -70,6 +71,7 @@ type RetrievalConfig struct {
 	MinVectorScore    float64       `mapstructure:"min_vector_score"`
 	ChunkRunes        int           `mapstructure:"chunk_runes"`
 	ChunkOverlapRunes int           `mapstructure:"chunk_overlap_runes"`
+	MaxChunks         int           `mapstructure:"max_chunks"`
 	MaxExtractedRunes int           `mapstructure:"max_extracted_runes"`
 	WorkerInterval    time.Duration `mapstructure:"worker_interval"`
 }
@@ -95,6 +97,12 @@ func (r RetrievalConfig) Validate(embeddingEnabled bool) error {
 	}
 	if r.ChunkOverlapRunes < 0 || r.ChunkOverlapRunes >= r.ChunkRunes {
 		return fmt.Errorf("retrieval.chunk_overlap_runes must be non-negative and less than chunk_runes")
+	}
+	if r.ChunkOverlapRunes > r.ChunkRunes/2 {
+		return fmt.Errorf("retrieval.chunk_overlap_runes must not exceed half of chunk_runes")
+	}
+	if r.MaxChunks < 1 || r.MaxChunks > 50000 {
+		return fmt.Errorf("retrieval.max_chunks must be between 1 and 50000")
 	}
 	if r.MaxExtractedRunes < r.ChunkRunes || r.MaxExtractedRunes > 5000000 {
 		return fmt.Errorf("retrieval.max_extracted_runes must be between chunk_runes and 5000000")
@@ -129,8 +137,8 @@ func (a *AgentConfig) Validate() error {
 	if a.MaxIterations < 1 || a.MaxIterations > 32 {
 		return fmt.Errorf("agent.max_iterations must be between 1 and 32")
 	}
-	if a.MaxToolCalls < 0 || a.MaxToolCalls > 64 {
-		return fmt.Errorf("agent.max_tool_calls must be between 0 and 64")
+	if a.MaxToolCalls < 1 || a.MaxToolCalls > 64 {
+		return fmt.Errorf("agent.max_tool_calls must be between 1 and 64")
 	}
 	if a.WorkerConcurrency < 1 || a.WorkerConcurrency > 16 {
 		return fmt.Errorf("agent.worker_concurrency must be between 1 and 16")
@@ -147,6 +155,14 @@ func (a *AgentConfig) Validate() error {
 		}
 		if strings.TrimSpace(a.LLMAPIKey) == "" {
 			return fmt.Errorf("agent.llm_api_key is required when agent is enabled")
+		}
+		provider := strings.TrimSpace(a.LLMProvider)
+		if provider == "openai" || provider == "openai_compatible" {
+			baseURL := strings.TrimSpace(a.LLMBaseURL)
+			parsed, err := url.Parse(baseURL)
+			if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+				return fmt.Errorf("agent.llm_base_url must be a valid http(s) URL when agent is enabled")
+			}
 		}
 		if a.LLMTimeout <= 0 {
 			return fmt.Errorf("agent.llm_timeout must be positive")
@@ -336,6 +352,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("retrieval.min_vector_score", 0.3)
 	viper.SetDefault("retrieval.chunk_runes", 600)
 	viper.SetDefault("retrieval.chunk_overlap_runes", 80)
+	viper.SetDefault("retrieval.max_chunks", 10000)
 	viper.SetDefault("retrieval.max_extracted_runes", 500000)
 	viper.SetDefault("retrieval.worker_interval", 5*time.Second)
 
@@ -395,6 +412,7 @@ func Load() (*Config, error) {
 	applyFloat64Env("CSA_RETRIEVAL_MIN_VECTOR_SCORE", &cfg.Retrieval.MinVectorScore)
 	applyIntEnv("CSA_RETRIEVAL_CHUNK_RUNES", &cfg.Retrieval.ChunkRunes)
 	applyIntEnv("CSA_RETRIEVAL_CHUNK_OVERLAP_RUNES", &cfg.Retrieval.ChunkOverlapRunes)
+	applyIntEnv("CSA_RETRIEVAL_MAX_CHUNKS", &cfg.Retrieval.MaxChunks)
 	applyIntEnv("CSA_RETRIEVAL_MAX_EXTRACTED_RUNES", &cfg.Retrieval.MaxExtractedRunes)
 	applyDurationEnv("CSA_RETRIEVAL_WORKER_INTERVAL", &cfg.Retrieval.WorkerInterval)
 	applyStringEnv("CSA_STORAGE_UPLOAD_DIR", &cfg.Storage.UploadDir)

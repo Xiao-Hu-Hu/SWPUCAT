@@ -2,6 +2,7 @@ package http
 
 import (
 	"SWPUCAT/internal/application/knowledge"
+	"SWPUCAT/internal/application/knowledgeindex"
 	knowledgedomain "SWPUCAT/internal/domain/knowledge"
 	"SWPUCAT/internal/domain/shared"
 	"SWPUCAT/internal/infrastructure/storage"
@@ -12,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -27,11 +29,16 @@ const (
 
 type KnowledgeHandler struct {
 	knowledgeSvc *knowledge.KnowledgeService
+	indexSvc     *knowledgeindex.Service
 	storage      *storage.LocalStorage
 }
 
-func NewKnowledgeHandler(knowledgeSvc *knowledge.KnowledgeService, storage *storage.LocalStorage) *KnowledgeHandler {
-	return &KnowledgeHandler{knowledgeSvc: knowledgeSvc, storage: storage}
+func NewKnowledgeHandler(knowledgeSvc *knowledge.KnowledgeService, storage *storage.LocalStorage, indexServices ...*knowledgeindex.Service) *KnowledgeHandler {
+	var indexSvc *knowledgeindex.Service
+	if len(indexServices) > 0 {
+		indexSvc = indexServices[0]
+	}
+	return &KnowledgeHandler{knowledgeSvc: knowledgeSvc, indexSvc: indexSvc, storage: storage}
 }
 
 func (h *KnowledgeHandler) CreateLink(c *gin.Context) {
@@ -220,6 +227,23 @@ func (h *KnowledgeHandler) ListItems(c *gin.Context) {
 	Success(c, items)
 }
 
+func (h *KnowledgeHandler) Search(c *gin.Context) {
+	if h == nil || h.indexSvc == nil {
+		Error(c, http.StatusServiceUnavailable, 503, "knowledge retrieval is not configured")
+		return
+	}
+	items, err := h.indexSvc.Search(c.Request.Context(), c.Query("q"))
+	if err != nil {
+		if errors.Is(err, knowledgeindex.ErrInvalidQuery) {
+			BadRequest(c, "q is required and must be at most 512 characters")
+			return
+		}
+		InternalError(c, "failed to search knowledge")
+		return
+	}
+	Success(c, items)
+}
+
 func (h *KnowledgeHandler) GetItem(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -392,10 +416,32 @@ func (h *KnowledgeHandler) DownloadFile(c *gin.Context) {
 	}
 
 	// 使用 RFC 5987 编码处理中文文件名
-	encodedName := url.QueryEscape(item.Name)
-	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, item.Name, encodedName))
+	safeName := safeDownloadFilename(item.Name)
+	encodedName := url.QueryEscape(safeName)
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, safeName, encodedName))
 	c.Header("Content-Type", "application/octet-stream")
 	c.File(filePath)
+}
+
+// safeDownloadFilename keeps the fallback filename inside a quoted
+// Content-Disposition value. Control characters, quotes, and path separators
+// are replaced so a stored filename cannot inject headers or alter the path.
+func safeDownloadFilename(name string) string {
+	name = strings.TrimSpace(name)
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f || r == '"' || r == '\\' || r == '/' {
+			b.WriteByte('_')
+			continue
+		}
+		b.WriteRune(r)
+	}
+	name = strings.TrimSpace(b.String())
+	if name == "" || name == "." || name == ".." {
+		return "download"
+	}
+	return name
 }
 
 func (h *KnowledgeHandler) CreateInsight(c *gin.Context) {

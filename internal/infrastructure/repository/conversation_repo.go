@@ -8,6 +8,7 @@ import (
 	"SWPUCAT/internal/infrastructure/database"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ConversationRepo persists Agent history in PostgreSQL. All methods that use
@@ -90,7 +91,7 @@ func (r *ConversationRepo) RecordTurn(ctx context.Context, userID int64, session
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var record database.AgentConversationModel
-		if err := tx.Where("user_id = ? AND session_id = ?", userID, sessionID).First(&record).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND session_id = ?", userID, sessionID).First(&record).Error; err != nil {
 			return err
 		}
 		for _, message := range []*conversation.Message{userMessage, assistantMessage} {

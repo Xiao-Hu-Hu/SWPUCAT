@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { agentApi } from '@/api/agent'
+import { agentApi, type AgentKnowledgeSource } from '@/api/agent'
+import { knowledgeApi } from '@/api/knowledge'
 import { useAuthStore } from '@/stores/auth'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+  sources?: AgentKnowledgeSource[]
 }
 
 const authStore = useAuthStore()
@@ -17,6 +19,7 @@ const messages = ref<ChatMessage[]>([
 ])
 const sessionId = ref('')
 const messagesRef = ref<HTMLElement | null>(null)
+const downloadingSources = ref<Record<number, boolean>>({})
 
 const sessionStorageKey = () => `swpucat-agent-session:${authStore.user?.id || 'anonymous'}`
 
@@ -44,7 +47,7 @@ async function sendMessage() {
     const data = res.data
     sessionId.value = data.session_id
     localStorage.setItem(sessionStorageKey(), data.session_id)
-    messages.value.push({ role: 'assistant', content: data.answer })
+    messages.value.push({ role: 'assistant', content: data.answer, sources: data.sources || [] })
   } catch (error: any) {
     const detail = error?.response?.data?.message
     ElMessage.error(detail || 'Agent 暂时不可用，请稍后重试')
@@ -66,6 +69,72 @@ function clearSession() {
   localStorage.removeItem(sessionStorageKey())
   messages.value = [{ role: 'assistant', content: '会话已清空。你可以继续向我提问。' }]
 }
+
+function sourceExcerpt(source: AgentKnowledgeSource): string {
+  return (source.excerpt || source.description || '').trim()
+}
+
+function sourceKindLabel(source: AgentKnowledgeSource): string {
+  if (source.type === 'file' || source.source_kind === 'file') return '文件'
+  if (source.type === 'link' || source.source_kind === 'link') return '链接'
+  return '资料'
+}
+
+function sourceMatchLabel(source: AgentKnowledgeSource): string {
+  if (source.match_mode === 'vector') return '语义匹配'
+  if (source.match_mode === 'keyword') return '关键词匹配'
+  if (source.match_mode === 'hybrid') return '混合匹配'
+  return ''
+}
+
+function externalSourceURL(source: AgentKnowledgeSource): string {
+  const raw = (source.url || '').trim()
+  if (!raw) return ''
+  try {
+    const parsed = new URL(raw)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return ''
+    if (parsed.username || parsed.password) return ''
+    return parsed.href
+  } catch {
+    return ''
+  }
+}
+
+function canDownloadSource(source: AgentKnowledgeSource): boolean {
+  return source.id > 0 && Boolean(source.download_url) && (source.type === 'file' || source.source_kind === 'file')
+}
+
+function sourceFilename(source: AgentKnowledgeSource): string {
+  const fallback = (source.name || '').trim() || `知识库文件-${source.id}`
+  // The server controls the actual response content. This only supplies a
+  // safe browser-side default filename for the Blob download.
+  const cleaned = fallback.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim()
+  return cleaned || `知识库文件-${source.id}`
+}
+
+async function downloadSource(source: AgentKnowledgeSource) {
+  if (!canDownloadSource(source) || downloadingSources.value[source.id]) return
+  downloadingSources.value[source.id] = true
+  try {
+    // This API call goes through the shared Axios interceptor and therefore
+    // carries the current bearer token (and refreshes it when necessary).
+    const response = await knowledgeApi.downloadFile(source.id)
+    const blob = response instanceof Blob ? response : (response as any).data
+    if (!(blob instanceof Blob)) throw new Error('invalid download response')
+    const objectURL = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectURL
+    link.download = sourceFilename(source)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(objectURL)
+  } catch {
+    ElMessage.error('知识库文件下载失败')
+  } finally {
+    delete downloadingSources.value[source.id]
+  }
+}
 </script>
 
 <template>
@@ -81,7 +150,39 @@ function clearSession() {
     <el-card class="chat-card" shadow="never">
       <div ref="messagesRef" class="messages">
         <div v-for="(item, index) in messages" :key="index" class="message-row" :class="item.role">
-          <div class="message-bubble">{{ item.content }}</div>
+          <div class="message-content">
+            <div class="message-bubble">{{ item.content }}</div>
+            <div v-if="item.role === 'assistant' && item.sources?.length" class="source-list">
+              <div class="source-list-title">参考资料</div>
+              <div v-for="source in item.sources" :key="`${index}-${source.id}-${source.name}`" class="source-card">
+                <div class="source-heading">
+                  <span class="source-kind">{{ sourceKindLabel(source) }}</span>
+                  <strong>{{ source.name || '未命名资料' }}</strong>
+                </div>
+                <p v-if="sourceExcerpt(source)" class="source-excerpt">{{ sourceExcerpt(source) }}</p>
+                <div class="source-meta">
+                  <span v-if="source.category_name">{{ source.category_name }}</span>
+                  <span v-if="sourceMatchLabel(source)">{{ sourceMatchLabel(source) }}</span>
+                </div>
+                <div class="source-actions">
+                  <el-button
+                    v-if="canDownloadSource(source)"
+                    text
+                    size="small"
+                    :loading="downloadingSources[source.id]"
+                    @click="downloadSource(source)"
+                  >下载文件</el-button>
+                  <a
+                    v-if="externalSourceURL(source)"
+                    class="source-link"
+                    :href="externalSourceURL(source)"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >打开链接</a>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
         <div v-if="loading" class="message-row assistant">
           <div class="message-bubble pending">正在思考…</div>
@@ -175,6 +276,84 @@ function clearSession() {
   color: var(--text-muted);
 }
 
+.message-content {
+  max-width: 82%;
+}
+
+.message-row.user .message-content {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.source-list {
+  margin-top: 0.55rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.source-list-title {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.source-card {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.55rem 0.65rem;
+  background: var(--bg-card);
+}
+
+.source-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--text);
+  font-size: 0.8rem;
+}
+
+.source-kind {
+  flex: none;
+  color: var(--accent);
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.source-excerpt {
+  margin: 0.35rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.source-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
+.source-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.2rem;
+}
+
+.source-link {
+  color: var(--accent);
+  font-size: 0.75rem;
+  text-decoration: none;
+}
+
+.source-link:hover {
+  text-decoration: underline;
+}
+
 .composer {
   border-top: 1px solid var(--border);
   padding-top: 1rem;
@@ -196,6 +375,10 @@ function clearSession() {
   }
 
   .message-bubble {
+    max-width: 92%;
+  }
+
+  .message-content {
     max-width: 92%;
   }
 }

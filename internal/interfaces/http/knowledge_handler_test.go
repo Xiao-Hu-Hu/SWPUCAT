@@ -141,6 +141,48 @@ func TestUploadAndDownloadWithEitherFieldOrder(t *testing.T) {
 	}
 }
 
+func TestSafeDownloadFilename(t *testing.T) {
+	for _, tc := range []struct {
+		name, input, want string
+	}{
+		{name: "normal", input: "资料.pdf", want: "资料.pdf"},
+		{name: "header controls and quote", input: "恶意\"\r\nX-Injected: yes.pdf", want: "恶意___X-Injected: yes.pdf"},
+		{name: "path separators", input: `..\\secret/file.pdf`, want: "..__secret_file.pdf"},
+		{name: "empty", input: " \r\n ", want: "download"},
+		{name: "dot names", input: ".", want: "download"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := safeDownloadFilename(tc.input); got != tc.want {
+				t.Fatalf("safeDownloadFilename(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDownloadFilenameHeaderIsSanitized(t *testing.T) {
+	h, repo, _ := uploadFixture(t)
+	r := uploadRouter(h)
+	res := httptest.NewRecorder()
+	r.ServeHTTP(res, multipartRequest(t, true, "2", "", 1))
+	if res.Code != http.StatusCreated {
+		t.Fatalf("upload: %d %s", res.Code, res.Body.String())
+	}
+	repo.item.Name = "恶意\"\r\nX-Injected: yes.pdf"
+
+	res = httptest.NewRecorder()
+	r.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/download/1", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("download: %d %s", res.Code, res.Body.String())
+	}
+	header := res.Header().Get("Content-Disposition")
+	if strings.ContainsAny(header, "\r\n") {
+		t.Fatalf("content-disposition contains a control line break: %q", header)
+	}
+	if !strings.Contains(header, `filename="恶意___X-Injected: yes.pdf"`) {
+		t.Fatalf("sanitized fallback filename missing from header: %q", header)
+	}
+}
+
 func TestInvalidUploadsLeaveNoFilesOrRecords(t *testing.T) {
 	for _, tc := range []struct {
 		name, category, description string

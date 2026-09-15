@@ -40,7 +40,15 @@ func (r *KnowledgeRepo) CreateItem(ctx context.Context, item *knowledge.Knowledg
 		DeletedBy:    item.DeletedBy,
 		CreatedAt:    item.CreatedAt,
 	}
-	if err := r.db.WithContext(ctx).Create(model).Error; err != nil {
+	if err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(model).Error; err != nil {
+			return err
+		}
+		if item.EffectiveStatus() == knowledge.ItemStatusApproved {
+			return queueKnowledgeIndexJob(tx, model.ID)
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 	item.ID = model.ID
@@ -118,52 +126,63 @@ func (r *KnowledgeRepo) FindItemsByUploader(ctx context.Context, uploaderID int6
 
 func (r *KnowledgeRepo) UpdateItem(ctx context.Context, item *knowledge.KnowledgeItem, expectedStatus knowledge.ItemStatus) error {
 	item.SetStatus(item.EffectiveStatus())
-	result := r.db.WithContext(ctx).
-		Model(&database.KnowledgeItemModel{}).
-		Where("id = ? AND status = ? AND deleted_at IS NULL", item.ID, string(expectedStatus)).
-		Updates(map[string]interface{}{
-			"name":          item.Name,
-			"description":   item.Description,
-			"url":           item.URL,
-			"file_size":     item.FileSize,
-			"file_key":      item.FileKey,
-			"category_id":   item.CategoryID,
-			"status":        string(item.Status),
-			"approved":      item.Approved,
-			"rejected":      item.Rejected,
-			"reject_reason": item.RejectReason,
-			"reviewer_id":   item.ReviewerID,
-			"reviewer_name": item.ReviewerName,
-			"deleted_at":    item.DeletedAt,
-			"deleted_by":    item.DeletedBy,
-		})
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return knowledge.ErrInvalidItemState
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&database.KnowledgeItemModel{}).
+			Where("id = ? AND status = ? AND deleted_at IS NULL", item.ID, string(expectedStatus)).
+			Updates(map[string]interface{}{
+				"name":          item.Name,
+				"description":   item.Description,
+				"url":           item.URL,
+				"file_size":     item.FileSize,
+				"file_key":      item.FileKey,
+				"category_id":   item.CategoryID,
+				"status":        string(item.Status),
+				"approved":      item.Approved,
+				"rejected":      item.Rejected,
+				"reject_reason": item.RejectReason,
+				"reviewer_id":   item.ReviewerID,
+				"reviewer_name": item.ReviewerName,
+				"deleted_at":    item.DeletedAt,
+				"deleted_by":    item.DeletedBy,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return knowledge.ErrInvalidItemState
+		}
+		if item.EffectiveStatus() == knowledge.ItemStatusApproved {
+			return queueKnowledgeIndexJob(tx, item.ID)
+		}
+		if err := tx.Exec("DELETE FROM knowledge_chunks WHERE knowledge_item_id = ?", item.ID).Error; err != nil {
+			return err
+		}
+		return tx.Exec("DELETE FROM knowledge_index_jobs WHERE knowledge_item_id = ?", item.ID).Error
+	})
 }
 
 func (r *KnowledgeRepo) DeleteItem(ctx context.Context, id, deletedBy int64) error {
-	result := r.db.WithContext(ctx).
-		Model(&database.KnowledgeItemModel{}).
-		Where("id = ? AND status <> ?", id, string(knowledge.ItemStatusDeleted)).
-		Updates(map[string]interface{}{
-			"status":     string(knowledge.ItemStatusDeleted),
-			"approved":   false,
-			"rejected":   false,
-			"deleted_at": time.Now(),
-			"deleted_by": deletedBy,
-		})
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return gorm.ErrRecordNotFound
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&database.KnowledgeItemModel{}).
+			Where("id = ? AND status <> ?", id, string(knowledge.ItemStatusDeleted)).
+			Updates(map[string]interface{}{
+				"status":     string(knowledge.ItemStatusDeleted),
+				"approved":   false,
+				"rejected":   false,
+				"deleted_at": time.Now(),
+				"deleted_by": deletedBy,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		if err := tx.Exec("DELETE FROM knowledge_chunks WHERE knowledge_item_id = ?", id).Error; err != nil {
+			return err
+		}
+		return tx.Exec("DELETE FROM knowledge_index_jobs WHERE knowledge_item_id = ?", id).Error
+	})
 }
 
 func (r *KnowledgeRepo) CountItems(ctx context.Context) (int64, error) {

@@ -11,7 +11,11 @@ import (
 
 func NewGORM(cfg *config.DatabaseConfig) (*gorm.DB, error) {
 	db, err := gorm.Open(postgres.Open(cfg.DSN()), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		// The index worker polls once every few seconds. Logging every successful
+		// SQL statement at Info quickly floods a small server's disk and stdout;
+		// keep warnings/errors while still surfacing slow queries through GORM's
+		// default threshold.
+		Logger: logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)

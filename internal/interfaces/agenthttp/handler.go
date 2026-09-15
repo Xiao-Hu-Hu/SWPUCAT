@@ -42,8 +42,10 @@ func (h *Handler) Chat(c *gin.Context) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"code": 503, "message": "agent is disabled"})
 		case errors.Is(err, agent.ErrInvalidMessage):
 			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
-		case errors.Is(err, agent.ErrInvalidSession):
+		case errors.Is(err, agent.ErrInvalidSession), errors.Is(err, agent.ErrInvalidHistory):
 			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
+		case errors.Is(err, agent.ErrBusy):
+			c.JSON(http.StatusServiceUnavailable, gin.H{"code": 503, "message": "agent is busy; please retry shortly"})
 		default:
 			c.JSON(http.StatusBadGateway, gin.H{"code": 502, "message": "agent execution failed"})
 		}

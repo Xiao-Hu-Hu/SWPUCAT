@@ -76,13 +76,40 @@ type reportMaterialsResult struct {
 }
 
 type knowledgeSearchResult struct {
-	Query   string                     `json:"query"`
-	Sources []business.KnowledgeSource `json:"sources"`
+	Query          string                     `json:"query"`
+	Sources        []business.KnowledgeSource `json:"sources"`
+	Truncated      bool                       `json:"truncated,omitempty"`
+	OmittedSources int                        `json:"omitted_sources,omitempty"`
 }
 
 type Registry struct {
 	client       *business.Client
 	writeEnabled bool
+}
+
+type budgetTool struct {
+	tool.InvokableTool
+}
+
+func (t *budgetTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
+	if err := business.ConsumeToolCall(ctx); err != nil {
+		return "", err
+	}
+	return t.InvokableTool.InvokableRun(ctx, argumentsInJSON, opts...)
+}
+
+// WithToolBudget wraps Eino's invokable tools without changing their schema.
+// The request context supplies the actual per-turn budget.
+func WithToolBudget(items []tool.BaseTool) []tool.BaseTool {
+	result := make([]tool.BaseTool, 0, len(items))
+	for _, item := range items {
+		if invokable, ok := item.(tool.InvokableTool); ok {
+			result = append(result, &budgetTool{InvokableTool: invokable})
+			continue
+		}
+		result = append(result, item)
+	}
+	return result
 }
 
 func NewRegistry(client *business.Client, writeEnabled bool) *Registry {
@@ -122,6 +149,9 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 			if input.MinHours != nil && (*input.MinHours < 0 || *input.MinHours > 10000) {
 				return "", fmt.Errorf("min_hours is out of range")
 			}
+			if input.ReportStatus != "" && input.PeriodID <= 0 {
+				return "", fmt.Errorf("period_id is required when report_status is set")
+			}
 			if input.ReportStatus != "" && input.ReportStatus != "missing" && input.ReportStatus != "draft" && input.ReportStatus != "submitted" && input.ReportStatus != "reviewed" {
 				return "", fmt.Errorf("invalid report_status")
 			}
@@ -160,7 +190,7 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	}
 	knowledgeTool, err := toolutils.InferTool[searchInput, string](
 		"search_knowledge",
-		"搜索已审核的知识库文件和说明，回答流程问题时优先调用。",
+		"使用关键词与语义混合检索已审核知识库的 Markdown 说明以及 PDF、DOCX、XLSX、Markdown、TXT 正文；回答流程、制度、资料内容或链接位置时优先调用。",
 		func(ctx context.Context, input searchInput) (string, error) {
 			query := strings.TrimSpace(input.Query)
 			if query == "" {
@@ -174,7 +204,7 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 			if collector := business.KnowledgeSourceCollectorFrom(ctx); collector != nil {
 				collector.Add(items)
 			}
-			return marshal(knowledgeSearchResult{Query: query, Sources: sources})
+			return marshalKnowledgeSearchResult(query, sources)
 		},
 	)
 	if err != nil {
@@ -244,7 +274,7 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 			reports = mergeReports(reports, reviewed, scope, identity.UserID)
 			result := reportMaterialsResult{PeriodID: input.PeriodID, Scope: scope, Offset: input.Offset, Limit: limit, TotalReports: len(reports), Materials: make([]reportMaterial, 0, limit)}
 			if input.Offset >= len(reports) {
-				return marshal(result)
+				return marshalReportMaterialsResult(result)
 			}
 			end := input.Offset + limit
 			if end > len(reports) {
@@ -268,7 +298,7 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 				body, truncated := truncateReportBody(version.BodyMarkdown)
 				result.Materials = append(result.Materials, reportMaterial{ReportID: item.ID, Version: version.Version, AuthorID: item.AuthorID, AuthorName: item.AuthorName, Status: version.Status, Title: version.Title, BodyMarkdown: body, ParseStatus: version.ParseStatus, ParseError: version.ParseError, ParsedJSON: version.ParsedJSON, Truncated: truncated})
 			}
-			return marshal(result)
+			return marshalReportMaterialsResult(result)
 		},
 	)
 	if err != nil {
@@ -342,8 +372,225 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 
 const (
 	maxReportMaterialsPerPage = 8
-	maxReportBodyRunes        = 12000
+	// A single report is intentionally bounded well below the previous 12k
+	// rune limit.  The page-level budget below is the stronger guard: eight
+	// reports cannot expand the tool result to eight times this value.
+	maxReportBodyRunes = 4000
+	// This budget applies to the report bodies before the JSON envelope is
+	// encoded.  It leaves room for report metadata and the model's prompt.
+	maxReportMaterialsBodyRunes = 12000
+	// The final serialized tool result is also bounded.  Eino appends tool
+	// output to the model context, so this protects the context from large
+	// report bodies and parsed JSON together.
+	maxReportMaterialsOutputRunes = 16000
+	maxReportParsedJSONRunes      = 1024
+	maxReportMetadataRunes        = 256
+	// search_knowledge is also a tool response and is appended to the model
+	// context. Keep its complete serialized payload below 12k runes even when
+	// the API returns eight sources with long descriptions.
+	maxKnowledgeToolOutputRunes      = 12000
+	maxKnowledgeToolDescriptionRunes = 2000
+	maxKnowledgeToolExcerptRunes     = 600
+	maxKnowledgeToolTextRunes        = 256
+	maxKnowledgeToolURLRunes         = 2048
+	maxKnowledgeToolSources          = 8
 )
+
+// marshalKnowledgeSearchResult applies a second, tool-specific budget after
+// BuildKnowledgeSources has created the safe source projection.  The
+// projection is deliberately useful for the UI, but sending eight 4000-rune
+// descriptions to the model would still consume most of its context.
+func marshalKnowledgeSearchResult(query string, sources []business.KnowledgeSource) (string, error) {
+	result := boundKnowledgeSearchResult(query, sources)
+	for {
+		data, err := json.Marshal(result)
+		if err != nil {
+			return "", err
+		}
+		if len([]rune(string(data))) <= maxKnowledgeToolOutputRunes {
+			return string(data), nil
+		}
+
+		index, field := largestKnowledgeText(result.Sources)
+		if index >= 0 {
+			var current string
+			switch field {
+			case knowledgeTextDescription:
+				current = result.Sources[index].Description
+			case knowledgeTextExcerpt:
+				current = result.Sources[index].Excerpt
+			}
+			currentRunes := len([]rune(current))
+			excess := len([]rune(string(data))) - maxKnowledgeToolOutputRunes
+			target := currentRunes - excess - 1
+			if target < 0 {
+				target = 0
+			}
+			trimmed := truncateToolRunes(current, target)
+			if len([]rune(trimmed)) >= currentRunes {
+				trimmed = ""
+			}
+			switch field {
+			case knowledgeTextDescription:
+				result.Sources[index].Description = trimmed
+			case knowledgeTextExcerpt:
+				result.Sources[index].Excerpt = trimmed
+			}
+			result.Truncated = true
+			continue
+		}
+
+		// Descriptions and excerpts are gone.  Drop optional ranking metadata
+		// before removing sources; ID, name and links remain available to the
+		// model for citations.
+		if stripKnowledgeOptionalField(result.Sources) {
+			result.Truncated = true
+			continue
+		}
+		if len(result.Sources) > 1 {
+			result.OmittedSources++
+			result.Sources = result.Sources[:len(result.Sources)-1]
+			result.Truncated = true
+			continue
+		}
+
+		// A single source should fit after the initial field bounds.  If an
+		// unusually long required field still exceeds the budget, retain its
+		// identity and trim the optional link fields as a last resort.
+		if len(result.Sources) == 1 {
+			source := &result.Sources[0]
+			if source.URL != "" {
+				source.URL = ""
+				result.Truncated = true
+				continue
+			}
+			if source.DownloadURL != "" {
+				source.DownloadURL = ""
+				result.Truncated = true
+				continue
+			}
+			source.Name = truncateToolRunes(source.Name, maxKnowledgeToolTextRunes/2)
+			result.Truncated = true
+			continue
+		}
+		// No reducible field remains.  This is only reachable for malformed
+		// input with an enormous required field; return the bounded projection
+		// rather than looping forever.
+		return string(data), nil
+	}
+}
+
+func boundKnowledgeSearchResult(query string, sources []business.KnowledgeSource) knowledgeSearchResult {
+	capacity := len(sources)
+	if capacity > maxKnowledgeToolSources {
+		capacity = maxKnowledgeToolSources
+	}
+	result := knowledgeSearchResult{Query: truncateToolRunes(query, maxKnowledgeToolTextRunes), Sources: make([]business.KnowledgeSource, 0, capacity)}
+	if result.Query != query {
+		result.Truncated = true
+	}
+	for _, source := range sources {
+		if len(result.Sources) >= maxKnowledgeToolSources {
+			result.OmittedSources++
+			result.Truncated = true
+			continue
+		}
+		bounded := source
+		var changed bool
+		bounded.Name, changed = truncateKnowledgeText(bounded.Name, maxKnowledgeToolTextRunes)
+		result.Truncated = result.Truncated || changed
+		bounded.Description, changed = truncateKnowledgeText(bounded.Description, maxKnowledgeToolDescriptionRunes)
+		result.Truncated = result.Truncated || changed
+		bounded.Excerpt, changed = truncateKnowledgeText(bounded.Excerpt, maxKnowledgeToolExcerptRunes)
+		result.Truncated = result.Truncated || changed
+		bounded.CategoryName, changed = truncateKnowledgeText(bounded.CategoryName, maxKnowledgeToolTextRunes)
+		result.Truncated = result.Truncated || changed
+		bounded.Type, changed = truncateKnowledgeText(bounded.Type, maxKnowledgeToolTextRunes)
+		result.Truncated = result.Truncated || changed
+		bounded.SourceKind, changed = truncateKnowledgeText(bounded.SourceKind, maxKnowledgeToolTextRunes)
+		result.Truncated = result.Truncated || changed
+		bounded.MatchMode, changed = truncateKnowledgeText(bounded.MatchMode, maxKnowledgeToolTextRunes)
+		result.Truncated = result.Truncated || changed
+		bounded.CreatedAt, changed = truncateKnowledgeText(bounded.CreatedAt, maxKnowledgeToolTextRunes)
+		result.Truncated = result.Truncated || changed
+		// A shortened URL is not a usable link.  Keep normal links intact and
+		// omit only an abnormally long value; the source ID/name remain useful.
+		if len([]rune(bounded.URL)) > maxKnowledgeToolURLRunes {
+			bounded.URL = ""
+			result.Truncated = true
+		}
+		if len([]rune(bounded.DownloadURL)) > maxKnowledgeToolURLRunes {
+			bounded.DownloadURL = ""
+			result.Truncated = true
+		}
+		result.Sources = append(result.Sources, bounded)
+	}
+	return result
+}
+
+func truncateKnowledgeText(value string, limit int) (string, bool) {
+	trimmed := truncateToolRunes(value, limit)
+	return trimmed, trimmed != value
+}
+
+func truncateToolRunes(value string, limit int) string {
+	if limit <= 0 {
+		if value == "" {
+			return ""
+		}
+		return "…"
+	}
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit]) + "…"
+}
+
+type knowledgeTextField uint8
+
+const (
+	knowledgeTextNone knowledgeTextField = iota
+	knowledgeTextDescription
+	knowledgeTextExcerpt
+)
+
+func largestKnowledgeText(sources []business.KnowledgeSource) (int, knowledgeTextField) {
+	index, field, size := -1, knowledgeTextNone, 0
+	for i := range sources {
+		if current := len([]rune(sources[i].Description)); current > size {
+			index, field, size = i, knowledgeTextDescription, current
+		}
+		if current := len([]rune(sources[i].Excerpt)); current > size {
+			index, field, size = i, knowledgeTextExcerpt, current
+		}
+	}
+	return index, field
+}
+
+func stripKnowledgeOptionalField(sources []business.KnowledgeSource) bool {
+	for i := len(sources) - 1; i >= 0; i-- {
+		source := &sources[i]
+		switch {
+		case source.CreatedAt != "":
+			source.CreatedAt = ""
+			return true
+		case source.MatchMode != "":
+			source.MatchMode = ""
+			return true
+		case source.SourceKind != "":
+			source.SourceKind = ""
+			return true
+		case source.CategoryName != "":
+			source.CategoryName = ""
+			return true
+		case source.Type != "":
+			source.Type = ""
+			return true
+		}
+	}
+	return false
+}
 
 func mergeReports(submitted, reviewed []business.Report, scope string, userID int64) []business.Report {
 	result := make([]business.Report, 0, len(submitted)+len(reviewed))
@@ -363,11 +610,180 @@ func mergeReports(submitted, reviewed []business.Report, scope string, userID in
 }
 
 func truncateReportBody(value string) (string, bool) {
+	return truncateReportBodyTo(value, maxReportBodyRunes)
+}
+
+// truncateReportBodyTo keeps the existing truncation marker contract while
+// allowing the page-level budget to allocate a smaller share to each report.
+// The limit is the number of source runes retained before the marker.
+func truncateReportBodyTo(value string, limit int) (string, bool) {
+	if limit < 0 {
+		limit = 0
+	}
 	runes := []rune(value)
-	if len(runes) <= maxReportBodyRunes {
+	if len(runes) <= limit {
 		return value, false
 	}
-	return string(runes[:maxReportBodyRunes]) + "…", true
+	return string(runes[:limit]) + "…", true
+}
+
+// marshalReportMaterialsResult bounds both the report bodies and the final
+// serialized result.  Tool output is part of the model context, therefore a
+// per-item limit alone is insufficient when a page contains eight reports.
+func marshalReportMaterialsResult(result reportMaterialsResult) (string, error) {
+	result = boundReportMaterials(result)
+	data, err := json.Marshal(result)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func boundReportMaterials(result reportMaterialsResult) reportMaterialsResult {
+	materials := make([]reportMaterial, len(result.Materials))
+	copy(materials, result.Materials)
+	if len(materials) > maxReportMaterialsPerPage {
+		result.SkippedReports += len(materials) - maxReportMaterialsPerPage
+		materials = materials[:maxReportMaterialsPerPage]
+	}
+	result.Scope = truncateMetadata(result.Scope)
+
+	// Normalize fields that can otherwise bypass the body budget.  ParsedJSON
+	// is useful for structured reports, but an unexpectedly large parser result
+	// should not be copied wholesale into the LLM context.
+	for i := range materials {
+		materials[i].AuthorName = truncateMetadata(materials[i].AuthorName)
+		materials[i].Status = truncateMetadata(materials[i].Status)
+		materials[i].Title = truncateMetadata(materials[i].Title)
+		materials[i].ParseStatus = truncateMetadata(materials[i].ParseStatus)
+		materials[i].ParseError = truncateMetadata(materials[i].ParseError)
+		if materials[i].ParsedJSON != nil {
+			if data, err := json.Marshal(materials[i].ParsedJSON); err != nil || len([]rune(string(data))) > maxReportParsedJSONRunes {
+				materials[i].ParsedJSON = nil
+				materials[i].Truncated = true
+			}
+		}
+	}
+
+	// Allocate the body budget fairly across the remaining reports.  A short
+	// report leaves budget for later reports on the same page.
+	remaining := maxReportMaterialsBodyRunes
+	remainingReports := len(materials)
+	for i := range materials {
+		if remainingReports <= 0 {
+			break
+		}
+		share := remaining / remainingReports
+		if remaining%remainingReports != 0 {
+			share++
+		}
+		if share > maxReportBodyRunes {
+			share = maxReportBodyRunes
+		}
+		body, truncated := truncateReportBodyTo(materials[i].BodyMarkdown, share)
+		materials[i].BodyMarkdown = body
+		materials[i].Truncated = materials[i].Truncated || truncated
+		used := len([]rune(body))
+		if used > remaining {
+			used = remaining
+		}
+		remaining -= used
+		remainingReports--
+	}
+	result.Materials = materials
+
+	// The body allocation leaves room for metadata, but parsed JSON and JSON
+	// escaping can still push the envelope over the hard limit.  Trim the
+	// largest body until the serialized result fits, then drop parsed JSON as a
+	// final data-preserving fallback.
+	for {
+		data, err := json.Marshal(result)
+		if err != nil || len([]rune(string(data))) <= maxReportMaterialsOutputRunes {
+			break
+		}
+		index := largestReportBody(result.Materials)
+		if index < 0 {
+			index = largestParsedReport(result.Materials)
+			if index < 0 {
+				// User supplied names and parser error strings can contain control
+				// characters that JSON expands substantially.  If all bodies and
+				// parsed payloads are already gone, strip optional text metadata as
+				// the final bounded fallback while retaining IDs and status markers.
+				stripped := false
+				for i := range result.Materials {
+					item := &result.Materials[i]
+					if item.AuthorName != "" || item.Status != "" || item.Title != "" || item.ParseStatus != "" || item.ParseError != "" {
+						item.AuthorName = ""
+						item.Status = ""
+						item.Title = ""
+						item.ParseStatus = ""
+						item.ParseError = ""
+						item.Truncated = true
+						stripped = true
+					}
+				}
+				if !stripped {
+					break
+				}
+				continue
+			}
+			result.Materials[index].ParsedJSON = nil
+			result.Materials[index].Truncated = true
+			continue
+		}
+		bodyRunes := len([]rune(result.Materials[index].BodyMarkdown))
+		excess := len([]rune(string(data))) - maxReportMaterialsOutputRunes
+		// Account for the marker that truncateReportBodyTo appends when it
+		// shortens a body.  Removing at least excess+1 source runes guarantees
+		// progress even when the body contains JSON-escaped characters.
+		target := bodyRunes - excess - 1
+		if target < 0 {
+			target = 0
+		}
+		body, _ := truncateReportBodyTo(result.Materials[index].BodyMarkdown, target)
+		if len([]rune(body)) >= bodyRunes {
+			body = ""
+		}
+		result.Materials[index].BodyMarkdown = body
+		result.Materials[index].Truncated = true
+	}
+
+	return result
+}
+
+func truncateMetadata(value string) string {
+	runes := []rune(value)
+	if len(runes) <= maxReportMetadataRunes {
+		return value
+	}
+	return string(runes[:maxReportMetadataRunes]) + "…"
+}
+
+func largestReportBody(materials []reportMaterial) int {
+	index, size := -1, 0
+	for i := range materials {
+		if current := len([]rune(materials[i].BodyMarkdown)); current > size {
+			index, size = i, current
+		}
+	}
+	return index
+}
+
+func largestParsedReport(materials []reportMaterial) int {
+	index, size := -1, 0
+	for i := range materials {
+		if materials[i].ParsedJSON == nil {
+			continue
+		}
+		data, err := json.Marshal(materials[i].ParsedJSON)
+		if err != nil {
+			return i
+		}
+		if current := len(data); current > size {
+			index, size = i, current
+		}
+	}
+	return index
 }
 
 func operationKey(requestID, action string) string {

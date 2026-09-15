@@ -62,5 +62,6 @@ retrieval:
   min_vector_score: 0.3
   chunk_runes: 600
   chunk_overlap_runes: 80
+  max_chunks: 10000
   max_extracted_runes: 500000
   worker_interval: 5s

@@ -43,7 +43,7 @@ func NewClient(baseURL, internalSecret string, timeout time.Duration) (*Client, 
 		return nil, fmt.Errorf("business server URL is required")
 	}
 	parsed, err := url.Parse(baseURL)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return nil, fmt.Errorf("business server URL is invalid")
 	}
 	if timeout <= 0 {
@@ -59,14 +59,19 @@ type CheckinStatus struct {
 }
 
 type KnowledgeItem struct {
-	ID           int64  `json:"id"`
-	Type         string `json:"type"`
-	Name         string `json:"name"`
-	Description  string `json:"description,omitempty"`
-	URL          string `json:"url,omitempty"`
-	CategoryName string `json:"category_name"`
-	Status       string `json:"status"`
-	CreatedAt    string `json:"created_at"`
+	ID           int64   `json:"id"`
+	Type         string  `json:"type"`
+	Name         string  `json:"name"`
+	Description  string  `json:"description,omitempty"`
+	URL          string  `json:"url,omitempty"`
+	DownloadURL  string  `json:"download_url,omitempty"`
+	CategoryName string  `json:"category_name"`
+	SourceKind   string  `json:"source_kind,omitempty"`
+	Excerpt      string  `json:"excerpt,omitempty"`
+	Score        float64 `json:"score,omitempty"`
+	MatchMode    string  `json:"match_mode,omitempty"`
+	Status       string  `json:"status,omitempty"`
+	CreatedAt    string  `json:"created_at,omitempty"`
 }
 
 type KnowledgeRecommendation struct {
@@ -83,13 +88,18 @@ type KnowledgeRecommendation struct {
 // KnowledgeSource is the safe, user-facing projection of a knowledge item.
 // It deliberately excludes FileKey and other storage details.
 type KnowledgeSource struct {
-	ID           int64  `json:"id"`
-	Type         string `json:"type"`
-	Name         string `json:"name"`
-	Description  string `json:"description,omitempty"`
-	URL          string `json:"url,omitempty"`
-	CategoryName string `json:"category_name"`
-	CreatedAt    string `json:"created_at,omitempty"`
+	ID           int64   `json:"id"`
+	Type         string  `json:"type"`
+	Name         string  `json:"name"`
+	Description  string  `json:"description,omitempty"`
+	URL          string  `json:"url,omitempty"`
+	DownloadURL  string  `json:"download_url,omitempty"`
+	CategoryName string  `json:"category_name"`
+	SourceKind   string  `json:"source_kind,omitempty"`
+	Excerpt      string  `json:"excerpt,omitempty"`
+	Score        float64 `json:"score,omitempty"`
+	MatchMode    string  `json:"match_mode,omitempty"`
+	CreatedAt    string  `json:"created_at,omitempty"`
 }
 
 const (
@@ -118,7 +128,12 @@ func BuildKnowledgeSources(items []KnowledgeItem) []KnowledgeSource {
 			Name:         item.Name,
 			Description:  item.Description,
 			URL:          item.URL,
+			DownloadURL:  item.DownloadURL,
 			CategoryName: item.CategoryName,
+			SourceKind:   item.SourceKind,
+			Excerpt:      truncateRunes(item.Excerpt, maxKnowledgeExcerptRunes),
+			Score:        item.Score,
+			MatchMode:    item.MatchMode,
 			CreatedAt:    item.CreatedAt,
 		})
 	}
@@ -127,6 +142,7 @@ func BuildKnowledgeSources(items []KnowledgeItem) []KnowledgeSource {
 
 func KnowledgeSourceExcerpt(source KnowledgeSource) KnowledgeSource {
 	source.Description = truncateRunes(source.Description, maxKnowledgeExcerptRunes)
+	source.Excerpt = truncateRunes(source.Excerpt, maxKnowledgeExcerptRunes)
 	return source
 }
 
@@ -177,6 +193,26 @@ func (c *KnowledgeSourceCollector) Add(items []KnowledgeItem) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, source := range BuildKnowledgeSources(items) {
+		if len(c.sources) >= maxKnowledgeSources {
+			return
+		}
+		if source.ID != 0 {
+			if _, ok := c.seen[source.ID]; ok {
+				continue
+			}
+			c.seen[source.ID] = struct{}{}
+		}
+		c.sources = append(c.sources, KnowledgeSourceExcerpt(source))
+	}
+}
+
+func (c *KnowledgeSourceCollector) AddSources(items []KnowledgeSource) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, source := range items {
 		if len(c.sources) >= maxKnowledgeSources {
 			return
 		}
@@ -316,9 +352,9 @@ func (c *Client) ClockOut(ctx context.Context, idempotencyKey string) (map[strin
 
 func (c *Client) SearchKnowledge(ctx context.Context, query string) ([]KnowledgeItem, error) {
 	params := url.Values{}
-	params.Set("search", query)
+	params.Set("q", query)
 	var result []KnowledgeItem
-	err := c.do(ctx, http.MethodGet, "/api/knowledge/items", params, nil, &result)
+	err := c.do(ctx, http.MethodGet, "/api/knowledge/search", params, nil, &result)
 	return result, err
 }
 
@@ -359,18 +395,29 @@ func (c *Client) QueryTeam(ctx context.Context, period string, periodID int64, m
 }
 
 func (c *Client) ListReports(ctx context.Context, periodID int64, status string) ([]Report, error) {
-	params := url.Values{}
-	if periodID > 0 {
-		params.Set("period_id", fmt.Sprintf("%d", periodID))
+	const pageSize = 100
+	const maxPages = 100
+	result := make([]Report, 0)
+	for page := 1; page <= maxPages; page++ {
+		params := url.Values{}
+		if periodID > 0 {
+			params.Set("period_id", fmt.Sprintf("%d", periodID))
+		}
+		if status != "" {
+			params.Set("status", status)
+		}
+		params.Set("page", fmt.Sprintf("%d", page))
+		params.Set("page_size", fmt.Sprintf("%d", pageSize))
+		var batch []Report
+		if err := c.do(ctx, http.MethodGet, "/api/reports", params, nil, &batch); err != nil {
+			return nil, err
+		}
+		result = append(result, batch...)
+		if len(batch) < pageSize {
+			break
+		}
 	}
-	if status != "" {
-		params.Set("status", status)
-	}
-	params.Set("page", "1")
-	params.Set("page_size", "100")
-	var result []Report
-	err := c.do(ctx, http.MethodGet, "/api/reports", params, nil, &result)
-	return result, err
+	return result, nil
 }
 
 func (c *Client) GetReportVersion(ctx context.Context, reportID int64, version int) (ReportVersion, error) {

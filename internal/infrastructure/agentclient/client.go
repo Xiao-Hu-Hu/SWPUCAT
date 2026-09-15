@@ -27,7 +27,7 @@ func NewClient(baseURL, internalSecret string, timeout time.Duration) (*Client, 
 		return nil, fmt.Errorf("agent base URL is required")
 	}
 	parsed, err := url.Parse(baseURL)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return nil, fmt.Errorf("agent base URL is invalid")
 	}
 	if timeout <= 0 {
@@ -41,10 +41,26 @@ func NewClient(baseURL, internalSecret string, timeout time.Duration) (*Client, 
 }
 
 type ChatRequest struct {
-	Message   string `json:"message"`
-	SessionID string `json:"session_id,omitempty"`
-	UserID    int64  `json:"user_id"`
-	Role      string `json:"role"`
+	Message          string            `json:"message"`
+	SessionID        string            `json:"session_id,omitempty"`
+	UserID           int64             `json:"user_id"`
+	Role             string            `json:"role"`
+	HistoryProvided  bool              `json:"history_provided,omitempty"`
+	History          []HistoryMessage  `json:"history,omitempty"`
+	RollingSummary   string            `json:"rolling_summary,omitempty"`
+	KnowledgeContext []KnowledgeSource `json:"knowledge_context,omitempty"`
+	PreviousSources  []KnowledgeSource `json:"previous_sources,omitempty"`
+}
+
+// HistoryMessage is the server-owned, already authorized conversation context
+// sent to the private Agent process. The Agent never uses a session identifier
+// as an authorization boundary; the main server has filtered these messages by
+// (user_id, session_id) before making this request.
+type HistoryMessage struct {
+	Role       string `json:"role"`
+	Content    string `json:"content"`
+	ToolName   string `json:"tool_name,omitempty"`
+	ToolResult string `json:"tool_result,omitempty"`
 }
 
 type ChatResponse struct {
@@ -54,13 +70,18 @@ type ChatResponse struct {
 }
 
 type KnowledgeSource struct {
-	ID           int64  `json:"id"`
-	Type         string `json:"type"`
-	Name         string `json:"name"`
-	Description  string `json:"description,omitempty"`
-	URL          string `json:"url,omitempty"`
-	CategoryName string `json:"category_name"`
-	CreatedAt    string `json:"created_at,omitempty"`
+	ID           int64   `json:"id"`
+	Type         string  `json:"type"`
+	Name         string  `json:"name"`
+	Description  string  `json:"description,omitempty"`
+	URL          string  `json:"url,omitempty"`
+	DownloadURL  string  `json:"download_url,omitempty"`
+	CategoryName string  `json:"category_name"`
+	SourceKind   string  `json:"source_kind,omitempty"`
+	Excerpt      string  `json:"excerpt,omitempty"`
+	Score        float64 `json:"score,omitempty"`
+	MatchMode    string  `json:"match_mode,omitempty"`
+	CreatedAt    string  `json:"created_at,omitempty"`
 }
 
 type apiResponse struct {
