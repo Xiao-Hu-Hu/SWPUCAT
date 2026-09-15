@@ -1,8 +1,8 @@
 // Package textextract extracts indexable text from knowledge-base attachments.
 //
-// It intentionally has no dependencies beyond the Go standard library.  The
-// Office formats are ZIP packages, so their XML parts can be read without
-// loading an office-suite runtime into the server image.
+// Office formats are read directly from their ZIP/XML structure and PDF files
+// are parsed in process by a pure-Go reader, so no office suite or external
+// command is required in the server image.
 package textextract
 
 import (
@@ -17,14 +17,15 @@ import (
 )
 
 var (
-	ErrUnsupportedFormat        = errors.New("unsupported document format")
-	ErrPDFExtractionUnavailable = errors.New("pdf extraction is not configured")
-	ErrInputTooLarge            = errors.New("input exceeds extraction limit")
-	ErrArchiveTooLarge          = errors.New("archive exceeds extraction limit")
-	ErrTooManyArchiveEntries    = errors.New("archive has too many entries")
-	ErrSuspiciousArchive        = errors.New("archive compression ratio exceeds limit")
-	ErrTextTooLarge             = errors.New("extracted text exceeds limit")
-	ErrMalformedDocument        = errors.New("malformed office document")
+	ErrUnsupportedFormat     = errors.New("unsupported document format")
+	ErrInputTooLarge         = errors.New("input exceeds extraction limit")
+	ErrArchiveTooLarge       = errors.New("archive exceeds extraction limit")
+	ErrTooManyArchiveEntries = errors.New("archive has too many entries")
+	ErrSuspiciousArchive     = errors.New("archive compression ratio exceeds limit")
+	ErrTextTooLarge          = errors.New("extracted text exceeds limit")
+	ErrMalformedDocument     = errors.New("malformed office document")
+	ErrMalformedPDF          = errors.New("malformed or unsupported pdf document")
+	ErrTooManyPDFPages       = errors.New("pdf has too many pages")
 )
 
 // Format identifies the source format used to produce Result.Text.
@@ -47,6 +48,7 @@ type Limits struct {
 	MaxTextBytes         int64
 	MaxSharedStringBytes int64
 	MaxCompressionRatio  int64
+	MaxPDFPages          int
 }
 
 func DefaultLimits() Limits {
@@ -58,6 +60,7 @@ func DefaultLimits() Limits {
 		MaxTextBytes:         2 << 20,
 		MaxSharedStringBytes: 2 << 20,
 		MaxCompressionRatio:  100,
+		MaxPDFPages:          200,
 	}
 }
 
@@ -83,6 +86,9 @@ func (l Limits) withDefaults() Limits {
 	}
 	if l.MaxCompressionRatio <= 0 {
 		l.MaxCompressionRatio = d.MaxCompressionRatio
+	}
+	if l.MaxPDFPages <= 0 {
+		l.MaxPDFPages = d.MaxPDFPages
 	}
 	return l
 }
@@ -144,9 +150,15 @@ func (e *Extractor) Extract(ctx context.Context, filename string, source io.Read
 		}
 		return Result{Format: format, Text: strings.TrimSpace(text)}, nil
 	case ".pdf":
-		// PDF has no safe standard-library text parser.  Keep the explicit branch
-		// so callers can queue it for an optional isolated PDF worker later.
-		return Result{}, ErrPDFExtractionUnavailable
+		data, err := readArchive(ctx, source, e.limits.MaxInputBytes)
+		if err != nil {
+			return Result{}, fmt.Errorf("read pdf: %w", err)
+		}
+		text, err := extractPDF(ctx, data, e.limits)
+		if err != nil {
+			return Result{}, err
+		}
+		return Result{Format: FormatPDF, Text: strings.TrimSpace(text)}, nil
 	default:
 		return Result{}, fmt.Errorf("%w: %s", ErrUnsupportedFormat, ext)
 	}

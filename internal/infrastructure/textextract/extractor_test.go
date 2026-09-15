@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -73,11 +74,70 @@ func TestExtractRejectsArchiveBombAndTooManyEntries(t *testing.T) {
 	}
 }
 
-func TestExtractPDFHasExplicitUnavailableResult(t *testing.T) {
-	_, err := New(DefaultLimits()).Extract(context.Background(), "manual.pdf", strings.NewReader("%PDF"))
-	if !errors.Is(err, ErrPDFExtractionUnavailable) {
-		t.Fatalf("got %v", err)
+func TestExtractPDF(t *testing.T) {
+	file := makePDF(t, "Knowledge PDF text")
+	got, err := New(DefaultLimits()).Extract(context.Background(), "manual.PDF", bytes.NewReader(file))
+	if err != nil {
+		t.Fatal(err)
 	}
+	if got.Format != FormatPDF || !strings.Contains(got.Text, "Knowledge PDF text") {
+		t.Fatalf("got %#v", got)
+	}
+}
+
+func TestExtractPDFRejectsMalformedAndBoundsOutput(t *testing.T) {
+	_, err := New(DefaultLimits()).Extract(context.Background(), "manual.pdf", strings.NewReader("not a pdf"))
+	if !errors.Is(err, ErrMalformedPDF) {
+		t.Fatalf("malformed error = %v", err)
+	}
+
+	file := makePDF(t, strings.Repeat("x", 80))
+	_, err = New(Limits{MaxInputBytes: int64(len(file) + 1), MaxTextBytes: 20}).Extract(context.Background(), "large.pdf", bytes.NewReader(file))
+	if !errors.Is(err, ErrTextTooLarge) {
+		t.Fatalf("text limit error = %v", err)
+	}
+
+	tooManyPages := bytes.Replace(makePDF(t, "text"), []byte("/Count 1"), []byte("/Count 9"), 1)
+	_, err = New(Limits{MaxPDFPages: 2}).Extract(context.Background(), "pages.pdf", bytes.NewReader(tooManyPages))
+	if !errors.Is(err, ErrTooManyPDFPages) {
+		t.Fatalf("page limit error = %v", err)
+	}
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = New(DefaultLimits()).Extract(canceled, "manual.pdf", bytes.NewReader(file))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled error = %v", err)
+	}
+}
+
+func makePDF(t *testing.T, content string) []byte {
+	t.Helper()
+	content = strings.ReplaceAll(content, `\`, `\\`)
+	content = strings.ReplaceAll(content, "(", `\(`)
+	content = strings.ReplaceAll(content, ")", `\)`)
+	stream := "BT /F1 12 Tf 72 720 Td (" + content + ") Tj ET"
+	objects := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(stream), stream),
+	}
+	var b bytes.Buffer
+	b.WriteString("%PDF-1.4\n")
+	offsets := make([]int, len(objects)+1)
+	for i, object := range objects {
+		offsets[i+1] = b.Len()
+		fmt.Fprintf(&b, "%d 0 obj\n%s\nendobj\n", i+1, object)
+	}
+	xref := b.Len()
+	fmt.Fprintf(&b, "xref\n0 %d\n0000000000 65535 f \n", len(objects)+1)
+	for i := 1; i <= len(objects); i++ {
+		fmt.Fprintf(&b, "%010d 00000 n \n", offsets[i])
+	}
+	fmt.Fprintf(&b, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(objects)+1, xref)
+	return b.Bytes()
 }
 
 func makeZIP(t *testing.T, entries map[string]string) []byte {
