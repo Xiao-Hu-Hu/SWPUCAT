@@ -73,7 +73,7 @@ function resetDraft() {
 }
 
 async function createNewConversation() {
-  if (creatingConversation.value || loading.value || historyLoading.value) return
+  if (creatingConversation.value || conversationsLoading.value || loading.value || historyLoading.value) return
   creatingConversation.value = true
   try {
     const res = await agentApi.createConversation()
@@ -170,7 +170,7 @@ async function refreshConversationList() {
 
 async function sendMessage() {
   const message = input.value.trim()
-  if (!message || loading.value || historyLoading.value) return
+  if (!message || conversationsLoading.value || loading.value || historyLoading.value) return
   if (!(await ensureConversation())) return
 
   const targetSessionId = sessionId.value
@@ -293,7 +293,7 @@ async function downloadSource(source: AgentKnowledgeSource) {
       <aside class="conversation-panel">
         <div class="conversation-panel-header">
           <span class="conversation-panel-title">会话记录</span>
-          <el-button text circle :loading="creatingConversation" aria-label="新建会话" @click="createNewConversation">
+          <el-button text circle :loading="creatingConversation" :disabled="conversationsLoading" aria-label="新建会话" @click="createNewConversation">
             <el-icon><Plus /></el-icon>
           </el-button>
         </div>
@@ -302,7 +302,7 @@ async function downloadSource(source: AgentKnowledgeSource) {
           type="primary"
           plain
           :loading="creatingConversation"
-          :disabled="loading || historyLoading"
+          :disabled="conversationsLoading || loading || historyLoading"
           @click="createNewConversation"
         >
           <el-icon><Plus /></el-icon>
@@ -388,13 +388,13 @@ async function downloadSource(source: AgentKnowledgeSource) {
             maxlength="4000"
             show-word-limit
             resize="none"
-            :disabled="historyLoading"
+            :disabled="conversationsLoading || historyLoading"
             placeholder="例如：帮我打卡上班，或者查一下本周的打卡情况"
             @keydown="handleKeydown"
           />
           <div class="composer-footer">
             <span>Enter 发送，Shift + Enter 换行</span>
-            <el-button type="primary" :loading="loading" :disabled="historyLoading || !input.trim()" @click="sendMessage">发送</el-button>
+            <el-button type="primary" :loading="loading" :disabled="conversationsLoading || historyLoading || !input.trim()" @click="sendMessage">发送</el-button>
           </div>
         </div>
       </section>

@@ -128,6 +128,49 @@ func TestServiceScopesSameSessionIDToItsOwner(t *testing.T) {
 	}
 }
 
+func TestNewConversationGetsDefaultTitleAndFirstTurnTitle(t *testing.T) {
+	repo := newFakeConversationRepo()
+	service := NewService(repo)
+	ctx := context.Background()
+
+	created, err := service.GetOrCreate(ctx, 7, "new-session", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Title != conversation.DefaultTitle {
+		t.Fatalf("default title = %q", created.Title)
+	}
+	updated, err := service.RecordTurn(ctx, 7, created.SessionID, RecordTurnRequest{
+		UserContent:      "请帮我查询本周的打卡记录",
+		AssistantContent: "好的，我来查询。",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Title != "请帮我查询本周的打卡记录" {
+		t.Fatalf("auto title = %q", updated.Title)
+	}
+}
+
+func TestListRecentOnlyReturnsOwnedConversations(t *testing.T) {
+	repo := newFakeConversationRepo()
+	service := NewService(repo)
+	ctx := context.Background()
+	if _, err := service.GetOrCreate(ctx, 7, "owner-session", "自己的会话"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.GetOrCreate(ctx, 8, "other-session", "别人的会话"); err != nil {
+		t.Fatal(err)
+	}
+	items, err := service.ListRecent(ctx, 7, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Title != "自己的会话" {
+		t.Fatalf("owned conversations = %+v", items)
+	}
+}
+
 func TestRecordTurnStoresChronologicalMessagesAndRollingSummary(t *testing.T) {
 	repo := newFakeConversationRepo()
 	service := NewService(repo)
