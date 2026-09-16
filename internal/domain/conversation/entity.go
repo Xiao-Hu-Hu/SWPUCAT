@@ -10,6 +10,7 @@ import (
 )
 
 const (
+	DefaultTitle      = "新会话"
 	MaxSessionIDRunes = 128
 	MaxTitleRunes     = 256
 	MaxSummaryRunes   = 32000

@@ -11,6 +11,7 @@ import (
 type Repository interface {
 	Create(ctx context.Context, item *Conversation) error
 	FindBySession(ctx context.Context, userID int64, sessionID string) (*Conversation, error)
+	ListRecent(ctx context.Context, userID int64, limit int) ([]*Conversation, error)
 	ListRecentMessages(ctx context.Context, userID int64, sessionID string, limit int) ([]*Message, error)
-	RecordTurn(ctx context.Context, userID int64, sessionID string, userMessage, assistantMessage *Message, summary, lastSourcesJSON string, activeAt time.Time) error
+	RecordTurn(ctx context.Context, userID int64, sessionID, title string, userMessage, assistantMessage *Message, summary, lastSourcesJSON string, activeAt time.Time) error
 }

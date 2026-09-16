@@ -17,6 +17,8 @@ import (
 
 	conversationapp "SWPUCAT/internal/application/conversation"
 	"SWPUCAT/internal/application/knowledgeindex"
+	"SWPUCAT/internal/domain/conversation"
+	"SWPUCAT/internal/domain/shared"
 	"SWPUCAT/internal/infrastructure/agentclient"
 
 	"github.com/gin-gonic/gin"
@@ -41,6 +43,88 @@ func NewAgentHandler(client *agentclient.Client, conversations *conversationapp.
 type agentChatRequest struct {
 	Message   string `json:"message"`
 	SessionID string `json:"session_id,omitempty"`
+}
+
+type agentCreateConversationRequest struct {
+	Title string `json:"title,omitempty"`
+}
+
+const (
+	agentConversationListLimit    = 100
+	agentConversationHistoryLimit = 200
+)
+
+func (h *AgentHandler) ListConversations(c *gin.Context) {
+	if h == nil || h.conversations == nil {
+		Error(c, http.StatusServiceUnavailable, 503, "agent service is not configured")
+		return
+	}
+	items, err := h.conversations.ListRecent(c.Request.Context(), GetUserID(c), agentConversationListLimit)
+	if err != nil {
+		InternalError(c, "failed to load agent conversations")
+		return
+	}
+	Success(c, items)
+}
+
+func (h *AgentHandler) CreateConversation(c *gin.Context) {
+	if h == nil || h.conversations == nil {
+		Error(c, http.StatusServiceUnavailable, 503, "agent service is not configured")
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16<<10)
+	var req agentCreateConversationRequest
+	if c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			BadRequest(c, "invalid request body")
+			return
+		}
+	}
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		title = conversation.DefaultTitle
+	}
+	if utf8.RuneCountInString(title) > conversation.MaxTitleRunes {
+		BadRequest(c, "title is too long")
+		return
+	}
+	sessionID, err := normalizeAgentSessionID("")
+	if err != nil {
+		InternalError(c, "failed to create agent conversation")
+		return
+	}
+	item, err := h.conversations.GetOrCreate(c.Request.Context(), GetUserID(c), sessionID, title)
+	if err != nil {
+		InternalError(c, "failed to create agent conversation")
+		return
+	}
+	Created(c, item)
+}
+
+func (h *AgentHandler) GetConversation(c *gin.Context) {
+	if h == nil || h.conversations == nil {
+		Error(c, http.StatusServiceUnavailable, 503, "agent service is not configured")
+		return
+	}
+	sessionID := strings.TrimSpace(c.Param("session_id"))
+	if sessionID == "" {
+		BadRequest(c, "session_id is required")
+		return
+	}
+	if _, err := normalizeAgentSessionID(sessionID); err != nil {
+		BadRequest(c, "session_id is invalid")
+		return
+	}
+	item, err := h.conversations.LoadContext(c.Request.Context(), GetUserID(c), sessionID, agentConversationHistoryLimit)
+	if err != nil {
+		if errors.Is(err, shared.ErrNotFound) {
+			NotFound(c, "agent conversation not found")
+			return
+		}
+		InternalError(c, "failed to load agent conversation")
+		return
+	}
+	Success(c, item)
 }
 
 func (h *AgentHandler) Chat(c *gin.Context) {

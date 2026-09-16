@@ -14,7 +14,12 @@ import (
 	"gorm.io/gorm"
 )
 
-const defaultRecentMessageLimit = 20
+const (
+	defaultRecentMessageLimit    = 20
+	defaultConversationListLimit = 100
+	maxConversationListLimit     = 200
+	maxConversationHistoryLimit  = 500
+)
 
 type Service struct {
 	repo conversation.Repository
@@ -81,6 +86,9 @@ func (s *Service) GetOrCreate(ctx context.Context, userID int64, sessionID, titl
 	if !isNotFound(err) {
 		return nil, err
 	}
+	if strings.TrimSpace(title) == "" {
+		title = conversation.DefaultTitle
+	}
 	item, err = conversation.New(userID, sessionID, title)
 	if err != nil {
 		return nil, shared.ErrValidation
@@ -97,6 +105,33 @@ func (s *Service) GetOrCreate(ctx context.Context, userID int64, sessionID, titl
 	return toConversationDTO(item), nil
 }
 
+// ListRecent returns only conversations owned by userID, ordered by the most
+// recently active turn. Empty conversations are included so a newly created
+// chat can remain visible before its first message is sent.
+func (s *Service) ListRecent(ctx context.Context, userID int64, limit int) ([]ConversationDTO, error) {
+	if s == nil || s.repo == nil || userID <= 0 {
+		return nil, shared.ErrValidation
+	}
+	if limit <= 0 {
+		limit = defaultConversationListLimit
+	}
+	if limit > maxConversationListLimit {
+		return nil, shared.ErrValidation
+	}
+	items, err := s.repo.ListRecent(ctx, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]ConversationDTO, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		result = append(result, *toConversationDTO(item))
+	}
+	return result, nil
+}
+
 func (s *Service) LoadContext(ctx context.Context, userID int64, sessionID string, limit int) (*ContextDTO, error) {
 	if s == nil || s.repo == nil || userID <= 0 || strings.TrimSpace(sessionID) == "" {
 		return nil, shared.ErrValidation
@@ -104,11 +139,14 @@ func (s *Service) LoadContext(ctx context.Context, userID int64, sessionID strin
 	if limit <= 0 {
 		limit = defaultRecentMessageLimit
 	}
-	if limit > 100 {
+	if limit > maxConversationHistoryLimit {
 		return nil, shared.ErrValidation
 	}
 	item, err := s.repo.FindBySession(ctx, userID, strings.TrimSpace(sessionID))
 	if err != nil {
+		if isNotFound(err) {
+			return nil, shared.ErrNotFound
+		}
 		return nil, err
 	}
 	messages, err := s.repo.ListRecentMessages(ctx, userID, item.SessionID, limit)
@@ -132,6 +170,9 @@ func (s *Service) RecordTurn(ctx context.Context, userID int64, sessionID string
 	}
 	item, err := s.repo.FindBySession(ctx, userID, strings.TrimSpace(sessionID))
 	if err != nil {
+		if isNotFound(err) {
+			return nil, shared.ErrNotFound
+		}
 		return nil, err
 	}
 	citations, err := normalizeJSONArray(req.CitationsJSON)
@@ -157,14 +198,31 @@ func (s *Service) RecordTurn(ctx context.Context, userID int64, sessionID string
 			return nil, shared.ErrValidation
 		}
 	}
+	if strings.TrimSpace(item.Title) == "" || item.Title == conversation.DefaultTitle {
+		item.Title = titleFromFirstMessage(req.UserContent)
+	}
 	activeAt := time.Now()
 	if err := item.UpdateContext(summary, sources, activeAt); err != nil {
 		return nil, shared.ErrValidation
 	}
-	if err := s.repo.RecordTurn(ctx, userID, item.SessionID, userMessage, assistantMessage, item.RollingSummary, item.LastSourcesJSON, item.LastActiveAt); err != nil {
+	if err := s.repo.RecordTurn(ctx, userID, item.SessionID, item.Title, userMessage, assistantMessage, item.RollingSummary, item.LastSourcesJSON, item.LastActiveAt); err != nil {
 		return nil, err
 	}
 	return toConversationDTO(item), nil
+}
+
+func titleFromFirstMessage(value string) string {
+	parts := strings.Fields(strings.TrimSpace(value))
+	if len(parts) == 0 {
+		return conversation.DefaultTitle
+	}
+	title := strings.Join(parts, " ")
+	runes := []rune(title)
+	const maxAutoTitleRunes = 48
+	if len(runes) > maxAutoTitleRunes {
+		title = string(runes[:maxAutoTitleRunes]) + "…"
+	}
+	return title
 }
 
 func normalizeJSONArray(value string) (string, error) {

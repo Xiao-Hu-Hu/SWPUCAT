@@ -41,6 +41,21 @@ func (r *fakeConversationRepo) FindBySession(_ context.Context, userID int64, se
 	return &copy, nil
 }
 
+func (r *fakeConversationRepo) ListRecent(_ context.Context, userID int64, limit int) ([]*conversation.Conversation, error) {
+	items := make([]*conversation.Conversation, 0)
+	for _, item := range r.conversations {
+		if item.UserID != userID {
+			continue
+		}
+		copy := *item
+		items = append(items, &copy)
+	}
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return items, nil
+}
+
 func (r *fakeConversationRepo) ListRecentMessages(_ context.Context, userID int64, sessionID string, limit int) ([]*conversation.Message, error) {
 	key := fakeConversationKey(userID, sessionID)
 	if r.conversations[key] == nil {
@@ -58,7 +73,7 @@ func (r *fakeConversationRepo) ListRecentMessages(_ context.Context, userID int6
 	return result, nil
 }
 
-func (r *fakeConversationRepo) RecordTurn(_ context.Context, userID int64, sessionID string, userMessage, assistantMessage *conversation.Message, summary, sources string, activeAt time.Time) error {
+func (r *fakeConversationRepo) RecordTurn(_ context.Context, userID int64, sessionID, title string, userMessage, assistantMessage *conversation.Message, summary, sources string, activeAt time.Time) error {
 	key := fakeConversationKey(userID, sessionID)
 	stored := r.conversations[key]
 	if stored == nil || stored.ID != userMessage.ConversationID || stored.ID != assistantMessage.ConversationID {
@@ -76,6 +91,7 @@ func (r *fakeConversationRepo) RecordTurn(_ context.Context, userID int64, sessi
 	if err := stored.UpdateContext(summary, sources, activeAt); err != nil {
 		return err
 	}
+	stored.Title = title
 	return nil
 }
 

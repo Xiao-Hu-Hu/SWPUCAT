@@ -60,6 +60,25 @@ func (r *ConversationRepo) FindBySession(ctx context.Context, userID int64, sess
 	return toDomainConversation(&model), nil
 }
 
+func (r *ConversationRepo) ListRecent(ctx context.Context, userID int64, limit int) ([]*conversation.Conversation, error) {
+	if r == nil || r.db == nil || userID <= 0 || limit < 1 {
+		return nil, conversation.ErrInvalidConversation
+	}
+	var models []database.AgentConversationModel
+	if err := r.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Order("last_active_at DESC, id DESC").
+		Limit(limit).
+		Find(&models).Error; err != nil {
+		return nil, err
+	}
+	items := make([]*conversation.Conversation, 0, len(models))
+	for i := range models {
+		items = append(items, toDomainConversation(&models[i]))
+	}
+	return items, nil
+}
+
 func (r *ConversationRepo) ListRecentMessages(ctx context.Context, userID int64, sessionID string, limit int) ([]*conversation.Message, error) {
 	if r == nil || r.db == nil || userID <= 0 || limit < 1 {
 		return nil, conversation.ErrInvalidConversation
@@ -85,7 +104,7 @@ func (r *ConversationRepo) ListRecentMessages(ctx context.Context, userID int64,
 	return items, nil
 }
 
-func (r *ConversationRepo) RecordTurn(ctx context.Context, userID int64, sessionID string, userMessage, assistantMessage *conversation.Message, summary, lastSourcesJSON string, activeAt time.Time) error {
+func (r *ConversationRepo) RecordTurn(ctx context.Context, userID int64, sessionID, title string, userMessage, assistantMessage *conversation.Message, summary, lastSourcesJSON string, activeAt time.Time) error {
 	if r == nil || r.db == nil || userID <= 0 || userMessage == nil || assistantMessage == nil || activeAt.IsZero() {
 		return conversation.ErrInvalidMessage
 	}
@@ -115,6 +134,7 @@ func (r *ConversationRepo) RecordTurn(ctx context.Context, userID int64, session
 			message.CreatedAt = model.CreatedAt
 		}
 		result := tx.Model(&database.AgentConversationModel{}).Where("id = ? AND user_id = ?", record.ID, userID).Updates(map[string]interface{}{
+			"title":             title,
 			"rolling_summary":   summary,
 			"last_sources_json": lastSourcesJSON,
 			"last_active_at":    activeAt,
