@@ -49,6 +49,10 @@ type agentCreateConversationRequest struct {
 	Title string `json:"title,omitempty"`
 }
 
+type agentUpdateConversationRequest struct {
+	Title string `json:"title"`
+}
+
 const (
 	agentConversationListLimit    = 100
 	agentConversationHistoryLimit = 200
@@ -122,6 +126,41 @@ func (h *AgentHandler) GetConversation(c *gin.Context) {
 			return
 		}
 		InternalError(c, "failed to load agent conversation")
+		return
+	}
+	Success(c, item)
+}
+
+func (h *AgentHandler) UpdateConversationTitle(c *gin.Context) {
+	if h == nil || h.conversations == nil {
+		Error(c, http.StatusServiceUnavailable, 503, "agent service is not configured")
+		return
+	}
+	sessionID := strings.TrimSpace(c.Param("session_id"))
+	if sessionID == "" {
+		BadRequest(c, "session_id is required")
+		return
+	}
+	if _, err := normalizeAgentSessionID(sessionID); err != nil {
+		BadRequest(c, "session_id is invalid")
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16<<10)
+	var req agentUpdateConversationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid request body")
+		return
+	}
+	item, err := h.conversations.UpdateTitle(c.Request.Context(), GetUserID(c), sessionID, req.Title)
+	if err != nil {
+		switch {
+		case errors.Is(err, shared.ErrValidation):
+			BadRequest(c, "title is required and must be at most 256 characters")
+		case errors.Is(err, shared.ErrNotFound):
+			NotFound(c, "agent conversation not found")
+		default:
+			InternalError(c, "failed to update agent conversation title")
+		}
 		return
 	}
 	Success(c, item)

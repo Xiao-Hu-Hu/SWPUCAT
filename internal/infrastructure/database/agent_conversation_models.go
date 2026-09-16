@@ -10,6 +10,7 @@ type AgentConversationModel struct {
 	UserID          int64     `gorm:"not null;uniqueIndex:idx_agent_conversation_owner_session;index:idx_agent_conversation_owner_active"`
 	SessionID       string    `gorm:"size:128;not null;uniqueIndex:idx_agent_conversation_owner_session"`
 	Title           string    `gorm:"size:256;not null;default:''"`
+	TitleCustomized bool      `gorm:"column:title_customized;not null;default:false"`
 	RollingSummary  string    `gorm:"type:text;not null;default:''"`
 	LastSourcesJSON string    `gorm:"column:last_sources_json;type:jsonb;not null;default:'[]'"`
 	LastActiveAt    time.Time `gorm:"not null;index:idx_agent_conversation_owner_active"`

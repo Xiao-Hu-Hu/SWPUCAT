@@ -132,6 +132,36 @@ func (s *Service) ListRecent(ctx context.Context, userID int64, limit int) ([]Co
 	return result, nil
 }
 
+// UpdateTitle changes only the title owned by the authenticated user. A
+// rename is deliberately not an activity update, so it does not reorder the
+// conversation list.
+func (s *Service) UpdateTitle(ctx context.Context, userID int64, sessionID, title string) (*ConversationDTO, error) {
+	if s == nil || s.repo == nil || userID <= 0 || strings.TrimSpace(sessionID) == "" {
+		return nil, shared.ErrValidation
+	}
+	title = strings.TrimSpace(title)
+	if title == "" || utf8.RuneCountInString(title) > conversation.MaxTitleRunes {
+		return nil, shared.ErrValidation
+	}
+	item, err := s.repo.FindBySession(ctx, userID, strings.TrimSpace(sessionID))
+	if err != nil {
+		if isNotFound(err) {
+			return nil, shared.ErrNotFound
+		}
+		return nil, err
+	}
+	if err := s.repo.UpdateTitle(ctx, userID, item.SessionID, title); err != nil {
+		if isNotFound(err) {
+			return nil, shared.ErrNotFound
+		}
+		return nil, err
+	}
+	item.Title = title
+	item.TitleCustomized = true
+	item.UpdatedAt = time.Now()
+	return toConversationDTO(item), nil
+}
+
 func (s *Service) LoadContext(ctx context.Context, userID int64, sessionID string, limit int) (*ContextDTO, error) {
 	if s == nil || s.repo == nil || userID <= 0 || strings.TrimSpace(sessionID) == "" {
 		return nil, shared.ErrValidation
@@ -198,14 +228,15 @@ func (s *Service) RecordTurn(ctx context.Context, userID int64, sessionID string
 			return nil, shared.ErrValidation
 		}
 	}
-	if strings.TrimSpace(item.Title) == "" || item.Title == conversation.DefaultTitle {
+	if !item.TitleCustomized {
 		item.Title = titleFromFirstMessage(req.UserContent)
+		item.TitleCustomized = true
 	}
 	activeAt := time.Now()
 	if err := item.UpdateContext(summary, sources, activeAt); err != nil {
 		return nil, shared.ErrValidation
 	}
-	if err := s.repo.RecordTurn(ctx, userID, item.SessionID, item.Title, userMessage, assistantMessage, item.RollingSummary, item.LastSourcesJSON, item.LastActiveAt); err != nil {
+	if err := s.repo.RecordTurn(ctx, userID, item.SessionID, item.Title, item.TitleCustomized, userMessage, assistantMessage, item.RollingSummary, item.LastSourcesJSON, item.LastActiveAt); err != nil {
 		return nil, err
 	}
 	return toConversationDTO(item), nil

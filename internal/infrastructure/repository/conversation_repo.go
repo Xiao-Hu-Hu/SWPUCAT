@@ -30,6 +30,7 @@ func (r *ConversationRepo) Create(ctx context.Context, item *conversation.Conver
 		UserID:          item.UserID,
 		SessionID:       item.SessionID,
 		Title:           item.Title,
+		TitleCustomized: item.TitleCustomized,
 		RollingSummary:  item.RollingSummary,
 		LastSourcesJSON: item.LastSourcesJSON,
 		LastActiveAt:    item.LastActiveAt,
@@ -79,6 +80,27 @@ func (r *ConversationRepo) ListRecent(ctx context.Context, userID int64, limit i
 	return items, nil
 }
 
+func (r *ConversationRepo) UpdateTitle(ctx context.Context, userID int64, sessionID, title string) error {
+	if r == nil || r.db == nil || userID <= 0 || sessionID == "" || title == "" {
+		return conversation.ErrInvalidConversation
+	}
+	result := r.db.WithContext(ctx).
+		Model(&database.AgentConversationModel{}).
+		Where("user_id = ? AND session_id = ?", userID, sessionID).
+		Updates(map[string]interface{}{
+			"title":            title,
+			"title_customized": true,
+			"updated_at":       time.Now(),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
 func (r *ConversationRepo) ListRecentMessages(ctx context.Context, userID int64, sessionID string, limit int) ([]*conversation.Message, error) {
 	if r == nil || r.db == nil || userID <= 0 || limit < 1 {
 		return nil, conversation.ErrInvalidConversation
@@ -104,7 +126,7 @@ func (r *ConversationRepo) ListRecentMessages(ctx context.Context, userID int64,
 	return items, nil
 }
 
-func (r *ConversationRepo) RecordTurn(ctx context.Context, userID int64, sessionID, title string, userMessage, assistantMessage *conversation.Message, summary, lastSourcesJSON string, activeAt time.Time) error {
+func (r *ConversationRepo) RecordTurn(ctx context.Context, userID int64, sessionID, title string, titleCustomized bool, userMessage, assistantMessage *conversation.Message, summary, lastSourcesJSON string, activeAt time.Time) error {
 	if r == nil || r.db == nil || userID <= 0 || userMessage == nil || assistantMessage == nil || activeAt.IsZero() {
 		return conversation.ErrInvalidMessage
 	}
@@ -135,6 +157,7 @@ func (r *ConversationRepo) RecordTurn(ctx context.Context, userID int64, session
 		}
 		result := tx.Model(&database.AgentConversationModel{}).Where("id = ? AND user_id = ?", record.ID, userID).Updates(map[string]interface{}{
 			"title":             title,
+			"title_customized":  titleCustomized,
 			"rolling_summary":   summary,
 			"last_sources_json": lastSourcesJSON,
 			"last_active_at":    activeAt,
@@ -156,6 +179,7 @@ func toDomainConversation(model *database.AgentConversationModel) *conversation.
 		UserID:          model.UserID,
 		SessionID:       model.SessionID,
 		Title:           model.Title,
+		TitleCustomized: model.TitleCustomized,
 		RollingSummary:  model.RollingSummary,
 		LastSourcesJSON: model.LastSourcesJSON,
 		LastActiveAt:    model.LastActiveAt,

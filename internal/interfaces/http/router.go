@@ -179,6 +179,8 @@ func (r *Router) Setup() *gin.Engine {
 			protected.GET("/agent/conversations", r.agentHandler.ListConversations)
 			protected.POST("/agent/conversations", r.agentHandler.CreateConversation)
 			protected.GET("/agent/conversations/:session_id", r.agentHandler.GetConversation)
+			protected.PATCH("/agent/conversations/:session_id", r.agentHandler.UpdateConversationTitle)
+			protected.PUT("/agent/conversations/:session_id", r.agentHandler.UpdateConversationTitle)
 			protected.POST("/agent/chat", r.agentHandler.Chat)
 
 			// Monthly reports. Drafts and versions remain private to their author

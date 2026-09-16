@@ -41,6 +41,17 @@ func (r *fakeConversationRepo) FindBySession(_ context.Context, userID int64, se
 	return &copy, nil
 }
 
+func (r *fakeConversationRepo) UpdateTitle(_ context.Context, userID int64, sessionID, title string) error {
+	item := r.conversations[fakeConversationKey(userID, sessionID)]
+	if item == nil {
+		return shared.ErrNotFound
+	}
+	item.Title = title
+	item.TitleCustomized = true
+	item.UpdatedAt = time.Now()
+	return nil
+}
+
 func (r *fakeConversationRepo) ListRecent(_ context.Context, userID int64, limit int) ([]*conversation.Conversation, error) {
 	items := make([]*conversation.Conversation, 0)
 	for _, item := range r.conversations {
@@ -73,7 +84,7 @@ func (r *fakeConversationRepo) ListRecentMessages(_ context.Context, userID int6
 	return result, nil
 }
 
-func (r *fakeConversationRepo) RecordTurn(_ context.Context, userID int64, sessionID, title string, userMessage, assistantMessage *conversation.Message, summary, sources string, activeAt time.Time) error {
+func (r *fakeConversationRepo) RecordTurn(_ context.Context, userID int64, sessionID, title string, titleCustomized bool, userMessage, assistantMessage *conversation.Message, summary, sources string, activeAt time.Time) error {
 	key := fakeConversationKey(userID, sessionID)
 	stored := r.conversations[key]
 	if stored == nil || stored.ID != userMessage.ConversationID || stored.ID != assistantMessage.ConversationID {
@@ -92,6 +103,7 @@ func (r *fakeConversationRepo) RecordTurn(_ context.Context, userID int64, sessi
 		return err
 	}
 	stored.Title = title
+	stored.TitleCustomized = titleCustomized
 	return nil
 }
 
@@ -168,6 +180,56 @@ func TestListRecentOnlyReturnsOwnedConversations(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].Title != "自己的会话" {
 		t.Fatalf("owned conversations = %+v", items)
+	}
+}
+
+func TestUpdateTitlePersistsAndPreventsAutomaticOverwrite(t *testing.T) {
+	repo := newFakeConversationRepo()
+	service := NewService(repo)
+	ctx := context.Background()
+	created, err := service.GetOrCreate(ctx, 7, "rename-session", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := service.UpdateTitle(ctx, 7, created.SessionID, "我指定的标题")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Title != "我指定的标题" {
+		t.Fatalf("updated title = %q", updated.Title)
+	}
+	turn, err := service.RecordTurn(ctx, 7, created.SessionID, RecordTurnRequest{
+		UserContent:      "首条消息不应覆盖标题",
+		AssistantContent: "明白。",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn.Title != "我指定的标题" {
+		t.Fatalf("custom title was overwritten: %q", turn.Title)
+	}
+}
+
+func TestUpdateTitleValidatesAndScopesOwner(t *testing.T) {
+	repo := newFakeConversationRepo()
+	service := NewService(repo)
+	ctx := context.Background()
+	created, err := service.GetOrCreate(ctx, 7, "rename-validation", "标题")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.UpdateTitle(ctx, 7, created.SessionID, "   "); err != shared.ErrValidation {
+		t.Fatalf("blank title error = %v", err)
+	}
+	if _, err := service.UpdateTitle(ctx, 8, created.SessionID, "越权修改"); err != shared.ErrNotFound {
+		t.Fatalf("cross-owner error = %v", err)
+	}
+	longTitle := make([]rune, conversation.MaxTitleRunes+1)
+	for i := range longTitle {
+		longTitle[i] = '长'
+	}
+	if _, err := service.UpdateTitle(ctx, 7, created.SessionID, string(longTitle)); err != shared.ErrValidation {
+		t.Fatalf("long title error = %v", err)
 	}
 }
 

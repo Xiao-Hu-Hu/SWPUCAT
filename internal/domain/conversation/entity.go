@@ -49,6 +49,7 @@ type Conversation struct {
 	UserID          int64
 	SessionID       string
 	Title           string
+	TitleCustomized bool
 	RollingSummary  string
 	LastSourcesJSON string
 	LastActiveAt    time.Time
@@ -79,6 +80,7 @@ func New(userID int64, sessionID, title string) (*Conversation, error) {
 		UserID:          userID,
 		SessionID:       sessionID,
 		Title:           title,
+		TitleCustomized: title != "" && title != DefaultTitle,
 		LastSourcesJSON: "[]",
 		LastActiveAt:    now,
 		CreatedAt:       now,
