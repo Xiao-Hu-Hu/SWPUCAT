@@ -848,7 +848,9 @@ async function downloadSource(source: AgentKnowledgeSource) {
 
 .message-row.user .message-content {
   display: flex;
+  flex-direction: column;
   justify-content: flex-end;
+  align-items: flex-end;
 }
 
 .source-list {
