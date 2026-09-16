@@ -35,13 +35,13 @@ web-build:
 	cd web && npm run build
 
 docker-build:
-	docker compose -f deploy/docker/docker-compose.yml build
+	docker compose --env-file .env -f deployments/docker-compose.yml build
 
 docker-up:
-	docker compose -f deploy/docker/docker-compose.yml up -d
+	docker compose --env-file .env -f deployments/docker-compose.yml up -d
 
 docker-down:
-	docker compose -f deploy/docker/docker-compose.yml down
+	docker compose --env-file .env -f deployments/docker-compose.yml down
 
 help:
 	@echo "Available targets:"
