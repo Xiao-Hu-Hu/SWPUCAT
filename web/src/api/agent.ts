@@ -28,7 +28,40 @@ export interface AgentChatResponse {
   sources?: AgentKnowledgeSource[]
 }
 
+export interface AgentConversation {
+  id: number
+  session_id: string
+  title: string
+  last_active_at: string
+  created_at: string
+}
+
+export interface AgentConversationMessage {
+  id: number
+  role: 'system' | 'user' | 'assistant' | 'tool'
+  content: string
+  tool_name?: string
+  tool_result?: string
+  citations_json?: string
+  token_count?: number
+  created_at: string
+}
+
+export interface AgentConversationContext {
+  conversation: AgentConversation
+  messages: AgentConversationMessage[]
+}
+
 export const agentApi = {
+  listConversations() {
+    return api.get<AgentConversation[]>('/agent/conversations')
+  },
+  createConversation(title?: string) {
+    return api.post<AgentConversation>('/agent/conversations', title ? { title } : {})
+  },
+  getConversation(sessionId: string) {
+    return api.get<AgentConversationContext>(`/agent/conversations/${encodeURIComponent(sessionId)}`)
+  },
   chat(message: string, sessionId = '') {
     return api.post<AgentChatResponse>('/agent/chat', {
       message,

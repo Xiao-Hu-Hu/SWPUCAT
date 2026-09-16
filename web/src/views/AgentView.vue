@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { agentApi, type AgentKnowledgeSource } from '@/api/agent'
+import {
+  agentApi,
+  type AgentConversation,
+  type AgentConversationMessage,
+  type AgentKnowledgeSource
+} from '@/api/agent'
 import { knowledgeApi } from '@/api/knowledge'
 import { useAuthStore } from '@/stores/auth'
 
@@ -11,21 +16,48 @@ interface ChatMessage {
   sources?: AgentKnowledgeSource[]
 }
 
+const greetingMessage = '你好，我可以协助查询知识库、查看打卡状态，也可以按你的请求执行打卡操作。'
+
 const authStore = useAuthStore()
 const input = ref('')
 const loading = ref(false)
-const messages = ref<ChatMessage[]>([
-  { role: 'assistant', content: '你好，我可以协助查询知识库、查看打卡状态，也可以按你的请求执行打卡操作。' }
-])
+const historyLoading = ref(false)
+const conversationsLoading = ref(false)
+const creatingConversation = ref(false)
+const conversations = ref<AgentConversation[]>([])
+const messages = ref<ChatMessage[]>([{ role: 'assistant', content: greetingMessage }])
 const sessionId = ref('')
 const messagesRef = ref<HTMLElement | null>(null)
 const downloadingSources = ref<Record<number, boolean>>({})
+const historyRequestId = ref(0)
 
 const sessionStorageKey = () => `swpucat-agent-session:${authStore.user?.id || 'anonymous'}`
 
 onMounted(() => {
-  sessionId.value = localStorage.getItem(sessionStorageKey()) || ''
+  void initializeConversations()
 })
+
+async function initializeConversations() {
+  conversationsLoading.value = true
+  try {
+    const res = await agentApi.listConversations()
+    const items = Array.isArray(res.data) ? res.data : []
+    conversations.value = items
+
+    const storedSessionId = localStorage.getItem(sessionStorageKey()) || ''
+    const preferred = items.find((item) => item.session_id === storedSessionId) || items[0]
+    if (preferred) {
+      await loadConversation(preferred.session_id)
+    } else {
+      resetDraft()
+    }
+  } catch {
+    resetDraft()
+    ElMessage.error('会话列表加载失败，请稍后重试')
+  } finally {
+    conversationsLoading.value = false
+  }
+}
 
 async function scrollToBottom() {
   await nextTick()
@@ -34,20 +66,127 @@ async function scrollToBottom() {
   }
 }
 
+function resetDraft() {
+  sessionId.value = ''
+  localStorage.removeItem(sessionStorageKey())
+  messages.value = [{ role: 'assistant', content: greetingMessage }]
+}
+
+async function createNewConversation() {
+  if (creatingConversation.value || loading.value || historyLoading.value) return
+  creatingConversation.value = true
+  try {
+    const res = await agentApi.createConversation()
+    const created = res.data
+    conversations.value = [created, ...conversations.value.filter((item) => item.session_id !== created.session_id)]
+    sessionId.value = created.session_id
+    localStorage.setItem(sessionStorageKey(), created.session_id)
+    messages.value = [{ role: 'assistant', content: greetingMessage }]
+    await scrollToBottom()
+  } catch {
+    ElMessage.error('新建会话失败，请稍后重试')
+  } finally {
+    creatingConversation.value = false
+  }
+}
+
+async function ensureConversation() {
+  if (sessionId.value) return true
+  try {
+    const res = await agentApi.createConversation()
+    const created = res.data
+    conversations.value = [created, ...conversations.value.filter((item) => item.session_id !== created.session_id)]
+    sessionId.value = created.session_id
+    localStorage.setItem(sessionStorageKey(), created.session_id)
+    return true
+  } catch {
+    ElMessage.error('无法创建会话，请稍后重试')
+    return false
+  }
+}
+
+async function selectConversation(item: AgentConversation) {
+  if (item.session_id === sessionId.value && !historyLoading.value) return
+  if (loading.value || historyLoading.value || creatingConversation.value) return
+  await loadConversation(item.session_id)
+}
+
+async function loadConversation(targetSessionId: string) {
+  const requestId = ++historyRequestId.value
+  historyLoading.value = true
+  try {
+    const res = await agentApi.getConversation(targetSessionId)
+    if (requestId !== historyRequestId.value) return
+    sessionId.value = res.data.conversation.session_id
+    localStorage.setItem(sessionStorageKey(), sessionId.value)
+    messages.value = res.data.messages
+      .filter((item) => item.role === 'user' || item.role === 'assistant')
+      .map(messageFromHistory)
+    if (messages.value.length === 0) {
+      messages.value = [{ role: 'assistant', content: greetingMessage }]
+    }
+    await scrollToBottom()
+  } catch (error: any) {
+    if (requestId !== historyRequestId.value) return
+    if (error?.response?.status === 404) {
+      conversations.value = conversations.value.filter((item) => item.session_id !== targetSessionId)
+      if (targetSessionId === sessionId.value) resetDraft()
+      ElMessage.warning('该会话已不存在')
+    } else {
+      ElMessage.error('会话记录加载失败，请稍后重试')
+    }
+  } finally {
+    if (requestId === historyRequestId.value) historyLoading.value = false
+  }
+}
+
+function messageFromHistory(message: AgentConversationMessage): ChatMessage {
+  return {
+    role: message.role === 'user' ? 'user' : 'assistant',
+    content: message.content,
+    sources: message.role === 'assistant' ? parseSources(message.citations_json) : undefined
+  }
+}
+
+function parseSources(value?: string): AgentKnowledgeSource[] {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed as AgentKnowledgeSource[] : []
+  } catch {
+    return []
+  }
+}
+
+async function refreshConversationList() {
+  try {
+    const res = await agentApi.listConversations()
+    conversations.value = Array.isArray(res.data) ? res.data : []
+  } catch {
+    // The current answer is already available. A later page refresh can retry
+    // the list request without interrupting the completed chat turn.
+  }
+}
+
 async function sendMessage() {
   const message = input.value.trim()
-  if (!message || loading.value) return
+  if (!message || loading.value || historyLoading.value) return
+  if (!(await ensureConversation())) return
 
+  const targetSessionId = sessionId.value
   messages.value.push({ role: 'user', content: message })
   input.value = ''
   loading.value = true
   await scrollToBottom()
   try {
-    const res = await agentApi.chat(message, sessionId.value)
+    const res = await agentApi.chat(message, targetSessionId)
     const data = res.data
-    sessionId.value = data.session_id
-    localStorage.setItem(sessionStorageKey(), data.session_id)
+    if (data.session_id && data.session_id !== sessionId.value) {
+      sessionId.value = data.session_id
+      localStorage.setItem(sessionStorageKey(), data.session_id)
+    }
     messages.value.push({ role: 'assistant', content: data.answer, sources: data.sources || [] })
+    await refreshConversationList()
   } catch (error: any) {
     const detail = error?.response?.data?.message
     ElMessage.error(detail || 'Agent 暂时不可用，请稍后重试')
@@ -64,10 +203,14 @@ function handleKeydown(event: KeyboardEvent) {
   }
 }
 
-function clearSession() {
-  sessionId.value = ''
-  localStorage.removeItem(sessionStorageKey())
-  messages.value = [{ role: 'assistant', content: '会话已清空。你可以继续向我提问。' }]
+function conversationTitle(item: AgentConversation): string {
+  return item.title?.trim() || '新会话'
+}
+
+function formatConversationDate(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(date)
 }
 
 function sourceExcerpt(source: AgentKnowledgeSource): string {
@@ -144,81 +287,128 @@ async function downloadSource(source: AgentKnowledgeSource) {
         <h2>智能助手</h2>
         <p>用自然语言查询知识库和打卡信息，涉及写入操作时我会先按系统权限执行。</p>
       </div>
-      <el-button plain @click="clearSession">清空会话</el-button>
     </div>
 
-    <el-card class="chat-card" shadow="never">
-      <div ref="messagesRef" class="messages">
-        <div v-for="(item, index) in messages" :key="index" class="message-row" :class="item.role">
-          <div class="message-content">
-            <div class="message-bubble">{{ item.content }}</div>
-            <div v-if="item.role === 'assistant' && item.sources?.length" class="source-list">
-              <div class="source-list-title">参考资料</div>
-              <div v-for="source in item.sources" :key="`${index}-${source.id}-${source.name}`" class="source-card">
-                <div class="source-heading">
-                  <span class="source-kind">{{ sourceKindLabel(source) }}</span>
-                  <strong>{{ source.name || '未命名资料' }}</strong>
-                </div>
-                <p v-if="sourceExcerpt(source)" class="source-excerpt">{{ sourceExcerpt(source) }}</p>
-                <div class="source-meta">
-                  <span v-if="source.category_name">{{ source.category_name }}</span>
-                  <span v-if="sourceMatchLabel(source)">{{ sourceMatchLabel(source) }}</span>
-                </div>
-                <div class="source-actions">
-                  <el-button
-                    v-if="canDownloadSource(source)"
-                    text
-                    size="small"
-                    :loading="downloadingSources[source.id]"
-                    @click="downloadSource(source)"
-                  >下载文件</el-button>
-                  <a
-                    v-if="externalSourceURL(source)"
-                    class="source-link"
-                    :href="externalSourceURL(source)"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >打开链接</a>
+    <div class="agent-layout">
+      <aside class="conversation-panel">
+        <div class="conversation-panel-header">
+          <span class="conversation-panel-title">会话记录</span>
+          <el-button text circle :loading="creatingConversation" aria-label="新建会话" @click="createNewConversation">
+            <el-icon><Plus /></el-icon>
+          </el-button>
+        </div>
+        <el-button
+          class="new-conversation-button"
+          type="primary"
+          plain
+          :loading="creatingConversation"
+          :disabled="loading || historyLoading"
+          @click="createNewConversation"
+        >
+          <el-icon><Plus /></el-icon>
+          新建会话
+        </el-button>
+
+        <div v-if="conversationsLoading" class="conversation-status">正在加载会话…</div>
+        <div v-else-if="!conversations.length" class="conversation-status">暂无历史会话</div>
+        <div v-else class="conversation-list">
+          <button
+            v-for="item in conversations"
+            :key="item.session_id"
+            type="button"
+            class="conversation-item"
+            :class="{ active: item.session_id === sessionId }"
+            :disabled="loading || historyLoading || creatingConversation"
+            @click="selectConversation(item)"
+          >
+            <el-icon class="conversation-item-icon"><ChatDotRound /></el-icon>
+            <span class="conversation-item-body">
+              <span class="conversation-item-title">{{ conversationTitle(item) }}</span>
+              <span class="conversation-item-date">{{ formatConversationDate(item.last_active_at || item.created_at) }}</span>
+            </span>
+          </button>
+        </div>
+      </aside>
+
+      <section class="chat-card" aria-label="智能助手对话">
+        <div class="chat-header">
+          <span class="chat-header-title">
+            {{ conversations.find((item) => item.session_id === sessionId)?.title || '新会话' }}
+          </span>
+          <span v-if="historyLoading" class="chat-header-status">正在加载记录…</span>
+        </div>
+        <div ref="messagesRef" class="messages">
+          <div v-if="historyLoading" class="history-placeholder">正在加载会话记录…</div>
+          <template v-else>
+            <div v-for="(item, index) in messages" :key="`${sessionId}-${index}`" class="message-row" :class="item.role">
+              <div class="message-content">
+                <div class="message-bubble">{{ item.content }}</div>
+                <div v-if="item.role === 'assistant' && item.sources?.length" class="source-list">
+                  <div class="source-list-title">参考资料</div>
+                  <div v-for="source in item.sources" :key="`${index}-${source.id}-${source.name}`" class="source-card">
+                    <div class="source-heading">
+                      <span class="source-kind">{{ sourceKindLabel(source) }}</span>
+                      <strong>{{ source.name || '未命名资料' }}</strong>
+                    </div>
+                    <p v-if="sourceExcerpt(source)" class="source-excerpt">{{ sourceExcerpt(source) }}</p>
+                    <div class="source-meta">
+                      <span v-if="source.category_name">{{ source.category_name }}</span>
+                      <span v-if="sourceMatchLabel(source)">{{ sourceMatchLabel(source) }}</span>
+                    </div>
+                    <div class="source-actions">
+                      <el-button
+                        v-if="canDownloadSource(source)"
+                        text
+                        size="small"
+                        :loading="downloadingSources[source.id]"
+                        @click="downloadSource(source)"
+                      >下载文件</el-button>
+                      <a
+                        v-if="externalSourceURL(source)"
+                        class="source-link"
+                        :href="externalSourceURL(source)"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >打开链接</a>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
+            <div v-if="loading" class="message-row assistant">
+              <div class="message-bubble pending">正在思考…</div>
+            </div>
+          </template>
+        </div>
+        <div class="composer">
+          <el-input
+            v-model="input"
+            type="textarea"
+            :rows="3"
+            maxlength="4000"
+            show-word-limit
+            resize="none"
+            :disabled="historyLoading"
+            placeholder="例如：帮我打卡上班，或者查一下本周的打卡情况"
+            @keydown="handleKeydown"
+          />
+          <div class="composer-footer">
+            <span>Enter 发送，Shift + Enter 换行</span>
+            <el-button type="primary" :loading="loading" :disabled="historyLoading || !input.trim()" @click="sendMessage">发送</el-button>
           </div>
         </div>
-        <div v-if="loading" class="message-row assistant">
-          <div class="message-bubble pending">正在思考…</div>
-        </div>
-      </div>
-      <div class="composer">
-        <el-input
-          v-model="input"
-          type="textarea"
-          :rows="3"
-          maxlength="4000"
-          show-word-limit
-          resize="none"
-          placeholder="例如：帮我打卡上班，或者查一下本周的打卡情况"
-          @keydown="handleKeydown"
-        />
-        <div class="composer-footer">
-          <span>Enter 发送，Shift + Enter 换行</span>
-          <el-button type="primary" :loading="loading" :disabled="!input.trim()" @click="sendMessage">发送</el-button>
-        </div>
-      </div>
-    </el-card>
+      </section>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .agent-page {
-  max-width: 960px;
+  max-width: 1180px;
   margin: 0 auto;
 }
 
 .agent-intro {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
   margin-bottom: 1rem;
 }
 
@@ -234,16 +424,159 @@ async function downloadSource(source: AgentKnowledgeSource) {
   font-size: 0.875rem;
 }
 
+.agent-layout {
+  display: grid;
+  grid-template-columns: 238px minmax(0, 1fr);
+  gap: 0.85rem;
+  align-items: stretch;
+}
+
+.conversation-panel,
 .chat-card {
   border: 1px solid var(--border);
   background: var(--bg-card);
+  border-radius: var(--radius);
+}
+
+.conversation-panel {
+  min-height: 620px;
+  padding: 0.65rem;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.conversation-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.15rem 0.15rem 0.55rem 0.35rem;
+}
+
+.conversation-panel-title {
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.new-conversation-button {
+  width: 100%;
+  margin-bottom: 0.55rem;
+}
+
+.conversation-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.2rem;
+  overflow-y: auto;
+  padding-right: 0.1rem;
+}
+
+.conversation-item {
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 0.5rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.conversation-item:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.conversation-item.active {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.conversation-item:disabled {
+  cursor: default;
+}
+
+.conversation-item-icon {
+  flex: none;
+}
+
+.conversation-item-body {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+
+.conversation-item-title {
+  overflow: hidden;
+  color: inherit;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-item-date {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
+.conversation-status {
+  padding: 1.2rem 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+.chat-card {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.chat-header {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--border);
+  padding: 0.55rem 0.9rem;
+}
+
+.chat-header-title {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-header-status {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 0.72rem;
 }
 
 .messages {
   height: min(58vh, 560px);
   min-height: 320px;
   overflow-y: auto;
-  padding: 0.5rem 0.25rem 1rem;
+  padding: 0.5rem 0.9rem 1rem;
+}
+
+.history-placeholder {
+  padding: 3rem 1rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  text-align: center;
 }
 
 .message-row {
@@ -356,7 +689,7 @@ async function downloadSource(source: AgentKnowledgeSource) {
 
 .composer {
   border-top: 1px solid var(--border);
-  padding-top: 1rem;
+  padding: 1rem;
 }
 
 .composer-footer {
@@ -369,15 +702,27 @@ async function downloadSource(source: AgentKnowledgeSource) {
   font-size: 0.75rem;
 }
 
-@media (max-width: 640px) {
-  .agent-intro {
-    flex-direction: column;
+@media (max-width: 860px) {
+  .agent-layout {
+    grid-template-columns: 190px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 680px) {
+  .agent-layout {
+    grid-template-columns: 1fr;
   }
 
-  .message-bubble {
-    max-width: 92%;
+  .conversation-panel {
+    min-height: 0;
+    max-height: 230px;
   }
 
+  .conversation-list {
+    max-height: 120px;
+  }
+
+  .message-bubble,
   .message-content {
     max-width: 92%;
   }
