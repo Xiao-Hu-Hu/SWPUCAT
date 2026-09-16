@@ -62,6 +62,9 @@ export const agentApi = {
   getConversation(sessionId: string) {
     return api.get<AgentConversationContext>(`/agent/conversations/${encodeURIComponent(sessionId)}`)
   },
+  updateConversationTitle(sessionId: string, title: string) {
+    return api.patch<AgentConversation>(`/agent/conversations/${encodeURIComponent(sessionId)}`, { title })
+  },
   chat(message: string, sessionId = '') {
     return api.post<AgentChatResponse>('/agent/chat', {
       message,

@@ -9,14 +9,20 @@ import {
 } from '@/api/agent'
 import { knowledgeApi } from '@/api/knowledge'
 import { useAuthStore } from '@/stores/auth'
+import { renderMarkdown } from '@/utils/markdown'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+  createdAt: string
   sources?: AgentKnowledgeSource[]
 }
 
 const greetingMessage = '你好，我可以协助查询知识库、查看打卡状态，也可以按你的请求执行打卡操作。'
+
+function newGreetingMessage(): ChatMessage {
+  return { role: 'assistant', content: greetingMessage, createdAt: new Date().toISOString() }
+}
 
 const authStore = useAuthStore()
 const input = ref('')
@@ -25,11 +31,14 @@ const historyLoading = ref(false)
 const conversationsLoading = ref(false)
 const creatingConversation = ref(false)
 const conversations = ref<AgentConversation[]>([])
-const messages = ref<ChatMessage[]>([{ role: 'assistant', content: greetingMessage }])
+const messages = ref<ChatMessage[]>([newGreetingMessage()])
 const sessionId = ref('')
 const messagesRef = ref<HTMLElement | null>(null)
 const downloadingSources = ref<Record<number, boolean>>({})
 const historyRequestId = ref(0)
+const editingSessionId = ref('')
+const editingTitle = ref('')
+const renamingSessionId = ref('')
 
 const sessionStorageKey = () => `swpucat-agent-session:${authStore.user?.id || 'anonymous'}`
 
@@ -69,11 +78,11 @@ async function scrollToBottom() {
 function resetDraft() {
   sessionId.value = ''
   localStorage.removeItem(sessionStorageKey())
-  messages.value = [{ role: 'assistant', content: greetingMessage }]
+  messages.value = [newGreetingMessage()]
 }
 
 async function createNewConversation() {
-  if (creatingConversation.value || conversationsLoading.value || loading.value || historyLoading.value) return
+  if (creatingConversation.value || conversationsLoading.value || loading.value || historyLoading.value || editingSessionId.value || renamingSessionId.value) return
   creatingConversation.value = true
   try {
     const res = await agentApi.createConversation()
@@ -81,7 +90,8 @@ async function createNewConversation() {
     conversations.value = [created, ...conversations.value.filter((item) => item.session_id !== created.session_id)]
     sessionId.value = created.session_id
     localStorage.setItem(sessionStorageKey(), created.session_id)
-    messages.value = [{ role: 'assistant', content: greetingMessage }]
+    editingSessionId.value = ''
+    messages.value = [newGreetingMessage()]
     await scrollToBottom()
   } catch {
     ElMessage.error('新建会话失败，请稍后重试')
@@ -107,7 +117,7 @@ async function ensureConversation() {
 
 async function selectConversation(item: AgentConversation) {
   if (item.session_id === sessionId.value && !historyLoading.value) return
-  if (loading.value || historyLoading.value || creatingConversation.value) return
+  if (loading.value || historyLoading.value || creatingConversation.value || editingSessionId.value || renamingSessionId.value) return
   await loadConversation(item.session_id)
 }
 
@@ -123,9 +133,8 @@ async function loadConversation(targetSessionId: string) {
       .filter((item) => item.role === 'user' || item.role === 'assistant')
       .map(messageFromHistory)
     if (messages.value.length === 0) {
-      messages.value = [{ role: 'assistant', content: greetingMessage }]
+      messages.value = [newGreetingMessage()]
     }
-    await scrollToBottom()
   } catch (error: any) {
     if (requestId !== historyRequestId.value) return
     if (error?.response?.status === 404) {
@@ -136,7 +145,12 @@ async function loadConversation(targetSessionId: string) {
       ElMessage.error('会话记录加载失败，请稍后重试')
     }
   } finally {
-    if (requestId === historyRequestId.value) historyLoading.value = false
+    if (requestId === historyRequestId.value) {
+      // The message list is hidden while historyLoading is true. Turn the
+      // placeholder off first, then wait for the real DOM before scrolling.
+      historyLoading.value = false
+      await scrollToBottom()
+    }
   }
 }
 
@@ -144,6 +158,7 @@ function messageFromHistory(message: AgentConversationMessage): ChatMessage {
   return {
     role: message.role === 'user' ? 'user' : 'assistant',
     content: message.content,
+    createdAt: message.created_at,
     sources: message.role === 'assistant' ? parseSources(message.citations_json) : undefined
   }
 }
@@ -170,11 +185,11 @@ async function refreshConversationList() {
 
 async function sendMessage() {
   const message = input.value.trim()
-  if (!message || conversationsLoading.value || loading.value || historyLoading.value) return
+  if (!message || conversationsLoading.value || loading.value || historyLoading.value || editingSessionId.value || renamingSessionId.value) return
   if (!(await ensureConversation())) return
 
   const targetSessionId = sessionId.value
-  messages.value.push({ role: 'user', content: message })
+  messages.value.push({ role: 'user', content: message, createdAt: new Date().toISOString() })
   input.value = ''
   loading.value = true
   await scrollToBottom()
@@ -185,7 +200,12 @@ async function sendMessage() {
       sessionId.value = data.session_id
       localStorage.setItem(sessionStorageKey(), data.session_id)
     }
-    messages.value.push({ role: 'assistant', content: data.answer, sources: data.sources || [] })
+    messages.value.push({
+      role: 'assistant',
+      content: data.answer,
+      createdAt: new Date().toISOString(),
+      sources: data.sources || []
+    })
     await refreshConversationList()
   } catch (error: any) {
     const detail = error?.response?.data?.message
@@ -205,6 +225,61 @@ function handleKeydown(event: KeyboardEvent) {
 
 function conversationTitle(item: AgentConversation): string {
   return item.title?.trim() || '新会话'
+}
+
+function startRename(item: AgentConversation) {
+  if (loading.value || historyLoading.value || creatingConversation.value) return
+  editingSessionId.value = item.session_id
+  editingTitle.value = conversationTitle(item)
+}
+
+function cancelRename() {
+  editingSessionId.value = ''
+  editingTitle.value = ''
+}
+
+async function saveRename(item: AgentConversation) {
+  if (renamingSessionId.value || editingSessionId.value !== item.session_id) return
+  const title = editingTitle.value.trim()
+  if (!title) {
+    ElMessage.warning('会话标题不能为空')
+    editingTitle.value = conversationTitle(item)
+    return
+  }
+  if (title === conversationTitle(item)) {
+    cancelRename()
+    return
+  }
+  renamingSessionId.value = item.session_id
+  try {
+    const res = await agentApi.updateConversationTitle(item.session_id, title)
+    const updated = res.data
+    const index = conversations.value.findIndex((conversation) => conversation.session_id === item.session_id)
+    if (index >= 0) conversations.value[index] = { ...conversations.value[index], ...updated }
+    cancelRename()
+  } catch (error: any) {
+    const detail = error?.response?.data?.message
+    ElMessage.error(detail || '会话标题修改失败，请稍后重试')
+  } finally {
+    renamingSessionId.value = ''
+  }
+}
+
+function handleRenameKeydown(event: KeyboardEvent, item: AgentConversation) {
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    void saveRename(item)
+  } else if (event.key === 'Escape') {
+    event.preventDefault()
+    cancelRename()
+  }
+}
+
+function formatMessageTime(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 
 function formatConversationDate(value: string): string {
@@ -293,7 +368,7 @@ async function downloadSource(source: AgentKnowledgeSource) {
       <aside class="conversation-panel">
         <div class="conversation-panel-header">
           <span class="conversation-panel-title">会话记录</span>
-          <el-button text circle :loading="creatingConversation" :disabled="conversationsLoading" aria-label="新建会话" @click="createNewConversation">
+          <el-button text circle :loading="creatingConversation" :disabled="conversationsLoading || Boolean(editingSessionId) || Boolean(renamingSessionId)" aria-label="新建会话" @click="createNewConversation">
             <el-icon><Plus /></el-icon>
           </el-button>
         </div>
@@ -302,7 +377,7 @@ async function downloadSource(source: AgentKnowledgeSource) {
           type="primary"
           plain
           :loading="creatingConversation"
-          :disabled="conversationsLoading || loading || historyLoading"
+          :disabled="conversationsLoading || loading || historyLoading || Boolean(editingSessionId) || Boolean(renamingSessionId)"
           @click="createNewConversation"
         >
           <el-icon><Plus /></el-icon>
@@ -312,21 +387,43 @@ async function downloadSource(source: AgentKnowledgeSource) {
         <div v-if="conversationsLoading" class="conversation-status">正在加载会话…</div>
         <div v-else-if="!conversations.length" class="conversation-status">暂无历史会话</div>
         <div v-else class="conversation-list">
-          <button
+          <div
             v-for="item in conversations"
             :key="item.session_id"
-            type="button"
             class="conversation-item"
-            :class="{ active: item.session_id === sessionId }"
-            :disabled="loading || historyLoading || creatingConversation"
+            :class="{ active: item.session_id === sessionId, editing: item.session_id === editingSessionId }"
             @click="selectConversation(item)"
           >
             <el-icon class="conversation-item-icon"><ChatDotRound /></el-icon>
             <span class="conversation-item-body">
-              <span class="conversation-item-title">{{ conversationTitle(item) }}</span>
+              <el-input
+                v-if="item.session_id === editingSessionId"
+                v-model="editingTitle"
+                class="conversation-title-input"
+                size="small"
+                maxlength="256"
+                :disabled="renamingSessionId === item.session_id"
+                autofocus
+                @click.stop
+                @keydown.stop="handleRenameKeydown($event, item)"
+                @blur="saveRename(item)"
+              />
+              <span v-else class="conversation-item-title">{{ conversationTitle(item) }}</span>
               <span class="conversation-item-date">{{ formatConversationDate(item.last_active_at || item.created_at) }}</span>
             </span>
-          </button>
+            <el-button
+              v-if="item.session_id !== editingSessionId"
+              class="conversation-edit-button"
+              text
+              circle
+              size="small"
+              :disabled="loading || historyLoading || creatingConversation || Boolean(renamingSessionId)"
+              aria-label="修改会话标题"
+              @click.stop="startRename(item)"
+            >
+              <el-icon><Edit /></el-icon>
+            </el-button>
+          </div>
         </div>
       </aside>
 
@@ -340,9 +437,10 @@ async function downloadSource(source: AgentKnowledgeSource) {
         <div ref="messagesRef" class="messages">
           <div v-if="historyLoading" class="history-placeholder">正在加载会话记录…</div>
           <template v-else>
-            <div v-for="(item, index) in messages" :key="`${sessionId}-${index}`" class="message-row" :class="item.role">
+            <div v-for="(item, index) in messages" :key="`${sessionId}-${index}-${item.createdAt}`" class="message-row" :class="item.role">
               <div class="message-content">
-                <div class="message-bubble">{{ item.content }}</div>
+                <div v-if="item.role === 'assistant'" class="message-bubble assistant-bubble markdown-body" v-html="renderMarkdown(item.content)"></div>
+                <div v-else class="message-bubble">{{ item.content }}</div>
                 <div v-if="item.role === 'assistant' && item.sources?.length" class="source-list">
                   <div class="source-list-title">参考资料</div>
                   <div v-for="source in item.sources" :key="`${index}-${source.id}-${source.name}`" class="source-card">
@@ -373,10 +471,13 @@ async function downloadSource(source: AgentKnowledgeSource) {
                     </div>
                   </div>
                 </div>
+                <time v-if="formatMessageTime(item.createdAt)" class="message-time" :datetime="item.createdAt">{{ formatMessageTime(item.createdAt) }}</time>
               </div>
             </div>
             <div v-if="loading" class="message-row assistant">
-              <div class="message-bubble pending">正在思考…</div>
+              <div class="message-content">
+                <div class="message-bubble pending">正在思考…</div>
+              </div>
             </div>
           </template>
         </div>
@@ -388,13 +489,13 @@ async function downloadSource(source: AgentKnowledgeSource) {
             maxlength="4000"
             show-word-limit
             resize="none"
-            :disabled="conversationsLoading || historyLoading"
+            :disabled="conversationsLoading || historyLoading || Boolean(editingSessionId) || Boolean(renamingSessionId)"
             placeholder="例如：帮我打卡上班，或者查一下本周的打卡情况"
             @keydown="handleKeydown"
           />
           <div class="composer-footer">
             <span>Enter 发送，Shift + Enter 换行</span>
-            <el-button type="primary" :loading="loading" :disabled="conversationsLoading || historyLoading || !input.trim()" @click="sendMessage">发送</el-button>
+            <el-button type="primary" :loading="loading" :disabled="conversationsLoading || historyLoading || Boolean(editingSessionId) || Boolean(renamingSessionId) || !input.trim()" @click="sendMessage">发送</el-button>
           </div>
         </div>
       </section>
@@ -488,7 +589,7 @@ async function downloadSource(source: AgentKnowledgeSource) {
   transition: background 0.2s, color 0.2s;
 }
 
-.conversation-item:hover:not(:disabled) {
+.conversation-item:hover {
   background: var(--bg-hover);
   color: var(--text);
 }
@@ -498,7 +599,7 @@ async function downloadSource(source: AgentKnowledgeSource) {
   color: var(--accent);
 }
 
-.conversation-item:disabled {
+.conversation-item.editing {
   cursor: default;
 }
 
@@ -521,6 +622,26 @@ async function downloadSource(source: AgentKnowledgeSource) {
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.conversation-title-input {
+  min-width: 0;
+}
+
+.conversation-edit-button {
+  flex: none;
+  opacity: 0;
+  color: var(--text-muted);
+  transition: opacity 0.2s, color 0.2s;
+}
+
+.conversation-item:hover .conversation-edit-button,
+.conversation-edit-button:focus-visible {
+  opacity: 1;
+}
+
+.conversation-edit-button:hover:not(:disabled) {
+  color: var(--accent);
 }
 
 .conversation-item-date {
@@ -598,6 +719,118 @@ async function downloadSource(source: AgentKnowledgeSource) {
   overflow-wrap: anywhere;
   line-height: 1.6;
   font-size: 0.925rem;
+}
+
+.assistant-bubble {
+  white-space: normal;
+}
+
+.message-time {
+  display: block;
+  margin-top: 0.3rem;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  line-height: 1.2;
+}
+
+.message-row.user .message-time {
+  text-align: right;
+}
+
+.markdown-body {
+  line-height: 1.65;
+}
+
+.markdown-body :deep(p) {
+  margin: 0 0 0.65em;
+}
+
+.markdown-body :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3),
+.markdown-body :deep(h4) {
+  margin: 0.7em 0 0.4em;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.markdown-body :deep(h1:first-child),
+.markdown-body :deep(h2:first-child),
+.markdown-body :deep(h3:first-child),
+.markdown-body :deep(h4:first-child) {
+  margin-top: 0;
+}
+
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) {
+  margin: 0.45em 0 0.7em;
+  padding-left: 1.4em;
+}
+
+.markdown-body :deep(blockquote) {
+  margin: 0.65em 0;
+  border-left: 3px solid var(--accent);
+  padding-left: 0.8em;
+  color: var(--text-secondary);
+}
+
+.markdown-body :deep(code) {
+  border-radius: 4px;
+  background: var(--bg-deep);
+  padding: 0.12em 0.35em;
+  font-size: 0.9em;
+}
+
+.markdown-body :deep(pre) {
+  max-width: 100%;
+  margin: 0.7em 0;
+  overflow-x: auto;
+  border-radius: 7px;
+  background: var(--bg-deep);
+  padding: 0.75em;
+}
+
+.markdown-body :deep(pre code) {
+  background: transparent;
+  padding: 0;
+}
+
+.markdown-body :deep(table) {
+  display: block;
+  max-width: 100%;
+  margin: 0.7em 0;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.88em;
+}
+
+.markdown-body :deep(th),
+.markdown-body :deep(td) {
+  border: 1px solid var(--border);
+  padding: 0.35em 0.55em;
+  text-align: left;
+}
+
+.markdown-body :deep(th) {
+  background: var(--bg-deep);
+}
+
+.markdown-body :deep(a) {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.markdown-body :deep(a:hover) {
+  text-decoration: underline;
+}
+
+.markdown-body :deep(img) {
+  max-width: 100%;
+  height: auto;
 }
 
 .message-row.user .message-bubble {
