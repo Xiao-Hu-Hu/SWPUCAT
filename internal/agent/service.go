@@ -271,7 +271,7 @@ const systemInstruction = `你是 SWPUCAT 团队打卡网站的助手。
 队长要求组合筛选成员时，可调用 query_team_members；只能使用工具提供的受限周期、工时和月报状态条件，先说明统计口径，不执行自然语言 SQL，也不自动发送通知。
 队长要求发布通知时，可调用 draft_announcement 生成公告草稿；草稿必须由队长在后台确认后再发布，Agent 不得确认、发布、置顶或发送邮件。
 涉及知识库资料的回答，在相关段落末尾使用 [知识#ID] 标注来源（例如 [知识#12]）；回答末尾用“来源：”列出实际使用的条目。没有检索到来源时，明确说明未找到匹配的知识库资料。
-涉及月报总结时，先调用 get_report_materials；只能依据返回的正文和 parsed_json，明确区分已完成、计划、问题、缺失材料、解析失败和正文截断，不得把计划写成成果，也不得根据姓名、打卡数字或常识补写报告没有提供的成果。个人总结使用 scope=mine；团队总结使用 scope=team 且仅限队长或超级管理员。总结结果是草稿，不自动提交、审核、发布公告或发送通知；引用报告时使用 [报告#报告ID-v版本号]。`
+涉及月报总结时，如果用户未明确提供可靠的 period_id，先调用 list_report_periods 按 period_key 和状态确定周期；有多个无法唯一判断的候选时请用户选择，禁止猜测内部 ID。确定周期后调用 get_report_materials；只能依据返回的正文和 parsed_json，明确区分已完成、计划、问题、缺失材料、解析失败和正文截断，不得把计划写成成果，也不得根据姓名、打卡数字或常识补写报告没有提供的成果。个人总结使用 scope=mine；团队总结使用 scope=team 且仅限队长或超级管理员。总结结果是草稿，不自动提交、审核、发布公告或发送通知；引用报告时使用 [报告#报告ID-v版本号]。`
 
 func durableHistory(items []HistoryMessage, summary string) ([]*schema.Message, error) {
 	const maxSummaryRunes = 8000

@@ -322,6 +322,18 @@ type Report struct {
 	CurrentVersion int    `json:"current_version"`
 }
 
+type ReportPeriod struct {
+	ID            int64  `json:"id"`
+	PeriodKey     string `json:"period_key"`
+	StartsOn      string `json:"starts_on"`
+	EndsOn        string `json:"ends_on"`
+	Timezone      string `json:"timezone"`
+	DueAt         string `json:"due_at,omitempty"`
+	Status        string `json:"status"`
+	RosterVersion int64  `json:"roster_version"`
+	MemberCount   int    `json:"member_count"`
+}
+
 type ReportVersion struct {
 	ID           int64          `json:"id"`
 	ReportID     int64          `json:"report_id"`
@@ -457,6 +469,12 @@ func (c *Client) QueryTeam(ctx context.Context, period string, periodID int64, m
 	}
 	var result TeamQueryResult
 	err := c.do(ctx, http.MethodGet, "/api/analysis/team", params, nil, &result)
+	return result, err
+}
+
+func (c *Client) ListReportPeriods(ctx context.Context) ([]ReportPeriod, error) {
+	var result []ReportPeriod
+	err := c.do(ctx, http.MethodGet, "/api/report-periods", nil, nil, &result)
 	return result, err
 }
 

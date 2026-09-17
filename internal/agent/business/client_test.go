@@ -148,6 +148,32 @@ func TestClientReadsWeeklyCheckinRequirements(t *testing.T) {
 	}
 }
 
+func TestClientListsReportPeriodsWithIdentity(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/report-periods" || r.URL.RawQuery != "" {
+			t.Fatalf("unexpected request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+		}
+		if r.Header.Get("Authorization") != "Bearer member-token" || r.Header.Get("X-Agent-Internal-Secret") != "secret" {
+			t.Fatalf("identity headers were not forwarded")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":[{"id":12,"period_key":"2026-09","starts_on":"2026-09-01","ends_on":"2026-09-30","timezone":"Asia/Shanghai","due_at":"2026-10-05T23:59:59+08:00","status":"open","roster_version":2,"member_count":15}]}`))
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "secret", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithRequestContext(context.Background(), RequestContext{Authorization: "Bearer member-token", UserID: 7, Role: "member"})
+	periods, err := client.ListReportPeriods(ctx)
+	if err != nil {
+		t.Fatalf("ListReportPeriods() error = %v", err)
+	}
+	if len(periods) != 1 || periods[0].ID != 12 || periods[0].PeriodKey != "2026-09" || periods[0].DueAt == "" || periods[0].MemberCount != 15 {
+		t.Fatalf("ListReportPeriods() = %+v", periods)
+	}
+}
+
 func TestBuildKnowledgeSourcesOmitsStorageDetailsAndBoundsContent(t *testing.T) {
 	items := make([]KnowledgeItem, 0, 10)
 	for i := 0; i < 10; i++ {

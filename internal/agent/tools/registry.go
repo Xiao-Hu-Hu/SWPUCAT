@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -40,10 +41,16 @@ type teamQueryInput struct {
 }
 
 type reportMaterialsInput struct {
-	PeriodID int64  `json:"period_id" jsonschema_description:"报告周期 ID，必须由用户明确提供"`
+	PeriodID int64  `json:"period_id" jsonschema_description:"报告周期 ID，必须来自 list_report_periods 的返回值或由用户明确提供，禁止猜测"`
 	Scope    string `json:"scope,omitempty" jsonschema_description:"材料范围，只能是 mine 或 team；team 仅队长可用"`
 	Offset   int    `json:"offset,omitempty" jsonschema_description:"分页偏移，默认 0；团队总结应按 next_offset 继续读取"`
 	Limit    int    `json:"limit,omitempty" jsonschema_description:"单页材料数，默认 8，最大 8"`
+}
+
+type reportPeriodsInput struct {
+	PeriodKey string `json:"period_key,omitempty" jsonschema_description:"可选，按 YYYY-MM 精确筛选报告周期"`
+	Status    string `json:"status,omitempty" jsonschema_description:"可选，只能是 open、closed 或 archived"`
+	Limit     int    `json:"limit,omitempty" jsonschema_description:"最大返回周期数，默认 12，范围 1 到 24"`
 }
 
 type announcementDraftInput struct {
@@ -79,6 +86,14 @@ type reportMaterialsResult struct {
 	SkippedReports int              `json:"skipped_reports,omitempty"`
 }
 
+type reportPeriodsResult struct {
+	PeriodKey    string                  `json:"period_key,omitempty"`
+	Status       string                  `json:"status,omitempty"`
+	TotalPeriods int                     `json:"total_periods"`
+	Truncated    bool                    `json:"truncated"`
+	Periods      []business.ReportPeriod `json:"periods"`
+}
+
 type knowledgeSearchResult struct {
 	Query          string                     `json:"query"`
 	Sources        []business.KnowledgeSource `json:"sources"`
@@ -95,6 +110,8 @@ type Registry struct {
 	client       *business.Client
 	writeEnabled bool
 }
+
+var reportPeriodKeyPattern = regexp.MustCompile(`^\d{4}-(0[1-9]|1[0-2])$`)
 
 type budgetTool struct {
 	tool.InvokableTool
@@ -299,9 +316,55 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
+	reportPeriodsTool, err := toolutils.InferTool[reportPeriodsInput, string](
+		"list_report_periods",
+		"查询可用月报周期及其 period_id，可按 YYYY-MM 和 open、closed、archived 状态筛选；读取月报材料前用它确定周期，不能猜测 ID。",
+		func(ctx context.Context, input reportPeriodsInput) (string, error) {
+			input.PeriodKey = strings.TrimSpace(input.PeriodKey)
+			input.Status = strings.TrimSpace(input.Status)
+			if input.PeriodKey != "" && !reportPeriodKeyPattern.MatchString(input.PeriodKey) {
+				return "", fmt.Errorf("period_key must use YYYY-MM")
+			}
+			if input.Status != "" && input.Status != "open" && input.Status != "closed" && input.Status != "archived" {
+				return "", fmt.Errorf("status must be open, closed, or archived")
+			}
+			limit := input.Limit
+			if limit == 0 {
+				limit = 12
+			}
+			if limit < 1 || limit > 24 {
+				return "", fmt.Errorf("limit must be between 1 and 24")
+			}
+			periods, err := r.client.ListReportPeriods(ctx)
+			if err != nil {
+				return "", err
+			}
+			sort.SliceStable(periods, func(i, j int) bool {
+				if periods[i].StartsOn == periods[j].StartsOn {
+					return periods[i].ID > periods[j].ID
+				}
+				return periods[i].StartsOn > periods[j].StartsOn
+			})
+			matched := make([]business.ReportPeriod, 0, limit)
+			total := 0
+			for _, period := range periods {
+				if (input.PeriodKey != "" && period.PeriodKey != input.PeriodKey) || (input.Status != "" && period.Status != input.Status) {
+					continue
+				}
+				total++
+				if len(matched) < limit {
+					matched = append(matched, period)
+				}
+			}
+			return marshal(reportPeriodsResult{PeriodKey: input.PeriodKey, Status: input.Status, TotalPeriods: total, Truncated: total > len(matched), Periods: matched})
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
 	reportTool, err := toolutils.InferTool[reportMaterialsInput, string](
 		"get_report_materials",
-		"读取指定报告周期内可用于总结的已提交月报正文。scope=mine 读取当前用户，scope=team 仅队长读取团队材料；按 offset/limit 分页直到 next_offset 为空；不会读取草稿，也不会发布总结。",
+		"读取指定报告周期内可用于总结的已提交月报正文。period_id 必须来自 list_report_periods 或用户明确提供；scope=mine 读取当前用户，scope=team 仅队长读取团队材料；按 offset/limit 分页直到 next_offset 为空；不会读取草稿，也不会发布总结。",
 		func(ctx context.Context, input reportMaterialsInput) (string, error) {
 			if input.PeriodID <= 0 {
 				return "", fmt.Errorf("period_id is required")
@@ -394,7 +457,7 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
-	result := []tool.BaseTool{statusTool, personalWorkHoursTool, checkinHistoryTool, checkinRequirementsTool, knowledgeTool, recommendTool, teamQueryTool, statsTool, reportTool}
+	result := []tool.BaseTool{statusTool, personalWorkHoursTool, checkinHistoryTool, checkinRequirementsTool, knowledgeTool, recommendTool, teamQueryTool, statsTool, reportPeriodsTool, reportTool}
 	if r.writeEnabled {
 		result = append(result, announcementDraftTool)
 		clockInTool, err := toolutils.InferTool[emptyInput, string](

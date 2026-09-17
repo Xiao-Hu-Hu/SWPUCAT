@@ -163,6 +163,89 @@ func TestCheckinRequirementsToolIsAvailableToMembers(t *testing.T) {
 	}
 }
 
+func TestReportPeriodsToolValidatesFiltersSortsAndLimits(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.Method != http.MethodGet || r.URL.Path != "/api/report-periods" || r.URL.RawQuery != "" {
+			t.Fatalf("unexpected request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+		}
+		if r.Header.Get("Authorization") != "Bearer member-token" {
+			t.Fatalf("authorization header = %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":[{"id":9,"period_key":"2026-06","starts_on":"2026-06-01","ends_on":"2026-06-30","timezone":"Asia/Shanghai","status":"open","roster_version":1,"member_count":10},{"id":11,"period_key":"2026-08","starts_on":"2026-08-01","ends_on":"2026-08-31","timezone":"Asia/Shanghai","status":"open","roster_version":1,"member_count":12},{"id":13,"period_key":"2026-10","starts_on":"2026-10-01","ends_on":"2026-10-31","timezone":"Asia/Shanghai","status":"closed","roster_version":1,"member_count":12},{"id":12,"period_key":"2026-09","starts_on":"2026-09-01","ends_on":"2026-09-30","timezone":"Asia/Shanghai","status":"open","roster_version":2,"member_count":15},{"id":8,"period_key":"2026-07","starts_on":"2026-07-01","ends_on":"2026-07-31","timezone":"Asia/Shanghai","status":"open","roster_version":1,"member_count":9}]}`))
+	}))
+	defer server.Close()
+	client, err := business.NewClient(server.URL, "", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered, err := NewRegistry(client, false).Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := findRegisteredTool(t, registered, "list_report_periods")
+	invokable, ok := item.(einotool.InvokableTool)
+	if !ok {
+		t.Fatal("list_report_periods is not invokable")
+	}
+	ctx := business.WithRequestContext(context.Background(), business.RequestContext{Authorization: "Bearer member-token", UserID: 7, Role: "member"})
+	for _, arguments := range []string{
+		`{"period_key":"2026-13"}`,
+		`{"period_key":"26-09"}`,
+		`{"status":"draft"}`,
+		`{"limit":-1}`,
+		`{"limit":25}`,
+	} {
+		if _, err := invokable.InvokableRun(ctx, arguments); err == nil {
+			t.Fatalf("arguments %s unexpectedly succeeded", arguments)
+		}
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("invalid filters issued %d HTTP requests", requests.Load())
+	}
+
+	output, err := invokable.InvokableRun(ctx, `{"status":"open","limit":2}`)
+	if err != nil {
+		t.Fatalf("filtered invocation error = %v", err)
+	}
+	var result reportPeriodsResult
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("decode filtered output: %v", err)
+	}
+	if result.TotalPeriods != 4 || !result.Truncated || len(result.Periods) != 2 || result.Periods[0].ID != 12 || result.Periods[1].ID != 11 {
+		t.Fatalf("filtered periods = %+v", result)
+	}
+
+	result = reportPeriodsResult{}
+	output, err = invokable.InvokableRun(ctx, `{"period_key":"2026-08","limit":1}`)
+	if err != nil {
+		t.Fatalf("exact invocation error = %v", err)
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("decode exact output: %v", err)
+	}
+	if result.TotalPeriods != 1 || result.Truncated || len(result.Periods) != 1 || result.Periods[0].ID != 11 {
+		t.Fatalf("exact periods = %+v", result)
+	}
+
+	result = reportPeriodsResult{}
+	output, err = invokable.InvokableRun(ctx, `{"period_key":"2025-01"}`)
+	if err != nil {
+		t.Fatalf("empty invocation error = %v", err)
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("decode empty output: %v", err)
+	}
+	if result.TotalPeriods != 0 || result.Periods == nil || len(result.Periods) != 0 {
+		t.Fatalf("empty periods = %+v", result)
+	}
+	if requests.Load() != 3 {
+		t.Fatalf("valid filters issued %d HTTP requests, want 3", requests.Load())
+	}
+}
+
 func findRegisteredTool(t *testing.T, items []einotool.BaseTool, name string) einotool.BaseTool {
 	t.Helper()
 	for _, item := range items {
