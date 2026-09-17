@@ -27,6 +27,10 @@ type statsInput struct {
 	Period string `json:"period,omitempty" jsonschema_description:"统计周期，只能是 today、week 或 month"`
 }
 
+type checkinHistoryInput struct {
+	Limit int `json:"limit,omitempty" jsonschema_description:"最近打卡动作数量，默认 20，范围 1 到 100"`
+}
+
 type teamQueryInput struct {
 	Period       string   `json:"period,omitempty" jsonschema_description:"统计周期，只能是 today、week 或 month"`
 	PeriodID     int64    `json:"period_id,omitempty" jsonschema_description:"月报周期 ID；需要结合月报状态筛选时必须提供"`
@@ -80,6 +84,11 @@ type knowledgeSearchResult struct {
 	Sources        []business.KnowledgeSource `json:"sources"`
 	Truncated      bool                       `json:"truncated,omitempty"`
 	OmittedSources int                        `json:"omitted_sources,omitempty"`
+}
+
+type checkinHistoryResult struct {
+	Limit   int                      `json:"limit"`
+	Records []business.CheckinRecord `json:"records"`
 }
 
 type Registry struct {
@@ -140,6 +149,30 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 				return "", err
 			}
 			return marshal(result)
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	checkinHistoryTool, err := toolutils.InferTool[checkinHistoryInput, string](
+		"get_my_checkin_history",
+		"查询当前登录成员最近的打卡动作，按最新优先返回；结果是原始上班/下班动作，不是已配对工时，不接受用户 ID，也不能查询他人。",
+		func(ctx context.Context, input checkinHistoryInput) (string, error) {
+			limit := input.Limit
+			if limit == 0 {
+				limit = 20
+			}
+			if limit < 1 || limit > 100 {
+				return "", fmt.Errorf("limit must be between 1 and 100")
+			}
+			records, err := r.client.GetMyCheckinRecords(ctx, limit)
+			if err != nil {
+				return "", err
+			}
+			if records == nil {
+				records = make([]business.CheckinRecord, 0)
+			}
+			return marshal(checkinHistoryResult{Limit: limit, Records: records})
 		},
 	)
 	if err != nil {
@@ -344,7 +377,7 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
-	result := []tool.BaseTool{statusTool, personalWorkHoursTool, knowledgeTool, recommendTool, teamQueryTool, statsTool, reportTool}
+	result := []tool.BaseTool{statusTool, personalWorkHoursTool, checkinHistoryTool, knowledgeTool, recommendTool, teamQueryTool, statsTool, reportTool}
 	if r.writeEnabled {
 		result = append(result, announcementDraftTool)
 		clockInTool, err := toolutils.InferTool[emptyInput, string](

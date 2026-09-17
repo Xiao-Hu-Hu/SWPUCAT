@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -60,6 +61,66 @@ func TestPersonalWorkHoursToolIsReadOnlyAndUserScoped(t *testing.T) {
 	}
 	if result.UserID != 7 || result.Week.TotalMinutes != 240 || result.Month.TotalMinutes != 960 {
 		t.Fatalf("tool output = %+v", result)
+	}
+}
+
+func TestPersonalCheckinHistoryToolDefaultsAndBoundsLimit(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.Method != http.MethodGet || r.URL.Path != "/api/checkin/records" || r.URL.Query().Get("limit") != "20" {
+			t.Fatalf("unexpected request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+		}
+		if r.Header.Get("Authorization") != "Bearer member-token" {
+			t.Fatalf("authorization header = %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":[{"id":9,"type":"out","date":"2026-09-17","time":"18:00:00"}]}`))
+	}))
+	defer server.Close()
+	client, err := business.NewClient(server.URL, "", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered, err := NewRegistry(client, false).Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := findRegisteredTool(t, registered, "get_my_checkin_history")
+	info, err := item.Info(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	schemaJSON, err := json.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(schemaJSON), `"user_id"`) {
+		t.Fatalf("history tool unexpectedly accepts user_id: %s", schemaJSON)
+	}
+	invokable, ok := item.(einotool.InvokableTool)
+	if !ok {
+		t.Fatal("get_my_checkin_history is not invokable")
+	}
+	ctx := business.WithRequestContext(context.Background(), business.RequestContext{Authorization: "Bearer member-token", UserID: 7, Role: "member"})
+	for _, arguments := range []string{`{"limit":-1}`, `{"limit":101}`} {
+		if _, err := invokable.InvokableRun(ctx, arguments); err == nil {
+			t.Fatalf("arguments %s unexpectedly succeeded", arguments)
+		}
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("invalid input issued %d HTTP requests", requests.Load())
+	}
+	output, err := invokable.InvokableRun(ctx, `{}`)
+	if err != nil {
+		t.Fatalf("default invocation error = %v", err)
+	}
+	var result checkinHistoryResult
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("decode tool output: %v", err)
+	}
+	if requests.Load() != 1 || result.Limit != 20 || len(result.Records) != 1 || result.Records[0].ID != 9 {
+		t.Fatalf("history result = %+v, requests=%d", result, requests.Load())
 	}
 }
 

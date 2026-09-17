@@ -96,6 +96,32 @@ func TestClientReadsOnlyAuthenticatedMembersWorkHours(t *testing.T) {
 	}
 }
 
+func TestClientReadsAuthenticatedMembersCheckinHistory(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/checkin/records" || r.URL.Query().Get("limit") != "20" {
+			t.Fatalf("unexpected request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+		}
+		if r.Header.Get("Authorization") != "Bearer member-token" {
+			t.Fatalf("authorization header = %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":[{"id":9,"type":"out","date":"2026-09-17","time":"18:00:00"},{"id":8,"type":"in","date":"2026-09-17","time":"09:00:00"}]}`))
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithRequestContext(context.Background(), RequestContext{Authorization: "Bearer member-token", UserID: 7, Role: "member"})
+	records, err := client.GetMyCheckinRecords(ctx, 20)
+	if err != nil {
+		t.Fatalf("GetMyCheckinRecords() error = %v", err)
+	}
+	if len(records) != 2 || records[0].ID != 9 || records[0].Type != "out" || records[1].ID != 8 {
+		t.Fatalf("GetMyCheckinRecords() = %+v", records)
+	}
+}
+
 func TestBuildKnowledgeSourcesOmitsStorageDetailsAndBoundsContent(t *testing.T) {
 	items := make([]KnowledgeItem, 0, 10)
 	for i := 0; i < 10; i++ {

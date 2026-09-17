@@ -58,6 +58,13 @@ type CheckinStatus struct {
 	ClockOut string `json:"clock_out,omitempty"`
 }
 
+type CheckinRecord struct {
+	ID   int64  `json:"id"`
+	Type string `json:"type"`
+	Date string `json:"date"`
+	Time string `json:"time"`
+}
+
 type PersonalPeriodStats struct {
 	StartsOn        string   `json:"starts_on"`
 	EndsOn          string   `json:"ends_on"`
@@ -363,6 +370,14 @@ func (c *Client) CheckinStatus(ctx context.Context) (CheckinStatus, error) {
 func (c *Client) GetMyWorkHours(ctx context.Context) (PersonalWorkHours, error) {
 	var result PersonalWorkHours
 	err := c.do(ctx, http.MethodGet, "/api/checkin/me/work-hours", nil, nil, &result)
+	return result, err
+}
+
+func (c *Client) GetMyCheckinRecords(ctx context.Context, limit int) ([]CheckinRecord, error) {
+	params := url.Values{}
+	params.Set("limit", fmt.Sprintf("%d", limit))
+	var result []CheckinRecord
+	err := c.do(ctx, http.MethodGet, "/api/checkin/records", params, nil, &result)
 	return result, err
 }
 
