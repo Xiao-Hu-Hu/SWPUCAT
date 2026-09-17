@@ -90,6 +90,9 @@ type KnowledgeItemDTO struct {
 	RejectReason string `json:"reject_reason,omitempty"`
 	ReviewerID   int64  `json:"reviewer_id,omitempty"`
 	ReviewerName string `json:"reviewer_name,omitempty"`
+	SourceOrigin string `json:"source_origin"`
+	SourceKey    string `json:"source_key,omitempty"`
+	Revision     int    `json:"revision"`
 	CreatedAt    string `json:"created_at"`
 }
 
@@ -141,6 +144,12 @@ func (s *KnowledgeService) DeleteItem(ctx context.Context, itemID, userID int64,
 	item, err := s.repo.FindItemByID(ctx, itemID)
 	if err != nil {
 		return err
+	}
+	// Official catalog entries are versioned by migrations. Keep them outside
+	// the generic item deletion path so a cited source cannot disappear because
+	// of an accidental UI action.
+	if item.IsOfficial() {
+		return shared.ErrForbidden
 	}
 	if !isCaptain && !item.IsOwnedBy(userID) {
 		return shared.ErrForbidden
@@ -476,6 +485,9 @@ func toItemDTO(item *knowledge.KnowledgeItem) *KnowledgeItemDTO {
 		RejectReason: item.RejectReason,
 		ReviewerID:   item.ReviewerID,
 		ReviewerName: item.ReviewerName,
+		SourceOrigin: item.SourceOrigin,
+		SourceKey:    item.SourceKey,
+		Revision:     item.Revision,
 		CreatedAt:    item.CreatedAt.Format("2006-01-02"),
 	}
 }

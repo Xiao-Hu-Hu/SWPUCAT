@@ -27,10 +27,18 @@ type KnowledgeItem struct {
 	RejectReason string
 	ReviewerID   int64
 	ReviewerName string
+	SourceOrigin string
+	SourceKey    string
+	Revision     int
 	DeletedAt    *time.Time
 	DeletedBy    int64
 	CreatedAt    time.Time
 }
+
+const (
+	SourceOriginUser            = "user"
+	SourceOriginOfficialCatalog = "official_catalog"
+)
 
 func NewLink(name, url, description string, categoryID, uploaderID int64, uploaderName string) (*KnowledgeItem, error) {
 	if name == "" {
@@ -49,6 +57,8 @@ func NewLink(name, url, description string, categoryID, uploaderID int64, upload
 		UploaderName: uploaderName,
 		Status:       ItemStatusApproved,
 		Approved:     true,
+		SourceOrigin: SourceOriginUser,
+		Revision:     1,
 		CreatedAt:    time.Now(),
 	}, nil
 }
@@ -72,6 +82,8 @@ func NewFile(name, description, fileSize, fileKey string, categoryID, uploaderID
 		UploaderName: uploaderName,
 		Status:       status,
 		Approved:     approved,
+		SourceOrigin: SourceOriginUser,
+		Revision:     1,
 		CreatedAt:    time.Now(),
 	}, nil
 }
@@ -127,6 +139,10 @@ func (k *KnowledgeItem) IsDeleted() bool {
 
 func (k *KnowledgeItem) IsOwnedBy(userID int64) bool {
 	return k.UploaderID == userID
+}
+
+func (k *KnowledgeItem) IsOfficial() bool {
+	return k.SourceOrigin == SourceOriginOfficialCatalog && k.SourceKey != ""
 }
 
 func (k *KnowledgeItem) IsVisibleTo(viewerID int64, canReview bool) bool {

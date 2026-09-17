@@ -32,6 +32,9 @@ const items = ref<Array<{
   uploader_id: number
   uploader_name: string
   approved: boolean
+  source_origin: string
+  source_key?: string
+  revision: number
   created_at: string
 }>>([])
 
@@ -382,6 +385,7 @@ async function handleDownloadFile(id: number, name: string) {
                 <span>{{ item.uploader_name }}</span>
                 <span>{{ item.created_at }}</span>
                 <span v-if="item.file_size">{{ item.file_size }}</span>
+                <el-tag v-if="item.source_origin === 'official_catalog'" size="small" type="success">官方 · v{{ item.revision }}</el-tag>
               </div>
             </div>
             <div class="item-actions" v-if="item.description">
@@ -401,7 +405,7 @@ async function handleDownloadFile(id: number, name: string) {
                 {{ downloading[item.id] !== undefined ? (downloading[item.id] < 100 ? `${downloading[item.id]}%` : '完成') : '下载' }}
               </el-button>
               <el-button
-                v-if="authStore.isCaptain || authStore.user?.id === item.uploader_id"
+                v-if="item.source_origin !== 'official_catalog' && (authStore.isCaptain || authStore.user?.id === item.uploader_id)"
                 size="small"
                 type="danger"
                 @click="handleDeleteItem(item.id)"

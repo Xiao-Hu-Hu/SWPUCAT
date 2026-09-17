@@ -20,6 +20,12 @@ func NewKnowledgeRepo(db *gorm.DB) *KnowledgeRepo {
 
 func (r *KnowledgeRepo) CreateItem(ctx context.Context, item *knowledge.KnowledgeItem) error {
 	item.SetStatus(item.EffectiveStatus())
+	if item.SourceOrigin == "" {
+		item.SourceOrigin = knowledge.SourceOriginUser
+	}
+	if item.Revision < 1 {
+		item.Revision = 1
+	}
 	model := &database.KnowledgeItemModel{
 		Type:         string(item.Type),
 		Name:         item.Name,
@@ -36,6 +42,9 @@ func (r *KnowledgeRepo) CreateItem(ctx context.Context, item *knowledge.Knowledg
 		RejectReason: item.RejectReason,
 		ReviewerID:   item.ReviewerID,
 		ReviewerName: item.ReviewerName,
+		SourceOrigin: item.SourceOrigin,
+		SourceKey:    item.SourceKey,
+		Revision:     item.Revision,
 		DeletedAt:    item.DeletedAt,
 		DeletedBy:    item.DeletedBy,
 		CreatedAt:    item.CreatedAt,
@@ -352,6 +361,9 @@ func toDomainKnowledgeItem(model *database.KnowledgeItemModel) *knowledge.Knowle
 		RejectReason: model.RejectReason,
 		ReviewerID:   model.ReviewerID,
 		ReviewerName: model.ReviewerName,
+		SourceOrigin: model.SourceOrigin,
+		SourceKey:    model.SourceKey,
+		Revision:     model.Revision,
 		DeletedAt:    model.DeletedAt,
 		DeletedBy:    model.DeletedBy,
 		CreatedAt:    model.CreatedAt,

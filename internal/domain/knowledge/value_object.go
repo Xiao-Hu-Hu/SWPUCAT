@@ -7,12 +7,13 @@ import (
 type ItemType string
 
 const (
-	ItemTypeLink ItemType = "link"
-	ItemTypeFile ItemType = "file"
+	ItemTypeLink    ItemType = "link"
+	ItemTypeFile    ItemType = "file"
+	ItemTypeArticle ItemType = "article"
 )
 
 func (t ItemType) IsValid() bool {
-	return t == ItemTypeLink || t == ItemTypeFile
+	return t == ItemTypeLink || t == ItemTypeFile || t == ItemTypeArticle
 }
 
 type ItemStatus string

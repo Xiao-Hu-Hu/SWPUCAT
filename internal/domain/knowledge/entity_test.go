@@ -73,3 +73,22 @@ func TestKnowledgeItemStatusSynchronizesLegacyFlags(t *testing.T) {
 		t.Fatalf("delete produced inconsistent state: %+v", item)
 	}
 }
+
+func TestOfficialArticleIdentity(t *testing.T) {
+	if !ItemTypeArticle.IsValid() {
+		t.Fatal("article must be a valid knowledge item type")
+	}
+	item := KnowledgeItem{
+		Type:         ItemTypeArticle,
+		SourceOrigin: SourceOriginOfficialCatalog,
+		SourceKey:    "official.checkin-policy",
+		Revision:     1,
+	}
+	if !item.IsOfficial() {
+		t.Fatalf("managed catalog identity was not recognized: %+v", item)
+	}
+	item.SourceKey = ""
+	if item.IsOfficial() {
+		t.Fatal("an official origin without a stable source key must not be managed")
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	domain "SWPUCAT/internal/domain/knowledge"
+	"SWPUCAT/internal/domain/shared"
 	"SWPUCAT/internal/infrastructure/event"
 )
 
@@ -139,6 +140,21 @@ func TestRejectKeepsAttachmentForAudit(t *testing.T) {
 	}
 	if fileKey != "" || repo.item.FileKey == "" || repo.item.EffectiveStatus() != domain.ItemStatusRejected {
 		t.Fatalf("rejection lost audit attachment: key=%q item=%+v", fileKey, repo.item)
+	}
+}
+
+func TestOfficialCatalogItemCannotUseGenericDelete(t *testing.T) {
+	repo := &stateRepository{item: &domain.KnowledgeItem{
+		ID:           17,
+		Type:         domain.ItemTypeArticle,
+		Status:       domain.ItemStatusApproved,
+		SourceOrigin: domain.SourceOriginOfficialCatalog,
+		SourceKey:    "official.faq",
+		UploaderID:   9,
+	}}
+	svc := NewKnowledgeService(repo, event.NewNoOpPublisher())
+	if err := svc.DeleteItem(context.Background(), 17, 9, true); !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("official catalog item deletion error = %v, want forbidden", err)
 	}
 }
 

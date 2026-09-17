@@ -127,6 +127,9 @@ type KnowledgeItemModel struct {
 	RejectReason string     `gorm:"size:512"`
 	ReviewerID   int64      `gorm:"index"`
 	ReviewerName string     `gorm:"size:32"`
+	SourceOrigin string     `gorm:"size:24;not null;default:user;index"`
+	SourceKey    string     `gorm:"size:128"`
+	Revision     int        `gorm:"not null;default:1"`
 	DeletedAt    *time.Time `gorm:"index"`
 	DeletedBy    int64
 	CreatedAt    time.Time `gorm:"not null;default:current_timestamp"`

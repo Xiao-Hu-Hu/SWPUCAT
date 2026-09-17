@@ -293,6 +293,7 @@ function sourceExcerpt(source: AgentKnowledgeSource): string {
 }
 
 function sourceKindLabel(source: AgentKnowledgeSource): string {
+  if (source.type === 'article') return '官方文章'
   if (source.type === 'file' || source.source_kind === 'file') return '文件'
   if (source.type === 'link' || source.source_kind === 'link') return '链接'
   return '资料'
