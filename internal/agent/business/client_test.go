@@ -67,6 +67,35 @@ func TestClientForwardsIdentityAndIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestClientReadsOnlyAuthenticatedMembersWorkHours(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/checkin/me/work-hours" || r.URL.RawQuery != "" {
+			t.Fatalf("unexpected request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+		}
+		if r.Header.Get("Authorization") != "Bearer member-token" || r.Header.Get("X-Agent-Internal-Secret") != "secret" {
+			t.Fatalf("identity headers were not forwarded")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"as_of_date":"2026-09-17","user_id":7,"nickname":"成员甲","week":{"starts_on":"2026-09-14","ends_on":"2026-09-17","total_minutes":240,"total_hours":4,"record_days":2,"attendance_state":"normal","anomalies":[]},"month":{"starts_on":"2026-09-01","ends_on":"2026-09-17","total_minutes":960,"total_hours":16,"record_days":8,"attendance_state":"normal","anomalies":[]},"weekly_requirement":{"grade":3,"required_minutes":360,"required_hours":6,"is_met":false,"shortfall_minutes":120,"shortfall_hours":2,"status":"below_target"}}}`))
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "secret", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithRequestContext(context.Background(), RequestContext{Authorization: "Bearer member-token", UserID: 7, Role: "member"})
+	result, err := client.GetMyWorkHours(ctx)
+	if err != nil {
+		t.Fatalf("GetMyWorkHours() error = %v", err)
+	}
+	if result.UserID != 7 || result.Week.TotalMinutes != 240 || result.Month.TotalMinutes != 960 {
+		t.Fatalf("GetMyWorkHours() = %+v", result)
+	}
+	if result.WeeklyRequirement.IsMet == nil || *result.WeeklyRequirement.IsMet || result.WeeklyRequirement.ShortfallMinutes == nil || *result.WeeklyRequirement.ShortfallMinutes != 120 {
+		t.Fatalf("weekly requirement = %+v", result.WeeklyRequirement)
+	}
+}
+
 func TestBuildKnowledgeSourcesOmitsStorageDetailsAndBoundsContent(t *testing.T) {
 	items := make([]KnowledgeItem, 0, 10)
 	for i := 0; i < 10; i++ {

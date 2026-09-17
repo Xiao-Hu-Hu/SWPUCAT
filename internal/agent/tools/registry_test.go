@@ -2,10 +2,81 @@ package tools
 
 import (
 	"SWPUCAT/internal/agent/business"
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	einotool "github.com/cloudwego/eino/components/tool"
 )
+
+func TestPersonalWorkHoursToolIsReadOnlyAndUserScoped(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/checkin/me/work-hours" || r.URL.RawQuery != "" {
+			t.Fatalf("unexpected request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+		}
+		if r.Header.Get("Authorization") != "Bearer member-token" {
+			t.Fatalf("authorization header = %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"as_of_date":"2026-09-17","user_id":7,"nickname":"成员甲","week":{"starts_on":"2026-09-14","ends_on":"2026-09-17","total_minutes":240,"total_hours":4,"record_days":2,"attendance_state":"normal","anomalies":[]},"month":{"starts_on":"2026-09-01","ends_on":"2026-09-17","total_minutes":960,"total_hours":16,"record_days":8,"attendance_state":"normal","anomalies":[]},"weekly_requirement":{"grade":3,"required_minutes":360,"required_hours":6,"is_met":false,"shortfall_minutes":120,"shortfall_hours":2,"status":"below_target"}}}`))
+	}))
+	defer server.Close()
+	client, err := business.NewClient(server.URL, "secret", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered, err := NewRegistry(client, false).Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := findRegisteredTool(t, registered, "get_my_work_hours")
+	info, err := item.Info(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	schemaJSON, err := json.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(schemaJSON), `"user_id"`) {
+		t.Fatalf("personal tool unexpectedly accepts user_id: %s", schemaJSON)
+	}
+	invokable, ok := item.(einotool.InvokableTool)
+	if !ok {
+		t.Fatal("get_my_work_hours is not invokable")
+	}
+	ctx := business.WithRequestContext(context.Background(), business.RequestContext{Authorization: "Bearer member-token", UserID: 7, Role: "member"})
+	output, err := invokable.InvokableRun(ctx, `{}`)
+	if err != nil {
+		t.Fatalf("InvokableRun() error = %v", err)
+	}
+	var result business.PersonalWorkHours
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("decode tool output: %v", err)
+	}
+	if result.UserID != 7 || result.Week.TotalMinutes != 240 || result.Month.TotalMinutes != 960 {
+		t.Fatalf("tool output = %+v", result)
+	}
+}
+
+func findRegisteredTool(t *testing.T, items []einotool.BaseTool, name string) einotool.BaseTool {
+	t.Helper()
+	for _, item := range items {
+		info, err := item.Info(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Name == name {
+			return item
+		}
+	}
+	t.Fatalf("tool %q is not registered", name)
+	return nil
+}
 
 func TestMergeReportsFiltersMineAndDeduplicatesReviewedVersions(t *testing.T) {
 	submitted := []business.Report{{ID: 1, AuthorID: 7}, {ID: 2, AuthorID: 8}}

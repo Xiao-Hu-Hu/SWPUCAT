@@ -58,6 +58,36 @@ type CheckinStatus struct {
 	ClockOut string `json:"clock_out,omitempty"`
 }
 
+type PersonalPeriodStats struct {
+	StartsOn        string   `json:"starts_on"`
+	EndsOn          string   `json:"ends_on"`
+	TotalMinutes    float64  `json:"total_minutes"`
+	TotalHours      float64  `json:"total_hours"`
+	RecordDays      int      `json:"record_days"`
+	AttendanceState string   `json:"attendance_state"`
+	Anomalies       []string `json:"anomalies"`
+}
+
+type WeeklyRequirementProgress struct {
+	Grade            int      `json:"grade,omitempty"`
+	RequiredMinutes  *int     `json:"required_minutes,omitempty"`
+	RequiredHours    *float64 `json:"required_hours,omitempty"`
+	IsMet            *bool    `json:"is_met,omitempty"`
+	ShortfallMinutes *float64 `json:"shortfall_minutes,omitempty"`
+	ShortfallHours   *float64 `json:"shortfall_hours,omitempty"`
+	Status           string   `json:"status"`
+	UnknownReason    string   `json:"unknown_reason,omitempty"`
+}
+
+type PersonalWorkHours struct {
+	AsOfDate          string                    `json:"as_of_date"`
+	UserID            int64                     `json:"user_id"`
+	Nickname          string                    `json:"nickname"`
+	Week              PersonalPeriodStats       `json:"week"`
+	Month             PersonalPeriodStats       `json:"month"`
+	WeeklyRequirement WeeklyRequirementProgress `json:"weekly_requirement"`
+}
+
 type KnowledgeItem struct {
 	ID           int64   `json:"id"`
 	Type         string  `json:"type"`
@@ -327,6 +357,12 @@ type AnnouncementDraft struct {
 func (c *Client) CheckinStatus(ctx context.Context) (CheckinStatus, error) {
 	var result CheckinStatus
 	err := c.do(ctx, http.MethodGet, "/api/checkin/status", nil, nil, &result)
+	return result, err
+}
+
+func (c *Client) GetMyWorkHours(ctx context.Context) (PersonalWorkHours, error) {
+	var result PersonalWorkHours
+	err := c.do(ctx, http.MethodGet, "/api/checkin/me/work-hours", nil, nil, &result)
 	return result, err
 }
 

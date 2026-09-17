@@ -131,6 +131,20 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
+	personalWorkHoursTool, err := toolutils.InferTool[emptyInput, string](
+		"get_my_work_hours",
+		"查询当前登录成员本周和本月的累计工时、异常，以及后端确定性计算的每周要求、是否达标和还差多久；不接受用户 ID，也不能查询他人。",
+		func(ctx context.Context, _ emptyInput) (string, error) {
+			result, err := r.client.GetMyWorkHours(ctx)
+			if err != nil {
+				return "", err
+			}
+			return marshal(result)
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
 	teamQueryTool, err := toolutils.InferTool[teamQueryInput, string](
 		"query_team_members",
 		"将队长的自然语言组合查询转换为受限条件，后端确定性计算打卡和月报状态；不能生成或执行 SQL，也不会自动发送通知。",
@@ -330,7 +344,7 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
-	result := []tool.BaseTool{statusTool, knowledgeTool, recommendTool, teamQueryTool, statsTool, reportTool}
+	result := []tool.BaseTool{statusTool, personalWorkHoursTool, knowledgeTool, recommendTool, teamQueryTool, statsTool, reportTool}
 	if r.writeEnabled {
 		result = append(result, announcementDraftTool)
 		clockInTool, err := toolutils.InferTool[emptyInput, string](
