@@ -28,9 +28,37 @@ func TestDisabledEngineDoesNotRequireLLMSecrets(t *testing.T) {
 	if engine.Enabled() {
 		t.Fatal("disabled engine reports enabled")
 	}
-	_, err = engine.Chat(context.Background(), ChatRequest{Message: "hello"})
+	response, err := engine.Chat(context.Background(), ChatRequest{Message: "hello"})
 	if !errors.Is(err, ErrDisabled) {
 		t.Fatalf("Chat() error = %v, want ErrDisabled", err)
+	}
+	if response.Telemetry.StartedAt.IsZero() || response.Telemetry.FinishedAt.IsZero() || response.Telemetry.ModelCallCount != 0 || response.Telemetry.ToolCallCount != 0 {
+		t.Fatalf("disabled response telemetry = %#v", response.Telemetry)
+	}
+}
+
+func TestChatResponseDoesNotSerializeTelemetry(t *testing.T) {
+	engine, err := NewEngine(context.Background(), config.AgentConfig{
+		Enabled:           false,
+		Port:              8090,
+		MaxIterations:     4,
+		MaxToolCalls:      8,
+		WorkerConcurrency: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, _ := engine.Chat(context.Background(), ChatRequest{Message: "hello"})
+	response.Answer = "answer"
+	response.SessionID = "session"
+	data, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"telemetry", "started_at", "model_calls", "tool_calls"} {
+		if strings.Contains(string(data), forbidden) {
+			t.Fatalf("serialized ChatResponse exposed %q: %s", forbidden, data)
+		}
 	}
 }
 

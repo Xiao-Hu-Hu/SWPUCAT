@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"SWPUCAT/internal/agent/business"
+	"SWPUCAT/internal/agent/telemetry"
 	agenttools "SWPUCAT/internal/agent/tools"
 	"SWPUCAT/internal/infrastructure/config"
 
@@ -55,6 +56,7 @@ type ChatResponse struct {
 	Answer    string                     `json:"answer"`
 	SessionID string                     `json:"session_id"`
 	Sources   []business.KnowledgeSource `json:"sources,omitempty"`
+	Telemetry telemetry.Snapshot         `json:"-"`
 }
 
 // Engine owns the Eino ChatModelAgent and the short-lived session history.
@@ -115,6 +117,9 @@ func NewEngine(ctx context.Context, cfg config.AgentConfig) (*Engine, error) {
 		Model:         model,
 		MaxIterations: cfg.MaxIterations,
 		ToolsConfig:   adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: registeredTools}},
+		Handlers: []adk.ChatModelAgentMiddleware{
+			telemetry.NewMiddleware(cfg.LLMProvider, cfg.LLMModel),
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create Eino ChatModelAgent: %w", err)
@@ -125,7 +130,13 @@ func NewEngine(ctx context.Context, cfg config.AgentConfig) (*Engine, error) {
 
 func (e *Engine) Enabled() bool { return e.enabled }
 
-func (e *Engine) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
+func (e *Engine) Chat(ctx context.Context, req ChatRequest) (response ChatResponse, err error) {
+	collector := telemetry.NewCollector()
+	ctx = telemetry.WithCollector(ctx, collector)
+	defer func() {
+		response.Telemetry = collector.Snapshot()
+	}()
+
 	if !e.enabled || e.runner == nil {
 		return ChatResponse{}, ErrDisabled
 	}
