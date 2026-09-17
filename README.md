@@ -291,11 +291,14 @@ docker compose --env-file .env -f deployments/docker-compose.yml up -d --build
 |------|------|------|
 | GET | `/api/knowledge/items` | 获取资源列表 |
 | GET | `/api/knowledge/items/pending` | 获取待审批资源 |
+| GET | `/api/knowledge/items/quarantined` | 获取已隔离资源（队长/管理员） |
 | GET | `/api/knowledge/items/my` | 获取我的资源 |
 | GET | `/api/knowledge/items/:id` | 获取资源详情 |
 | POST | `/api/knowledge/links` | 添加链接 |
 | POST | `/api/knowledge/files` | 上传文件 |
 | DELETE | `/api/knowledge/items/:id` | 删除资源 |
+| POST | `/api/knowledge/items/:id/quarantine` | 隔离已审核资源（队长/管理员） |
+| POST | `/api/knowledge/items/:id/restore` | 恢复已隔离资源（队长/管理员） |
 | PUT | `/api/knowledge/items/:id/approve` | 审批通过 |
 | PUT | `/api/knowledge/items/:id/reject` | 审批拒绝 |
 | GET | `/api/knowledge/download/:id` | 下载文件 |

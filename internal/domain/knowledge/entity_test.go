@@ -1,6 +1,9 @@
 package knowledge
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestKnowledgeItemVisibility(t *testing.T) {
 	tests := []struct {
@@ -47,6 +50,19 @@ func TestKnowledgeItemVisibility(t *testing.T) {
 			viewerID: 1,
 			visible:  false,
 		},
+		{
+			name:     "quarantined item is private to owner",
+			item:     KnowledgeItem{Status: ItemStatusQuarantined, UploaderID: 1},
+			viewerID: 1,
+			visible:  false,
+		},
+		{
+			name:      "quarantined item remains visible to reviewer",
+			item:      KnowledgeItem{Status: ItemStatusQuarantined, UploaderID: 1},
+			viewerID:  2,
+			canReview: true,
+			visible:   true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -90,5 +106,24 @@ func TestOfficialArticleIdentity(t *testing.T) {
 	item.SourceKey = ""
 	if item.IsOfficial() {
 		t.Fatal("an official origin without a stable source key must not be managed")
+	}
+}
+
+func TestQuarantineTransitionsAreReversible(t *testing.T) {
+	item := KnowledgeItem{ID: 9, Status: ItemStatusApproved, Approved: true}
+	if err := item.Quarantine(3, "license_risk", "许可证状态不明"); err != nil {
+		t.Fatal(err)
+	}
+	if item.EffectiveStatus() != ItemStatusQuarantined || item.Approved || item.Rejected || item.QuarantinedAt == nil || item.QuarantinedBy != 3 {
+		t.Fatalf("invalid quarantine state: %+v", item)
+	}
+	if err := item.RestoreFromQuarantine(3, "许可证已核验"); err != nil {
+		t.Fatal(err)
+	}
+	if item.EffectiveStatus() != ItemStatusApproved || !item.Approved || item.QuarantinedAt != nil || item.QuarantineReason != "" {
+		t.Fatalf("invalid restored state: %+v", item)
+	}
+	if err := item.RestoreFromQuarantine(3, "重复恢复"); !errors.Is(err, ErrInvalidItemState) {
+		t.Fatalf("second restore error = %v", err)
 	}
 }

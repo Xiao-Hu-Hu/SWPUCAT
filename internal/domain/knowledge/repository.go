@@ -9,6 +9,7 @@ type Repository interface {
 	FindItems(ctx context.Context, filter ItemFilter) ([]*KnowledgeItem, error)
 	FindItemsByUploader(ctx context.Context, uploaderID int64) ([]*KnowledgeItem, error)
 	UpdateItem(ctx context.Context, item *KnowledgeItem, expectedStatus ItemStatus) error
+	UpdateLifecycle(ctx context.Context, item *KnowledgeItem, expectedStatus ItemStatus, eventType string, actorID int64, actorName, reason string) error
 	DeleteItem(ctx context.Context, id, deletedBy int64) error
 	CountItems(ctx context.Context) (int64, error)
 

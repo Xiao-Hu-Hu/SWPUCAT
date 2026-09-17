@@ -27,6 +27,14 @@ type uploadRepository struct {
 	err  error
 }
 
+type lifecycleNotFoundRepository struct {
+	domain.Repository
+}
+
+func (*lifecycleNotFoundRepository) FindItemByID(context.Context, int64) (*domain.KnowledgeItem, error) {
+	return nil, domain.ErrItemNotFound
+}
+
 func (r *uploadRepository) CreateItem(_ context.Context, item *domain.KnowledgeItem) error {
 	if r.err != nil {
 		return r.err
@@ -50,6 +58,34 @@ func uploadFixture(t *testing.T) (*KnowledgeHandler, *uploadRepository, string) 
 	repo := &uploadRepository{}
 	h := NewKnowledgeHandler(app.NewKnowledgeService(repo, event.NewNoOpPublisher()), store)
 	return h, repo, dir
+}
+
+func TestKnowledgeLifecycleHandlersReturnNotFound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewKnowledgeHandler(
+		app.NewKnowledgeService(&lifecycleNotFoundRepository{}, event.NewNoOpPublisher()),
+		nil,
+	)
+	router := gin.New()
+	withActor := func(next gin.HandlerFunc) gin.HandlerFunc {
+		return func(c *gin.Context) {
+			c.Set(ContextUserID, int64(1))
+			c.Set(ContextUsername, "测试队长")
+			next(c)
+		}
+	}
+	router.POST("/items/:id/quarantine", withActor(handler.QuarantineItem))
+	router.POST("/items/:id/restore", withActor(handler.RestoreItem))
+
+	for _, path := range []string{"/items/999/quarantine", "/items/999/restore"} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"reason":"复核不存在的条目"}`))
+		request.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want %d: %s", path, recorder.Code, http.StatusNotFound, recorder.Body.String())
+		}
+	}
 }
 
 func multipartRequest(t *testing.T, fieldsFirst bool, category, description string, files int) *http.Request {

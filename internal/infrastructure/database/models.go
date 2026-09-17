@@ -110,32 +110,55 @@ type KnowledgeCategoryModel struct {
 func (KnowledgeCategoryModel) TableName() string { return "knowledge_categories" }
 
 type KnowledgeItemModel struct {
-	ID           int64      `gorm:"primaryKey;autoIncrement"`
-	Type         string     `gorm:"size:8;not null"`
-	Name         string     `gorm:"size:256;not null"`
-	Description  string     `gorm:"type:text"`
-	URL          string     `gorm:"size:512"`
-	FileSize     string     `gorm:"size:32"`
-	FileKey      string     `gorm:"size:256"`
-	CategoryID   int64      `gorm:"not null;index"`
-	CategoryName string     `gorm:"size:64"`
-	UploaderID   int64      `gorm:"not null"`
-	UploaderName string     `gorm:"size:32;not null"`
-	Status       string     `gorm:"size:16;not null;default:pending;index"`
-	Approved     bool       `gorm:"not null;default:false"`
-	Rejected     bool       `gorm:"not null;default:false"`
-	RejectReason string     `gorm:"size:512"`
-	ReviewerID   int64      `gorm:"index"`
-	ReviewerName string     `gorm:"size:32"`
-	SourceOrigin string     `gorm:"size:24;not null;default:user;index"`
-	SourceKey    string     `gorm:"size:128"`
-	Revision     int        `gorm:"not null;default:1"`
-	DeletedAt    *time.Time `gorm:"index"`
-	DeletedBy    int64
-	CreatedAt    time.Time `gorm:"not null;default:current_timestamp"`
+	ID                   int64      `gorm:"primaryKey;autoIncrement"`
+	Type                 string     `gorm:"size:8;not null"`
+	Name                 string     `gorm:"size:256;not null"`
+	Description          string     `gorm:"type:text"`
+	URL                  string     `gorm:"size:512"`
+	FileSize             string     `gorm:"size:32"`
+	FileKey              string     `gorm:"size:256"`
+	CategoryID           int64      `gorm:"not null;index"`
+	CategoryName         string     `gorm:"size:64"`
+	UploaderID           int64      `gorm:"not null"`
+	UploaderName         string     `gorm:"size:32;not null"`
+	Status               string     `gorm:"size:16;not null;default:pending;index"`
+	Approved             bool       `gorm:"not null;default:false"`
+	Rejected             bool       `gorm:"not null;default:false"`
+	RejectReason         string     `gorm:"size:512"`
+	ReviewerID           int64      `gorm:"index"`
+	ReviewerName         string     `gorm:"size:32"`
+	SourceOrigin         string     `gorm:"size:24;not null;default:user;index"`
+	SourceKey            string     `gorm:"size:128"`
+	Revision             int        `gorm:"not null;default:1"`
+	QuarantinedAt        *time.Time `gorm:"index"`
+	QuarantinedBy        int64
+	QuarantineReasonCode string     `gorm:"size:64"`
+	QuarantineReason     string     `gorm:"size:512"`
+	DeletedAt            *time.Time `gorm:"index"`
+	DeletedBy            int64
+	CreatedAt            time.Time `gorm:"not null;default:current_timestamp"`
 }
 
 func (KnowledgeItemModel) TableName() string { return "knowledge_items" }
+
+type KnowledgeItemLifecycleEventModel struct {
+	ID         int64     `gorm:"primaryKey;autoIncrement"`
+	ItemID     int64     `gorm:"not null;index"`
+	EventType  string    `gorm:"size:32;not null;index"`
+	FromStatus string    `gorm:"size:16;not null"`
+	ToStatus   string    `gorm:"size:16;not null"`
+	ActorID    int64     `gorm:"not null;index"`
+	ActorName  string    `gorm:"size:32;not null"`
+	ReasonCode string    `gorm:"size:64;not null"`
+	Reason     string    `gorm:"size:512;not null"`
+	SourceKey  string    `gorm:"size:128"`
+	Revision   int       `gorm:"not null;default:1"`
+	CreatedAt  time.Time `gorm:"not null;default:current_timestamp;index"`
+}
+
+func (KnowledgeItemLifecycleEventModel) TableName() string {
+	return "knowledge_item_lifecycle_events"
+}
 
 type ApprovalModel struct {
 	ID           int64  `gorm:"primaryKey;autoIncrement"`

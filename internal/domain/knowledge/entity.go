@@ -1,6 +1,9 @@
 package knowledge
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type Category struct {
 	ID        int64
@@ -10,29 +13,33 @@ type Category struct {
 }
 
 type KnowledgeItem struct {
-	ID           int64
-	Type         ItemType
-	Name         string
-	Description  string
-	URL          string
-	FileKey      string
-	FileSize     string
-	CategoryID   int64
-	CategoryName string
-	UploaderID   int64
-	UploaderName string
-	Status       ItemStatus
-	Approved     bool
-	Rejected     bool
-	RejectReason string
-	ReviewerID   int64
-	ReviewerName string
-	SourceOrigin string
-	SourceKey    string
-	Revision     int
-	DeletedAt    *time.Time
-	DeletedBy    int64
-	CreatedAt    time.Time
+	ID                   int64
+	Type                 ItemType
+	Name                 string
+	Description          string
+	URL                  string
+	FileKey              string
+	FileSize             string
+	CategoryID           int64
+	CategoryName         string
+	UploaderID           int64
+	UploaderName         string
+	Status               ItemStatus
+	Approved             bool
+	Rejected             bool
+	RejectReason         string
+	ReviewerID           int64
+	ReviewerName         string
+	SourceOrigin         string
+	SourceKey            string
+	Revision             int
+	QuarantinedAt        *time.Time
+	QuarantinedBy        int64
+	QuarantineReasonCode string
+	QuarantineReason     string
+	DeletedAt            *time.Time
+	DeletedBy            int64
+	CreatedAt            time.Time
 }
 
 const (
@@ -105,6 +112,33 @@ func (k *KnowledgeItem) MarkDeleted(deletedBy int64) {
 	k.SetStatus(ItemStatusDeleted)
 }
 
+func (k *KnowledgeItem) Quarantine(actorID int64, reasonCode, reason string) error {
+	reasonCode = strings.TrimSpace(reasonCode)
+	reason = strings.TrimSpace(reason)
+	if k == nil || k.EffectiveStatus() != ItemStatusApproved || actorID <= 0 || reasonCode == "" || reason == "" {
+		return ErrInvalidItemState
+	}
+	now := time.Now()
+	k.QuarantinedAt = &now
+	k.QuarantinedBy = actorID
+	k.QuarantineReasonCode = reasonCode
+	k.QuarantineReason = reason
+	k.SetStatus(ItemStatusQuarantined)
+	return nil
+}
+
+func (k *KnowledgeItem) RestoreFromQuarantine(actorID int64, reason string) error {
+	if k == nil || k.EffectiveStatus() != ItemStatusQuarantined || actorID <= 0 || strings.TrimSpace(reason) == "" {
+		return ErrInvalidItemState
+	}
+	k.QuarantinedAt = nil
+	k.QuarantinedBy = 0
+	k.QuarantineReasonCode = ""
+	k.QuarantineReason = ""
+	k.SetStatus(ItemStatusApproved)
+	return nil
+}
+
 func (k *KnowledgeItem) SetStatus(status ItemStatus) {
 	k.Status = status
 	switch status {
@@ -114,7 +148,7 @@ func (k *KnowledgeItem) SetStatus(status ItemStatus) {
 	case ItemStatusRejected:
 		k.Approved = false
 		k.Rejected = true
-	case ItemStatusPending, ItemStatusDeleted:
+	case ItemStatusPending, ItemStatusQuarantined, ItemStatusDeleted:
 		k.Approved = false
 		k.Rejected = false
 	}
@@ -148,6 +182,9 @@ func (k *KnowledgeItem) IsOfficial() bool {
 func (k *KnowledgeItem) IsVisibleTo(viewerID int64, canReview bool) bool {
 	if k.IsDeleted() {
 		return false
+	}
+	if k.EffectiveStatus() == ItemStatusQuarantined {
+		return canReview
 	}
 	if canReview || k.IsOwnedBy(viewerID) {
 		return true

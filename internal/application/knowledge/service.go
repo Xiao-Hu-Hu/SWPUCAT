@@ -73,27 +73,31 @@ type RecommendationFeedbackRequest struct {
 }
 
 type KnowledgeItemDTO struct {
-	ID           int64  `json:"id"`
-	Type         string `json:"type"`
-	Name         string `json:"name"`
-	Description  string `json:"description,omitempty"`
-	URL          string `json:"url,omitempty"`
-	FileKey      string `json:"file_key,omitempty"`
-	FileSize     string `json:"file_size,omitempty"`
-	CategoryID   int64  `json:"category_id"`
-	CategoryName string `json:"category_name"`
-	UploaderID   int64  `json:"uploader_id"`
-	UploaderName string `json:"uploader_name"`
-	Status       string `json:"status"`
-	Approved     bool   `json:"approved"`
-	Rejected     bool   `json:"rejected"`
-	RejectReason string `json:"reject_reason,omitempty"`
-	ReviewerID   int64  `json:"reviewer_id,omitempty"`
-	ReviewerName string `json:"reviewer_name,omitempty"`
-	SourceOrigin string `json:"source_origin"`
-	SourceKey    string `json:"source_key,omitempty"`
-	Revision     int    `json:"revision"`
-	CreatedAt    string `json:"created_at"`
+	ID                   int64  `json:"id"`
+	Type                 string `json:"type"`
+	Name                 string `json:"name"`
+	Description          string `json:"description,omitempty"`
+	URL                  string `json:"url,omitempty"`
+	FileKey              string `json:"file_key,omitempty"`
+	FileSize             string `json:"file_size,omitempty"`
+	CategoryID           int64  `json:"category_id"`
+	CategoryName         string `json:"category_name"`
+	UploaderID           int64  `json:"uploader_id"`
+	UploaderName         string `json:"uploader_name"`
+	Status               string `json:"status"`
+	Approved             bool   `json:"approved"`
+	Rejected             bool   `json:"rejected"`
+	RejectReason         string `json:"reject_reason,omitempty"`
+	ReviewerID           int64  `json:"reviewer_id,omitempty"`
+	ReviewerName         string `json:"reviewer_name,omitempty"`
+	SourceOrigin         string `json:"source_origin"`
+	SourceKey            string `json:"source_key,omitempty"`
+	Revision             int    `json:"revision"`
+	QuarantinedAt        string `json:"quarantined_at,omitempty"`
+	QuarantinedBy        int64  `json:"quarantined_by,omitempty"`
+	QuarantineReasonCode string `json:"quarantine_reason_code,omitempty"`
+	QuarantineReason     string `json:"quarantine_reason,omitempty"`
+	CreatedAt            string `json:"created_at"`
 }
 
 type CategoryDTO struct {
@@ -148,13 +152,48 @@ func (s *KnowledgeService) DeleteItem(ctx context.Context, itemID, userID int64,
 	// Official catalog entries are versioned by migrations. Keep them outside
 	// the generic item deletion path so a cited source cannot disappear because
 	// of an accidental UI action.
-	if item.IsOfficial() {
+	if item.IsOfficial() || item.EffectiveStatus() == knowledge.ItemStatusQuarantined {
 		return shared.ErrForbidden
 	}
 	if !isCaptain && !item.IsOwnedBy(userID) {
 		return shared.ErrForbidden
 	}
 	return s.repo.DeleteItem(ctx, itemID, userID)
+}
+
+func (s *KnowledgeService) QuarantineItem(ctx context.Context, itemID, actorID int64, actorName, reason string) error {
+	reason = strings.TrimSpace(reason)
+	if itemID <= 0 || actorID <= 0 || reason == "" || len([]rune(reason)) > 512 {
+		return shared.ErrValidation
+	}
+	item, err := s.repo.FindItemByID(ctx, itemID)
+	if err != nil {
+		return err
+	}
+	if item.IsOfficial() {
+		return shared.ErrForbidden
+	}
+	expected := item.EffectiveStatus()
+	if err := item.Quarantine(actorID, "manual_review", reason); err != nil {
+		return err
+	}
+	return s.repo.UpdateLifecycle(ctx, item, expected, "quarantine", actorID, strings.TrimSpace(actorName), reason)
+}
+
+func (s *KnowledgeService) RestoreItem(ctx context.Context, itemID, actorID int64, actorName, reason string) error {
+	reason = strings.TrimSpace(reason)
+	if itemID <= 0 || actorID <= 0 || reason == "" || len([]rune(reason)) > 512 {
+		return shared.ErrValidation
+	}
+	item, err := s.repo.FindItemByID(ctx, itemID)
+	if err != nil {
+		return err
+	}
+	expected := item.EffectiveStatus()
+	if err := item.RestoreFromQuarantine(actorID, reason); err != nil {
+		return err
+	}
+	return s.repo.UpdateLifecycle(ctx, item, expected, "restore", actorID, strings.TrimSpace(actorName), reason)
 }
 
 func (s *KnowledgeService) ListItems(ctx context.Context, categoryID *int64, search string) ([]KnowledgeItemDTO, error) {
@@ -189,6 +228,19 @@ func (s *KnowledgeService) ListPendingItems(ctx context.Context) ([]KnowledgeIte
 	return result, nil
 }
 
+func (s *KnowledgeService) ListQuarantinedItems(ctx context.Context) ([]KnowledgeItemDTO, error) {
+	quarantined := knowledge.ItemStatusQuarantined
+	items, err := s.repo.FindItems(ctx, knowledge.ItemFilter{Status: &quarantined})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]KnowledgeItemDTO, 0, len(items))
+	for _, item := range items {
+		result = append(result, *toItemDTO(item))
+	}
+	return result, nil
+}
+
 func (s *KnowledgeService) ListUserItems(ctx context.Context, userID int64) ([]KnowledgeItemDTO, error) {
 	items, err := s.repo.FindItemsByUploader(ctx, userID)
 	if err != nil {
@@ -196,6 +248,9 @@ func (s *KnowledgeService) ListUserItems(ctx context.Context, userID int64) ([]K
 	}
 	result := make([]KnowledgeItemDTO, 0, len(items))
 	for _, item := range items {
+		if !item.IsVisibleTo(userID, false) {
+			continue
+		}
 		result = append(result, *toItemDTO(item))
 	}
 	return result, nil
@@ -467,27 +522,34 @@ func (s *KnowledgeService) GetItem(ctx context.Context, id, viewerID int64, canR
 }
 
 func toItemDTO(item *knowledge.KnowledgeItem) *KnowledgeItemDTO {
-	return &KnowledgeItemDTO{
-		ID:           item.ID,
-		Type:         string(item.Type),
-		Name:         item.Name,
-		Description:  item.Description,
-		URL:          item.URL,
-		FileKey:      item.FileKey,
-		FileSize:     item.FileSize,
-		CategoryID:   item.CategoryID,
-		CategoryName: item.CategoryName,
-		UploaderID:   item.UploaderID,
-		UploaderName: item.UploaderName,
-		Status:       string(item.EffectiveStatus()),
-		Approved:     item.Approved,
-		Rejected:     item.Rejected,
-		RejectReason: item.RejectReason,
-		ReviewerID:   item.ReviewerID,
-		ReviewerName: item.ReviewerName,
-		SourceOrigin: item.SourceOrigin,
-		SourceKey:    item.SourceKey,
-		Revision:     item.Revision,
-		CreatedAt:    item.CreatedAt.Format("2006-01-02"),
+	dto := &KnowledgeItemDTO{
+		ID:                   item.ID,
+		Type:                 string(item.Type),
+		Name:                 item.Name,
+		Description:          item.Description,
+		URL:                  item.URL,
+		FileKey:              item.FileKey,
+		FileSize:             item.FileSize,
+		CategoryID:           item.CategoryID,
+		CategoryName:         item.CategoryName,
+		UploaderID:           item.UploaderID,
+		UploaderName:         item.UploaderName,
+		Status:               string(item.EffectiveStatus()),
+		Approved:             item.Approved,
+		Rejected:             item.Rejected,
+		RejectReason:         item.RejectReason,
+		ReviewerID:           item.ReviewerID,
+		ReviewerName:         item.ReviewerName,
+		SourceOrigin:         item.SourceOrigin,
+		SourceKey:            item.SourceKey,
+		Revision:             item.Revision,
+		QuarantinedBy:        item.QuarantinedBy,
+		QuarantineReasonCode: item.QuarantineReasonCode,
+		QuarantineReason:     item.QuarantineReason,
+		CreatedAt:            item.CreatedAt.Format("2006-01-02"),
 	}
+	if item.QuarantinedAt != nil {
+		dto.QuarantinedAt = item.QuarantinedAt.Format(time.RFC3339)
+	}
+	return dto
 }

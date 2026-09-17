@@ -4,6 +4,7 @@ import (
 	"SWPUCAT/internal/domain/knowledge"
 	"SWPUCAT/internal/infrastructure/database"
 	"context"
+	"errors"
 	"time"
 
 	"gorm.io/gorm"
@@ -27,27 +28,31 @@ func (r *KnowledgeRepo) CreateItem(ctx context.Context, item *knowledge.Knowledg
 		item.Revision = 1
 	}
 	model := &database.KnowledgeItemModel{
-		Type:         string(item.Type),
-		Name:         item.Name,
-		Description:  item.Description,
-		URL:          item.URL,
-		FileSize:     item.FileSize,
-		FileKey:      item.FileKey,
-		CategoryID:   item.CategoryID,
-		UploaderID:   item.UploaderID,
-		UploaderName: item.UploaderName,
-		Status:       string(item.Status),
-		Approved:     item.Approved,
-		Rejected:     item.Rejected,
-		RejectReason: item.RejectReason,
-		ReviewerID:   item.ReviewerID,
-		ReviewerName: item.ReviewerName,
-		SourceOrigin: item.SourceOrigin,
-		SourceKey:    item.SourceKey,
-		Revision:     item.Revision,
-		DeletedAt:    item.DeletedAt,
-		DeletedBy:    item.DeletedBy,
-		CreatedAt:    item.CreatedAt,
+		Type:                 string(item.Type),
+		Name:                 item.Name,
+		Description:          item.Description,
+		URL:                  item.URL,
+		FileSize:             item.FileSize,
+		FileKey:              item.FileKey,
+		CategoryID:           item.CategoryID,
+		UploaderID:           item.UploaderID,
+		UploaderName:         item.UploaderName,
+		Status:               string(item.Status),
+		Approved:             item.Approved,
+		Rejected:             item.Rejected,
+		RejectReason:         item.RejectReason,
+		ReviewerID:           item.ReviewerID,
+		ReviewerName:         item.ReviewerName,
+		SourceOrigin:         item.SourceOrigin,
+		SourceKey:            item.SourceKey,
+		Revision:             item.Revision,
+		QuarantinedAt:        item.QuarantinedAt,
+		QuarantinedBy:        item.QuarantinedBy,
+		QuarantineReasonCode: item.QuarantineReasonCode,
+		QuarantineReason:     item.QuarantineReason,
+		DeletedAt:            item.DeletedAt,
+		DeletedBy:            item.DeletedBy,
+		CreatedAt:            item.CreatedAt,
 	}
 	if err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(model).Error; err != nil {
@@ -77,6 +82,9 @@ func (r *KnowledgeRepo) itemQuery(ctx context.Context) *gorm.DB {
 func (r *KnowledgeRepo) FindItemByID(ctx context.Context, id int64) (*knowledge.KnowledgeItem, error) {
 	var model database.KnowledgeItemModel
 	if err := r.itemQuery(ctx).Where("knowledge_items.id = ?", id).First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, knowledge.ErrItemNotFound
+		}
 		return nil, err
 	}
 	return toDomainKnowledgeItem(&model), nil
@@ -167,6 +175,70 @@ func (r *KnowledgeRepo) UpdateItem(ctx context.Context, item *knowledge.Knowledg
 			return err
 		}
 		return tx.Exec("DELETE FROM knowledge_index_jobs WHERE knowledge_item_id = ?", item.ID).Error
+	})
+}
+
+func (r *KnowledgeRepo) UpdateLifecycle(
+	ctx context.Context,
+	item *knowledge.KnowledgeItem,
+	expectedStatus knowledge.ItemStatus,
+	eventType string,
+	actorID int64,
+	actorName string,
+	reason string,
+) error {
+	if item == nil || actorID <= 0 || actorName == "" || reason == "" {
+		return knowledge.ErrInvalidItemState
+	}
+	targetStatus := item.EffectiveStatus()
+	validTransition := eventType == "quarantine" && expectedStatus == knowledge.ItemStatusApproved && targetStatus == knowledge.ItemStatusQuarantined ||
+		eventType == "restore" && expectedStatus == knowledge.ItemStatusQuarantined && targetStatus == knowledge.ItemStatusApproved
+	if !validTransition {
+		return knowledge.ErrInvalidItemState
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&database.KnowledgeItemModel{}).
+			Where("id = ? AND status = ? AND deleted_at IS NULL", item.ID, string(expectedStatus)).
+			Updates(map[string]interface{}{
+				"status":                 string(targetStatus),
+				"approved":               item.Approved,
+				"rejected":               item.Rejected,
+				"quarantined_at":         item.QuarantinedAt,
+				"quarantined_by":         item.QuarantinedBy,
+				"quarantine_reason_code": item.QuarantineReasonCode,
+				"quarantine_reason":      item.QuarantineReason,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return knowledge.ErrInvalidItemState
+		}
+
+		reasonCode := item.QuarantineReasonCode
+		if eventType == "restore" {
+			reasonCode = "manual_restore"
+		}
+		event := &database.KnowledgeItemLifecycleEventModel{
+			ItemID:     item.ID,
+			EventType:  eventType,
+			FromStatus: string(expectedStatus),
+			ToStatus:   string(targetStatus),
+			ActorID:    actorID,
+			ActorName:  actorName,
+			ReasonCode: reasonCode,
+			Reason:     reason,
+			SourceKey:  item.SourceKey,
+			Revision:   item.Revision,
+			CreatedAt:  time.Now(),
+		}
+		if err := tx.Create(event).Error; err != nil {
+			return err
+		}
+		if targetStatus == knowledge.ItemStatusApproved {
+			return queueKnowledgeIndexJob(tx, item.ID)
+		}
+		return nil
 	})
 }
 
@@ -344,29 +416,33 @@ func (r *KnowledgeRepo) SaveRecommendationFeedback(ctx context.Context, feedback
 
 func toDomainKnowledgeItem(model *database.KnowledgeItemModel) *knowledge.KnowledgeItem {
 	item := &knowledge.KnowledgeItem{
-		ID:           model.ID,
-		Type:         knowledge.ItemType(model.Type),
-		Name:         model.Name,
-		Description:  model.Description,
-		URL:          model.URL,
-		FileSize:     model.FileSize,
-		FileKey:      model.FileKey,
-		CategoryID:   model.CategoryID,
-		CategoryName: model.CategoryName,
-		UploaderID:   model.UploaderID,
-		UploaderName: model.UploaderName,
-		Status:       knowledge.ItemStatus(model.Status),
-		Approved:     model.Approved,
-		Rejected:     model.Rejected,
-		RejectReason: model.RejectReason,
-		ReviewerID:   model.ReviewerID,
-		ReviewerName: model.ReviewerName,
-		SourceOrigin: model.SourceOrigin,
-		SourceKey:    model.SourceKey,
-		Revision:     model.Revision,
-		DeletedAt:    model.DeletedAt,
-		DeletedBy:    model.DeletedBy,
-		CreatedAt:    model.CreatedAt,
+		ID:                   model.ID,
+		Type:                 knowledge.ItemType(model.Type),
+		Name:                 model.Name,
+		Description:          model.Description,
+		URL:                  model.URL,
+		FileSize:             model.FileSize,
+		FileKey:              model.FileKey,
+		CategoryID:           model.CategoryID,
+		CategoryName:         model.CategoryName,
+		UploaderID:           model.UploaderID,
+		UploaderName:         model.UploaderName,
+		Status:               knowledge.ItemStatus(model.Status),
+		Approved:             model.Approved,
+		Rejected:             model.Rejected,
+		RejectReason:         model.RejectReason,
+		ReviewerID:           model.ReviewerID,
+		ReviewerName:         model.ReviewerName,
+		SourceOrigin:         model.SourceOrigin,
+		SourceKey:            model.SourceKey,
+		Revision:             model.Revision,
+		QuarantinedAt:        model.QuarantinedAt,
+		QuarantinedBy:        model.QuarantinedBy,
+		QuarantineReasonCode: model.QuarantineReasonCode,
+		QuarantineReason:     model.QuarantineReason,
+		DeletedAt:            model.DeletedAt,
+		DeletedBy:            model.DeletedBy,
+		CreatedAt:            model.CreatedAt,
 	}
 	item.SetStatus(item.EffectiveStatus())
 	return item

@@ -19,16 +19,18 @@ func (t ItemType) IsValid() bool {
 type ItemStatus string
 
 const (
-	ItemStatusPending  ItemStatus = "pending"
-	ItemStatusApproved ItemStatus = "approved"
-	ItemStatusRejected ItemStatus = "rejected"
-	ItemStatusDeleted  ItemStatus = "deleted"
+	ItemStatusPending     ItemStatus = "pending"
+	ItemStatusApproved    ItemStatus = "approved"
+	ItemStatusRejected    ItemStatus = "rejected"
+	ItemStatusQuarantined ItemStatus = "quarantined"
+	ItemStatusDeleted     ItemStatus = "deleted"
 )
 
 func (s ItemStatus) IsValid() bool {
 	return s == ItemStatusPending ||
 		s == ItemStatusApproved ||
 		s == ItemStatusRejected ||
+		s == ItemStatusQuarantined ||
 		s == ItemStatusDeleted
 }
 

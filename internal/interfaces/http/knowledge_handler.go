@@ -207,6 +207,59 @@ func (h *KnowledgeHandler) DeleteItem(c *gin.Context) {
 	Success(c, nil)
 }
 
+func (h *KnowledgeHandler) QuarantineItem(c *gin.Context) {
+	id, ok := parseKnowledgeID(c, "id")
+	if !ok {
+		return
+	}
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Reason) == "" {
+		BadRequest(c, "quarantine reason is required")
+		return
+	}
+	if err := h.knowledgeSvc.QuarantineItem(c.Request.Context(), id, GetUserID(c), GetUsername(c), req.Reason); err != nil {
+		handleKnowledgeLifecycleError(c, err)
+		return
+	}
+	Success(c, nil)
+}
+
+func (h *KnowledgeHandler) RestoreItem(c *gin.Context) {
+	id, ok := parseKnowledgeID(c, "id")
+	if !ok {
+		return
+	}
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Reason) == "" {
+		BadRequest(c, "restore reason is required")
+		return
+	}
+	if err := h.knowledgeSvc.RestoreItem(c.Request.Context(), id, GetUserID(c), GetUsername(c), req.Reason); err != nil {
+		handleKnowledgeLifecycleError(c, err)
+		return
+	}
+	Success(c, nil)
+}
+
+func handleKnowledgeLifecycleError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, shared.ErrValidation):
+		BadRequest(c, "invalid knowledge lifecycle request")
+	case errors.Is(err, shared.ErrForbidden):
+		Forbidden(c, "official catalog items are managed by migrations")
+	case errors.Is(err, knowledgedomain.ErrItemNotFound):
+		NotFound(c, "knowledge item not found")
+	case errors.Is(err, knowledgedomain.ErrInvalidItemState):
+		Conflict(c, "knowledge item lifecycle state changed")
+	default:
+		InternalError(c, "failed to update knowledge item lifecycle")
+	}
+}
+
 func (h *KnowledgeHandler) ListItems(c *gin.Context) {
 	var categoryID *int64
 	if catIDStr := c.Query("category_id"); catIDStr != "" {
@@ -314,6 +367,15 @@ func (h *KnowledgeHandler) ListPendingItems(c *gin.Context) {
 		return
 	}
 
+	Success(c, items)
+}
+
+func (h *KnowledgeHandler) ListQuarantinedItems(c *gin.Context) {
+	items, err := h.knowledgeSvc.ListQuarantinedItems(c.Request.Context())
+	if err != nil {
+		InternalError(c, "failed to list quarantined items")
+		return
+	}
 	Success(c, items)
 }
 
