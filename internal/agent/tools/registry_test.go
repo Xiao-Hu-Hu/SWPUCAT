@@ -124,6 +124,45 @@ func TestPersonalCheckinHistoryToolDefaultsAndBoundsLimit(t *testing.T) {
 	}
 }
 
+func TestCheckinRequirementsToolIsAvailableToMembers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/checkin/requirements" || r.URL.RawQuery != "" {
+			t.Fatalf("unexpected request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+		}
+		if r.Header.Get("Authorization") != "Bearer member-token" {
+			t.Fatalf("authorization header = %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"requirements":[{"grade":1,"minutes":600},{"grade":4,"minutes":240}]}}`))
+	}))
+	defer server.Close()
+	client, err := business.NewClient(server.URL, "", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered, err := NewRegistry(client, false).Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := findRegisteredTool(t, registered, "get_checkin_requirements")
+	invokable, ok := item.(einotool.InvokableTool)
+	if !ok {
+		t.Fatal("get_checkin_requirements is not invokable")
+	}
+	ctx := business.WithRequestContext(context.Background(), business.RequestContext{Authorization: "Bearer member-token", UserID: 7, Role: "member"})
+	output, err := invokable.InvokableRun(ctx, `{}`)
+	if err != nil {
+		t.Fatalf("InvokableRun() error = %v", err)
+	}
+	var result business.CheckinRequirements
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("decode tool output: %v", err)
+	}
+	if len(result.Requirements) != 2 || result.Requirements[0].Grade != 1 || result.Requirements[1].Minutes != 240 {
+		t.Fatalf("requirements result = %+v", result)
+	}
+}
+
 func findRegisteredTool(t *testing.T, items []einotool.BaseTool, name string) einotool.BaseTool {
 	t.Helper()
 	for _, item := range items {

@@ -178,6 +178,23 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
+	checkinRequirementsTool, err := toolutils.InferTool[emptyInput, string](
+		"get_checkin_requirements",
+		"查询当前配置的各年级每周最低工时要求；用于回答通用制度问题。判断当前成员本人是否达标时应使用 get_my_work_hours 的后端计算结果。",
+		func(ctx context.Context, _ emptyInput) (string, error) {
+			result, err := r.client.GetCheckinRequirements(ctx)
+			if err != nil {
+				return "", err
+			}
+			if result.Requirements == nil {
+				result.Requirements = make([]business.CheckinRequirement, 0)
+			}
+			return marshal(result)
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
 	teamQueryTool, err := toolutils.InferTool[teamQueryInput, string](
 		"query_team_members",
 		"将队长的自然语言组合查询转换为受限条件，后端确定性计算打卡和月报状态；不能生成或执行 SQL，也不会自动发送通知。",
@@ -377,7 +394,7 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
-	result := []tool.BaseTool{statusTool, personalWorkHoursTool, checkinHistoryTool, knowledgeTool, recommendTool, teamQueryTool, statsTool, reportTool}
+	result := []tool.BaseTool{statusTool, personalWorkHoursTool, checkinHistoryTool, checkinRequirementsTool, knowledgeTool, recommendTool, teamQueryTool, statsTool, reportTool}
 	if r.writeEnabled {
 		result = append(result, announcementDraftTool)
 		clockInTool, err := toolutils.InferTool[emptyInput, string](

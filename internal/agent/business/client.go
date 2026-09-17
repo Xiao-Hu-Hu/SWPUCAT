@@ -65,6 +65,15 @@ type CheckinRecord struct {
 	Time string `json:"time"`
 }
 
+type CheckinRequirement struct {
+	Grade   int `json:"grade"`
+	Minutes int `json:"minutes"`
+}
+
+type CheckinRequirements struct {
+	Requirements []CheckinRequirement `json:"requirements"`
+}
+
 type PersonalPeriodStats struct {
 	StartsOn        string   `json:"starts_on"`
 	EndsOn          string   `json:"ends_on"`
@@ -378,6 +387,12 @@ func (c *Client) GetMyCheckinRecords(ctx context.Context, limit int) ([]CheckinR
 	params.Set("limit", fmt.Sprintf("%d", limit))
 	var result []CheckinRecord
 	err := c.do(ctx, http.MethodGet, "/api/checkin/records", params, nil, &result)
+	return result, err
+}
+
+func (c *Client) GetCheckinRequirements(ctx context.Context) (CheckinRequirements, error) {
+	var result CheckinRequirements
+	err := c.do(ctx, http.MethodGet, "/api/checkin/requirements", nil, nil, &result)
 	return result, err
 }
 
