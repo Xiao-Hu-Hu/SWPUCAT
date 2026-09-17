@@ -124,6 +124,15 @@ func (h *CheckinHandler) GetStats(c *gin.Context) {
 	Success(c, stats)
 }
 
+func (h *CheckinHandler) GetPersonalWorkHours(c *gin.Context) {
+	result, err := h.checkinSvc.GetPersonalWorkHours(c.Request.Context(), GetUserID(c))
+	if err != nil {
+		InternalError(c, "failed to get personal work hours")
+		return
+	}
+	Success(c, result)
+}
+
 func (h *CheckinHandler) GetOnlineMembers(c *gin.Context) {
 	members, err := h.checkinSvc.GetOnlineMembers(c.Request.Context())
 	if err != nil {

@@ -44,6 +44,7 @@ type CheckinService struct {
 	publisher    shared.EventPublisher
 	settingsRepo SettingsRepository
 	notifier     AnomalyNotifier
+	now          func() time.Time
 }
 
 func NewCheckinService(
@@ -58,6 +59,7 @@ func NewCheckinService(
 		userRepo:     userRepo,
 		publisher:    publisher,
 		settingsRepo: settingsRepo,
+		now:          time.Now,
 	}
 	if len(notifiers) > 0 {
 		service.notifier = notifiers[0]
@@ -165,23 +167,14 @@ func (s *CheckinService) GetStatus(ctx context.Context, userID int64) (*CheckinS
 }
 
 func (s *CheckinService) GetStatsByPeriod(ctx context.Context, period string) ([]WeeklyStatsDTO, error) {
-	now := time.Now()
-	var startDate, endDate string
-
-	switch period {
-	case "today":
-		startDate = now.Format("2006-01-02")
-		endDate = startDate
-	case "month":
-		startDate = now.AddDate(0, 0, -now.Day()+1).Format("2006-01-02")
-		endDate = now.Format("2006-01-02")
-	default: // week
-		weekday := now.Weekday()
-		if weekday == time.Sunday {
-			weekday = 7
-		}
-		startDate = now.AddDate(0, 0, -int(weekday-1)).Format("2006-01-02")
-		endDate = now.Format("2006-01-02")
+	now := s.now()
+	startDate, endDate, valid := checkinPeriodDateRange(period, now)
+	if !valid {
+		// Preserve the existing public API behavior: an unknown value falls back
+		// to the current week. New callers that require strict validation do so
+		// before invoking this method.
+		period = "week"
+		startDate, endDate, _ = checkinPeriodDateRange(period, now)
 	}
 
 	records, err := s.checkinRepo.FindByDateRange(ctx, startDate, endDate)
@@ -212,67 +205,8 @@ func (s *CheckinService) GetStatsByPeriod(ctx context.Context, period string) ([
 	}
 
 	for userID, memberRecords := range userRecords {
-		stat := statsMap[userID]
-		dateRecords := make(map[string][]*checkin.CheckinRecord)
-		for _, r := range memberRecords {
-			dateRecords[r.Date] = append(dateRecords[r.Date], r)
-		}
-
-		var totalMinutes float64
-		days := make(map[string]bool, len(dateRecords))
-		anomalySet := make(map[string]struct{})
-		for date, dayRecords := range dateRecords {
-			days[date] = true
-			sort.SliceStable(dayRecords, func(i, j int) bool {
-				if dayRecords[i].CreatedAt.Equal(dayRecords[j].CreatedAt) {
-					return dayRecords[i].ID < dayRecords[j].ID
-				}
-				return dayRecords[i].CreatedAt.Before(dayRecords[j].CreatedAt)
-			})
-
-			var openIn *checkin.CheckinRecord
-			for _, record := range dayRecords {
-				switch record.Type {
-				case checkin.CheckinTypeIn:
-					if openIn != nil {
-						anomalySet["duplicate_clock_in"] = struct{}{}
-					}
-					openIn = record
-				case checkin.CheckinTypeOut:
-					if openIn == nil {
-						anomalySet["orphan_clock_out"] = struct{}{}
-						continue
-					}
-					inTime, inErr := time.Parse("15:04:05", openIn.Time)
-					outTime, outErr := time.Parse("15:04:05", record.Time)
-					if inErr != nil || outErr != nil || outTime.Before(inTime) {
-						anomalySet["invalid_time_pair"] = struct{}{}
-					} else {
-						totalMinutes += outTime.Sub(inTime).Minutes()
-					}
-					openIn = nil
-				default:
-					anomalySet["invalid_type"] = struct{}{}
-				}
-			}
-			if openIn != nil {
-				anomalySet["missing_clock_out"] = struct{}{}
-			}
-		}
-
-		stat.TotalMinutes = totalMinutes
-		stat.TotalHours = totalMinutes / 60
-		stat.Days = len(days)
-		stat.Anomalies = make([]string, 0, len(anomalySet))
-		for anomaly := range anomalySet {
-			stat.Anomalies = append(stat.Anomalies, anomaly)
-		}
-		sort.Strings(stat.Anomalies)
-		if len(stat.Anomalies) == 0 {
-			stat.Status = "normal"
-		} else {
-			stat.Status = "attention"
-		}
+		stat := summarizeCheckinRecords(userID, statsMap[userID].Nickname, memberRecords)
+		statsMap[userID] = &stat
 	}
 
 	result := make([]WeeklyStatsDTO, 0, len(statsMap))
@@ -304,6 +238,177 @@ func (s *CheckinService) GetStatsByPeriod(ctx context.Context, period string) ([
 		}
 	}
 	return result, nil
+}
+
+// GetPersonalWorkHours returns only the authenticated member's data. It reads
+// the current month once and derives the current week from that user-scoped
+// result, avoiding both a team scan and the notification side effects of the
+// team statistics endpoint.
+func (s *CheckinService) GetPersonalWorkHours(ctx context.Context, userID int64) (*PersonalWorkHoursDTO, error) {
+	now := s.now()
+	weekStart, weekEnd, _ := checkinPeriodDateRange("week", now)
+	monthStart, monthEnd, _ := checkinPeriodDateRange("month", now)
+	queryStart := monthStart
+	if weekStart < queryStart {
+		queryStart = weekStart
+	}
+	member, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	records, err := s.checkinRepo.FindByUserIDAndDateRange(ctx, userID, queryStart, monthEnd)
+	if err != nil {
+		return nil, err
+	}
+	weekRecords := make([]*checkin.CheckinRecord, 0, len(records))
+	monthRecords := make([]*checkin.CheckinRecord, 0, len(records))
+	for _, record := range records {
+		if record.Date >= weekStart && record.Date <= weekEnd {
+			weekRecords = append(weekRecords, record)
+		}
+		if record.Date >= monthStart && record.Date <= monthEnd {
+			monthRecords = append(monthRecords, record)
+		}
+	}
+	weekStats := summarizeCheckinRecords(userID, member.DisplayName(), weekRecords)
+	monthStats := summarizeCheckinRecords(userID, member.DisplayName(), monthRecords)
+	result := &PersonalWorkHoursDTO{
+		AsOfDate: now.Format("2006-01-02"),
+		UserID:   userID,
+		Nickname: member.DisplayName(),
+		Week:     toPersonalPeriodStats(weekStart, weekEnd, weekStats),
+		Month:    toPersonalPeriodStats(monthStart, monthEnd, monthStats),
+		WeeklyRequirement: WeeklyRequirementProgressDTO{
+			Grade:         gradeFromStudentIDAt(string(member.StudentID), now),
+			Status:        "unknown",
+			UnknownReason: "weekly requirement is not configured for the member's grade",
+		},
+	}
+	if result.WeeklyRequirement.Grade == 0 {
+		result.WeeklyRequirement.UnknownReason = "student ID does not contain a valid enrollment year"
+		return result, nil
+	}
+	for _, requirement := range s.GetRequirements(ctx).Requirements {
+		if requirement.Grade != result.WeeklyRequirement.Grade || requirement.Minutes < 0 {
+			continue
+		}
+		requiredMinutes := requirement.Minutes
+		requiredHours := float64(requiredMinutes) / 60
+		met := weekStats.TotalMinutes >= float64(requiredMinutes)
+		shortfallMinutes := math.Max(0, float64(requiredMinutes)-weekStats.TotalMinutes)
+		shortfallHours := shortfallMinutes / 60
+		status := "below_target"
+		if met {
+			status = "met"
+		}
+		result.WeeklyRequirement.RequiredMinutes = &requiredMinutes
+		result.WeeklyRequirement.RequiredHours = &requiredHours
+		result.WeeklyRequirement.IsMet = &met
+		result.WeeklyRequirement.ShortfallMinutes = &shortfallMinutes
+		result.WeeklyRequirement.ShortfallHours = &shortfallHours
+		result.WeeklyRequirement.Status = status
+		result.WeeklyRequirement.UnknownReason = ""
+	}
+	return result, nil
+}
+
+func toPersonalPeriodStats(startsOn, endsOn string, stats WeeklyStatsDTO) PersonalPeriodStatsDTO {
+	return PersonalPeriodStatsDTO{
+		StartsOn:        startsOn,
+		EndsOn:          endsOn,
+		TotalMinutes:    stats.TotalMinutes,
+		TotalHours:      stats.TotalHours,
+		RecordDays:      stats.Days,
+		AttendanceState: stats.Status,
+		Anomalies:       append([]string{}, stats.Anomalies...),
+	}
+}
+
+func checkinPeriodDateRange(period string, now time.Time) (string, string, bool) {
+	endDate := now.Format("2006-01-02")
+	switch period {
+	case "today":
+		return endDate, endDate, true
+	case "week":
+		weekday := now.Weekday()
+		if weekday == time.Sunday {
+			weekday = 7
+		}
+		return now.AddDate(0, 0, -int(weekday-1)).Format("2006-01-02"), endDate, true
+	case "month":
+		return now.AddDate(0, 0, -now.Day()+1).Format("2006-01-02"), endDate, true
+	default:
+		return "", "", false
+	}
+}
+
+func summarizeCheckinRecords(userID int64, nickname string, records []*checkin.CheckinRecord) WeeklyStatsDTO {
+	result := WeeklyStatsDTO{
+		UserID:    userID,
+		Nickname:  nickname,
+		Status:    "absent",
+		Anomalies: []string{"no_checkin"},
+	}
+	if len(records) == 0 {
+		return result
+	}
+
+	dateRecords := make(map[string][]*checkin.CheckinRecord)
+	for _, record := range records {
+		dateRecords[record.Date] = append(dateRecords[record.Date], record)
+	}
+	var totalMinutes float64
+	anomalySet := make(map[string]struct{})
+	for _, dayRecords := range dateRecords {
+		sort.SliceStable(dayRecords, func(i, j int) bool {
+			if dayRecords[i].CreatedAt.Equal(dayRecords[j].CreatedAt) {
+				return dayRecords[i].ID < dayRecords[j].ID
+			}
+			return dayRecords[i].CreatedAt.Before(dayRecords[j].CreatedAt)
+		})
+		var openIn *checkin.CheckinRecord
+		for _, record := range dayRecords {
+			switch record.Type {
+			case checkin.CheckinTypeIn:
+				if openIn != nil {
+					anomalySet["duplicate_clock_in"] = struct{}{}
+				}
+				openIn = record
+			case checkin.CheckinTypeOut:
+				if openIn == nil {
+					anomalySet["orphan_clock_out"] = struct{}{}
+					continue
+				}
+				inTime, inErr := time.Parse("15:04:05", openIn.Time)
+				outTime, outErr := time.Parse("15:04:05", record.Time)
+				if inErr != nil || outErr != nil || outTime.Before(inTime) {
+					anomalySet["invalid_time_pair"] = struct{}{}
+				} else {
+					totalMinutes += outTime.Sub(inTime).Minutes()
+				}
+				openIn = nil
+			default:
+				anomalySet["invalid_type"] = struct{}{}
+			}
+		}
+		if openIn != nil {
+			anomalySet["missing_clock_out"] = struct{}{}
+		}
+	}
+	result.TotalMinutes = totalMinutes
+	result.TotalHours = totalMinutes / 60
+	result.Days = len(dateRecords)
+	result.Anomalies = make([]string, 0, len(anomalySet))
+	for anomaly := range anomalySet {
+		result.Anomalies = append(result.Anomalies, anomaly)
+	}
+	sort.Strings(result.Anomalies)
+	if len(result.Anomalies) == 0 {
+		result.Status = "normal"
+	} else {
+		result.Status = "attention"
+	}
+	return result
 }
 
 func (s *CheckinService) AutoClockOut(ctx context.Context, date string) error {
@@ -570,6 +675,10 @@ func (s *CheckinService) PublishReport(ctx context.Context) (string, string, err
 }
 
 func gradeFromStudentID(studentID string) int {
+	return gradeFromStudentIDAt(studentID, time.Now())
+}
+
+func gradeFromStudentIDAt(studentID string, now time.Time) int {
 	if len(studentID) < 4 {
 		return 0
 	}
@@ -577,7 +686,6 @@ func gradeFromStudentID(studentID string) int {
 	if err != nil {
 		return 0
 	}
-	now := time.Now()
 	currentYear := now.Year()
 	currentMonth := int(now.Month())
 	grade := currentYear - enrollmentYear + 1

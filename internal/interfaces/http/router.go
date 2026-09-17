@@ -131,6 +131,7 @@ func (r *Router) Setup() *gin.Engine {
 			protected.POST("/checkin/clock-out", r.checkinHandler.ClockOut)
 			protected.GET("/checkin/records", r.checkinHandler.GetRecords)
 			protected.GET("/checkin/status", r.checkinHandler.GetStatus)
+			protected.GET("/checkin/me/work-hours", r.checkinHandler.GetPersonalWorkHours)
 			protected.GET("/checkin/stats", r.checkinHandler.GetStats)
 			protected.GET("/checkin/online", r.checkinHandler.GetOnlineMembers)
 			protected.GET("/checkin/today-records", r.checkinHandler.GetAllTodayRecords)
