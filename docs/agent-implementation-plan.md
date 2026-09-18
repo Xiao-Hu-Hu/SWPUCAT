@@ -50,7 +50,7 @@
 
 计划提交：`docs(agent): add complete implementation roadmap`
 
-### [ ] P01：修复成员工时统计条形图
+### [x] P01：修复成员工时统计条形图
 
 范围：
 
@@ -266,6 +266,7 @@
 | 时间 | 阶段 | 状态 | 验证结果 | 本地提交 |
 |---|---|---|---|---|
 | 2026-09-18 | P00 | 完成 | 已建立范围、验收标准和提交计划；暂存区仅包含本文档 | `docs(agent): add complete implementation roadmap` |
+| 2026-09-18 | P01 | 完成 | 修复仅有超级管理员时被前端过滤为空的问题；增加安全数据归一化、空状态、失败重试、请求竞态保护、ResizeObserver 与销毁清理；数据测试和生产构建通过 | `fix(checkin): restore member work-hour bar chart` |
 
 ## 8. 当前基线
 
