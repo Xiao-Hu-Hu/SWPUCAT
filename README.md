@@ -180,7 +180,7 @@ CSA_MIGRATION_BASELINE=true
 
 ## Agent 角色化评测
 
-仓库内置 54 个 `member`、`captain`、`super_admin` 场景，覆盖生产 13 个工具、权限边界、写开关、引用、提示注入与隐私哨兵。默认命令只做严格离线校验，不读取模型凭据或访问网络：
+仓库内置 54 个 `member`、`captain`、`super_admin` 场景，覆盖生产 18 个工具、权限边界、写开关、确认提议、引用、提示注入与隐私哨兵。默认命令只做严格离线校验，不读取模型凭据或访问网络：
 
 ```bash
 make agent-eval

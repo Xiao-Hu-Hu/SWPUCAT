@@ -143,6 +143,15 @@ func (h *CheckinHandler) GetOnlineMembers(c *gin.Context) {
 	Success(c, members)
 }
 
+func (h *CheckinHandler) GetAgentOnlineSummary(c *gin.Context) {
+	summary, err := h.checkinSvc.GetOnlineSummary(c.Request.Context(), GetUserID(c), IsCaptain(c))
+	if err != nil {
+		InternalError(c, "failed to get online summary")
+		return
+	}
+	Success(c, summary)
+}
+
 func (h *CheckinHandler) GetAllTodayRecords(c *gin.Context) {
 	records, err := h.checkinSvc.GetAllTodayRecords(c.Request.Context())
 	if err != nil {

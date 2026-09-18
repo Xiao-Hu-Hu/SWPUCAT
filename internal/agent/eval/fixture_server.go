@@ -239,10 +239,12 @@ var staticFixtureRoutes = map[string]fixtureRoute{
 	"/api/checkin/me/work-hours":     {tool: "get_my_work_hours", method: http.MethodGet},
 	"/api/checkin/records":           {tool: "get_my_checkin_history", method: http.MethodGet},
 	"/api/checkin/requirements":      {tool: "get_checkin_requirements", method: http.MethodGet},
+	"/api/checkin/online-summary":    {tool: "get_online_summary", method: http.MethodGet},
 	"/api/checkin/clock-in":          {tool: "clock_in", method: http.MethodPost, write: true},
 	"/api/checkin/clock-out":         {tool: "clock_out", method: http.MethodPost, write: true},
 	"/api/knowledge/search":          {tool: "search_knowledge", method: http.MethodGet},
 	"/api/knowledge/recommendations": {tool: "recommend_knowledge", method: http.MethodGet},
+	"/api/knowledge/items/pending":   {tool: "list_pending_knowledge", method: http.MethodGet},
 	"/api/checkin/stats":             {tool: "get_checkin_stats", method: http.MethodGet},
 	"/api/analysis/team":             {tool: "query_team_members", method: http.MethodGet},
 	"/api/report-periods":            {tool: "list_report_periods", method: http.MethodGet},
@@ -338,7 +340,7 @@ func (item *boundFixtureCase) allows(route fixtureRoute) bool {
 		return false
 	}
 	switch route.tool {
-	case "query_team_members", "get_checkin_stats", "draft_announcement":
+	case "query_team_members", "get_checkin_stats", "list_pending_knowledge", "draft_announcement":
 		return item.role == "captain" || item.role == "super_admin"
 	default:
 		return true
@@ -369,7 +371,7 @@ func (s *FixtureServer) validateRequest(item *boundFixtureCase, route fixtureRou
 		return newFixtureRequestError(http.StatusBadRequest, "GET requests must not include a body")
 	}
 	switch route.tool {
-	case "get_checkin_status", "get_my_work_hours", "get_checkin_requirements", "list_report_periods":
+	case "get_checkin_status", "get_my_work_hours", "get_checkin_requirements", "list_report_periods", "list_pending_knowledge", "get_online_summary":
 		return rejectUnexpectedQuery(query)
 	case "get_my_checkin_history":
 		if _, err := positiveQueryInt(query, "limit", 20); err != nil {

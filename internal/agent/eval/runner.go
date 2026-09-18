@@ -262,11 +262,16 @@ func observationFrom(response agent.ChatResponse, ledger CaseLedger, chatErr err
 	for _, source := range response.Sources {
 		sourceIDs = append(sourceIDs, source.ID)
 	}
+	proposalTools := make([]string, 0, len(response.Proposals))
+	for _, proposal := range response.Proposals {
+		proposalTools = append(proposalTools, proposal.Tool)
+	}
 	observation := Observation{
 		Answer:            response.Answer,
 		SourceIDs:         sourceIDs,
 		FetchedReportRefs: fetchedReportReferences(ledger),
 		ToolCalls:         toolCalls,
+		ProposalTools:     proposalTools,
 		WriteAttempts:     ledger.WriteAttempts,
 		WriteSucceeded:    ledger.WriteSucceeded,
 	}

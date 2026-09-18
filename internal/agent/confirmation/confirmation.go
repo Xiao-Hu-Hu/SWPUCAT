@@ -18,6 +18,9 @@ const (
 	ToolClockIn           = "clock_in"
 	ToolClockOut          = "clock_out"
 	ToolDraftAnnouncement = "draft_announcement"
+	ToolReviewKnowledge   = "review_knowledge_item"
+	ToolGenerateInvite    = "generate_invitation_code"
+	ToolSaveEvaluation    = "save_evaluation_draft"
 	defaultTTL            = 5 * time.Minute
 	maxTTL                = 15 * time.Minute
 	maxTokenBytes         = 4096
@@ -44,6 +47,25 @@ type DraftAnnouncementParameters struct {
 	Pinned       bool    `json:"pinned"`
 	SourceNote   string  `json:"source_note,omitempty"`
 	RecipientIDs []int64 `json:"recipient_ids,omitempty"`
+}
+
+type KnowledgeReviewParameters struct {
+	ItemID   int64  `json:"item_id"`
+	Decision string `json:"decision"`
+	Reason   string `json:"reason,omitempty"`
+}
+
+type InvitationParameters struct {
+	Type string `json:"type"`
+}
+
+type EvaluationDraftParameters struct {
+	Mode            string `json:"mode"`
+	DraftID         int64  `json:"draft_id,omitempty"`
+	SnapshotID      int64  `json:"snapshot_id,omitempty"`
+	Title           string `json:"title"`
+	SummaryMarkdown string `json:"summary_markdown"`
+	Audience        string `json:"audience,omitempty"`
 }
 
 type Claims struct {
@@ -190,7 +212,7 @@ func TokenDigest(token string) string {
 
 func SupportedTool(toolName string) bool {
 	switch toolName {
-	case ToolClockIn, ToolClockOut, ToolDraftAnnouncement:
+	case ToolClockIn, ToolClockOut, ToolDraftAnnouncement, ToolReviewKnowledge, ToolGenerateInvite, ToolSaveEvaluation:
 		return true
 	default:
 		return false

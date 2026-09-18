@@ -138,6 +138,7 @@ func (r *Router) Setup() *gin.Engine {
 			protected.GET("/checkin/me/work-hours", r.checkinHandler.GetPersonalWorkHours)
 			protected.GET("/checkin/stats", r.checkinHandler.GetStats)
 			protected.GET("/checkin/online", r.checkinHandler.GetOnlineMembers)
+			protected.GET("/checkin/online-summary", r.checkinHandler.GetAgentOnlineSummary)
 			protected.GET("/checkin/today-records", r.checkinHandler.GetAllTodayRecords)
 
 			// Knowledge

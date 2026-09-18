@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +33,29 @@ type personalUserRepo struct {
 	member      *userdomain.User
 	requestedID int64
 	err         error
+}
+
+type onlineCheckinRepo struct {
+	checkindomain.Repository
+	online map[int64]bool
+	dates  []string
+}
+
+func (r *onlineCheckinRepo) GetLastByUserAndDate(_ context.Context, userID int64, date string) (*checkindomain.CheckinRecord, error) {
+	r.dates = append(r.dates, date)
+	if !r.online[userID] {
+		return nil, nil
+	}
+	return &checkindomain.CheckinRecord{UserID: userID, Type: checkindomain.CheckinTypeIn, Date: date}, nil
+}
+
+type onlineUserRepo struct {
+	userdomain.Repository
+	members []*userdomain.User
+}
+
+func (r *onlineUserRepo) FindAll(context.Context) ([]*userdomain.User, error) {
+	return r.members, nil
 }
 
 func (r *personalUserRepo) FindByID(_ context.Context, id int64) (*userdomain.User, error) {
@@ -181,6 +207,70 @@ func TestSummarizeCheckinRecordsReportsIncompleteTransitions(t *testing.T) {
 	}
 	if len(result.Anomalies) != 2 || result.Anomalies[0] != "missing_clock_out" || result.Anomalies[1] != "orphan_clock_out" {
 		t.Fatalf("anomalies = %#v", result.Anomalies)
+	}
+}
+
+func TestGetOnlineSummaryMinimizesMemberResponse(t *testing.T) {
+	fixedNow := time.Date(2026, time.September, 18, 12, 0, 0, 0, time.Local)
+	users := &onlineUserRepo{members: []*userdomain.User{
+		{ID: 7, Nickname: userdomain.Nickname("当前成员")},
+		{ID: 8, Nickname: userdomain.Nickname("其他成员")},
+	}}
+	repo := &onlineCheckinRepo{online: map[int64]bool{7: true, 8: true}}
+	service := NewCheckinService(repo, users, nil, checkinSettingsStub{})
+	service.now = func() time.Time { return fixedNow }
+
+	result, err := service.GetOnlineSummary(context.Background(), 7, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.AsOfDate != "2026-09-18" || result.TotalMembers != 2 || result.OnlineCount != 2 || result.SelfOnline == nil || !*result.SelfOnline {
+		t.Fatalf("summary = %+v", result)
+	}
+	if result.OnlineMembers != nil || result.Truncated {
+		t.Fatalf("member response exposed names: %+v", result)
+	}
+	for _, date := range repo.dates {
+		if date != "2026-09-18" {
+			t.Fatalf("repository date = %q", date)
+		}
+	}
+	payload, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"user_id", "token", "ip", "device", "activity", "其他成员"} {
+		if strings.Contains(string(payload), forbidden) {
+			t.Fatalf("privacy-minimized payload leaked %q: %s", forbidden, payload)
+		}
+	}
+}
+
+func TestGetOnlineSummaryManagerNamesAreSortedAndStablyTruncated(t *testing.T) {
+	fixedNow := time.Date(2026, time.September, 18, 12, 0, 0, 0, time.Local)
+	members := make([]*userdomain.User, 0, 53)
+	online := make(map[int64]bool, 53)
+	for index := 52; index >= 0; index-- {
+		id := int64(index + 1)
+		members = append(members, &userdomain.User{ID: id, Nickname: userdomain.Nickname(fmt.Sprintf("成员%02d", index))})
+		online[id] = true
+	}
+	service := NewCheckinService(&onlineCheckinRepo{online: online}, &onlineUserRepo{members: members}, nil, checkinSettingsStub{})
+	service.now = func() time.Time { return fixedNow }
+
+	result, err := service.GetOnlineSummary(context.Background(), 1, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.OnlineCount != 53 || len(result.OnlineMembers) != 50 || !result.Truncated {
+		t.Fatalf("bounded summary = %+v", result)
+	}
+	want := make([]string, 50)
+	for index := range want {
+		want[index] = fmt.Sprintf("成员%02d", index)
+	}
+	if !reflect.DeepEqual(result.OnlineMembers, want) {
+		t.Fatalf("online names = %#v, want %#v", result.OnlineMembers, want)
 	}
 }
 

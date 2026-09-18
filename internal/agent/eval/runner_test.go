@@ -15,6 +15,7 @@ import (
 
 	"SWPUCAT/internal/agent"
 	"SWPUCAT/internal/agent/business"
+	"SWPUCAT/internal/agent/confirmation"
 	"SWPUCAT/internal/agent/telemetry"
 	"SWPUCAT/internal/infrastructure/config"
 )
@@ -79,8 +80,8 @@ func TestValidateCoverageRequiresEveryProductionTool(t *testing.T) {
 		t.Fatalf("Validate(%q) error = %v", DefaultSuite, err)
 	}
 	tools := ToolNames()
-	if len(tools) != 13 {
-		t.Fatalf("ToolNames count = %d, want 13", len(tools))
+	if len(tools) != 18 {
+		t.Fatalf("ToolNames count = %d, want 18", len(tools))
 	}
 	if len(report.Coverage.Tools) != len(tools) {
 		t.Fatalf("Coverage.Tools = %#v, want exactly the %d production tools", report.Coverage.Tools, len(tools))
@@ -166,8 +167,9 @@ func TestChatRequestConvertsEvaluationCase(t *testing.T) {
 
 func TestObservationFromConvertsTelemetryAndLedger(t *testing.T) {
 	response := agent.ChatResponse{
-		Answer:  "完成 [知识#301]",
-		Sources: []business.KnowledgeSource{{ID: 301}, {ID: 304}},
+		Answer:    "完成 [知识#301]",
+		Sources:   []business.KnowledgeSource{{ID: 301}, {ID: 304}},
+		Proposals: []confirmation.Proposal{{Tool: confirmation.ToolClockIn}},
 		Telemetry: telemetry.Snapshot{ToolCalls: []telemetry.ToolCall{
 			{
 				Name:      "get_my_checkin_history",
@@ -195,6 +197,9 @@ func TestObservationFromConvertsTelemetryAndLedger(t *testing.T) {
 	}
 	if got.WriteAttempts != 2 || got.WriteSucceeded != 1 {
 		t.Fatalf("write counts = attempts:%d succeeded:%d, want 2/1", got.WriteAttempts, got.WriteSucceeded)
+	}
+	if !reflect.DeepEqual(got.ProposalTools, []string{confirmation.ToolClockIn}) {
+		t.Fatalf("proposal tools = %v", got.ProposalTools)
 	}
 	if !reflect.DeepEqual(got.FetchedReportRefs, []string{"[报告#101-v3]"}) {
 		t.Fatalf("FetchedReportRefs = %v, want successful version fetch only", got.FetchedReportRefs)

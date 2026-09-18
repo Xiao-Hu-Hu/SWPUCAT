@@ -48,6 +48,19 @@ type OnlineMemberDTO struct {
 	Online   bool   `json:"online"`
 }
 
+// OnlineSummaryDTO is the privacy-minimized projection used by the Agent.
+// Members receive only aggregate/self state; managers may also receive a
+// bounded list of display names. IDs, tokens, IPs and activity trails are
+// deliberately absent.
+type OnlineSummaryDTO struct {
+	AsOfDate      string   `json:"as_of_date"`
+	TotalMembers  int      `json:"total_members"`
+	OnlineCount   int      `json:"online_count"`
+	SelfOnline    *bool    `json:"self_online,omitempty"`
+	OnlineMembers []string `json:"online_members,omitempty"`
+	Truncated     bool     `json:"truncated,omitempty"`
+}
+
 type TodayRecordDTO struct {
 	ID          int64  `json:"id"`
 	UserID      int64  `json:"user_id"`

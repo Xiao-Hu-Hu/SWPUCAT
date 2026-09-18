@@ -19,7 +19,12 @@
     "get_checkin_stats",
     "list_report_periods",
     "get_report_materials",
+	"list_pending_knowledge",
+	"get_online_summary",
     "draft_announcement",
+	"review_knowledge_item",
+	"generate_invitation_code",
+	"save_evaluation_draft",
     "clock_in",
     "clock_out"
   ],

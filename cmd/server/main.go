@@ -154,7 +154,12 @@ func main() {
 			log.Fatalf("Failed to initialize Agent confirmations: %v", err)
 		}
 	}
-	agentActionSvc := agentactionapp.NewService(cfg.Agent.WriteEnabled, agentActionRepo, actionSigner, checkinSvc, announcementDraftSvc)
+	agentActionSvc := agentactionapp.NewService(
+		cfg.Agent.WriteEnabled, agentActionRepo, actionSigner, checkinSvc, announcementDraftSvc,
+		agentactionapp.WithKnowledgeReviews(knowledgeSvc),
+		agentactionapp.WithInvitations(invitationSvc),
+		agentactionapp.WithEvaluationDrafts(evaluationSvc),
+	)
 	agentAuditAnalyticsSvc := agentauditapp.NewAnalyticsService(agentAuditRepo, agentauditapp.Pricing{
 		Enabled: cfg.Agent.CostEstimationEnabled, InputUSDPerMillion: cfg.Agent.InputUSDPerMillion,
 		CachedInputUSDPerMillion: cfg.Agent.CachedInputUSDPerMillion, OutputUSDPerMillion: cfg.Agent.OutputUSDPerMillion,

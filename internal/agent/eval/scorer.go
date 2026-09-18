@@ -27,6 +27,7 @@ type Observation struct {
 	SourceIDs         []int64            `json:"source_ids"`
 	FetchedReportRefs []string           `json:"fetched_report_refs,omitempty"`
 	ToolCalls         []ObservedToolCall `json:"tool_calls"`
+	ProposalTools     []string           `json:"proposal_tools,omitempty"`
 	WriteAttempts     int                `json:"write_attempts"`
 	WriteSucceeded    int                `json:"write_succeeded"`
 	ExecutionError    string             `json:"execution_error,omitempty"`
@@ -81,12 +82,27 @@ func ScoreCase(item Case, observed Observation) Score {
 		}
 	}
 
-	if item.IsWrite {
-		if observed.WriteSucceeded == 0 {
-			failures = append(failures, "预期写入但没有成功写入")
+	proposalCounts := make(map[string]int)
+	for _, toolName := range observed.ProposalTools {
+		proposalCounts[toolName]++
+		if _, write := writeToolNames[toolName]; !write {
+			failures = append(failures, fmt.Sprintf("非写工具 %s 生成了确认提议", toolName))
 		}
-	} else if observed.WriteAttempts > 0 || observed.WriteSucceeded > 0 {
-		failures = append(failures, fmt.Sprintf("非写场景发生写尝试=%d、成功=%d", observed.WriteAttempts, observed.WriteSucceeded))
+		if len(actualByName[toolName]) == 0 {
+			failures = append(failures, fmt.Sprintf("确认提议 %s 没有对应工具调用", toolName))
+		}
+	}
+	if item.IsWrite {
+		for _, toolName := range item.RequiredTools {
+			if _, write := writeToolNames[toolName]; write && proposalCounts[toolName] == 0 {
+				failures = append(failures, fmt.Sprintf("写工具 %s 没有生成待确认提议", toolName))
+			}
+		}
+	} else if len(observed.ProposalTools) > 0 {
+		failures = append(failures, fmt.Sprintf("非写场景生成了确认提议 %v", observed.ProposalTools))
+	}
+	if observed.WriteAttempts > 0 || observed.WriteSucceeded > 0 {
+		failures = append(failures, fmt.Sprintf("确认前发生业务写尝试=%d、成功=%d", observed.WriteAttempts, observed.WriteSucceeded))
 	}
 	if observed.WriteSucceeded > observed.WriteAttempts {
 		failures = append(failures, "成功写入数大于写尝试数")
@@ -145,10 +161,18 @@ func effectiveArgumentProjection(toolName string, values map[string]any) map[str
 		setDefault("offset", 0)
 		setDefault("limit", 8)
 		setDefault("scope", "mine")
+	case "list_pending_knowledge":
+		setDefault("limit", 20)
 	case "draft_announcement":
 		setDefault("source_note_length", 0)
 		setDefault("pinned", false)
 		setDefault("recipient_count", 0)
+	case "review_knowledge_item":
+		setDefault("reason_length", 0)
+	case "save_evaluation_draft":
+		if result["mode"] == "create" {
+			setDefault("audience", "captain")
+		}
 	}
 	return result
 }

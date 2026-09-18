@@ -127,7 +127,7 @@ func marshalCapture(value any, originalBytes int, redacted, truncated bool, limi
 func projectArguments(toolName string, decoded any) any {
 	object, _ := decoded.(map[string]any)
 	switch toolName {
-	case "get_checkin_status", "get_my_work_hours", "get_checkin_requirements", "clock_in", "clock_out":
+	case "get_checkin_status", "get_my_work_hours", "get_checkin_requirements", "get_online_summary", "clock_in", "clock_out":
 		return map[string]any{}
 	case "get_my_checkin_history":
 		result := make(map[string]any)
@@ -170,6 +170,29 @@ func projectArguments(toolName string, decoded any) any {
 			"pinned":             argumentBool(object, "pinned"),
 			"recipient_count":    arrayLength(object["recipient_ids"]),
 		}
+	case "list_pending_knowledge":
+		result := make(map[string]any)
+		projectArgumentNumber(result, object, "limit", 0, 50, true)
+		return result
+	case "review_knowledge_item":
+		result := map[string]any{"reason_length": trimmedStringLength(object["reason"])}
+		projectArgumentPresence(result, object, "item_id")
+		projectArgumentEnum(result, object, "decision", "approve", "reject")
+		return result
+	case "generate_invitation_code":
+		result := make(map[string]any)
+		projectArgumentEnum(result, object, "type", "member", "captain")
+		return result
+	case "save_evaluation_draft":
+		result := map[string]any{
+			"title_length":   trimmedStringLength(object["title"]),
+			"summary_length": trimmedStringLength(object["summary_markdown"]),
+		}
+		projectArgumentEnum(result, object, "mode", "create", "update")
+		projectArgumentPresence(result, object, "draft_id")
+		projectArgumentPresence(result, object, "snapshot_id")
+		projectArgumentEnum(result, object, "audience", "captain", "team", "private")
+		return result
 	default:
 		return payloadShape(decoded, 0)
 	}
@@ -286,9 +309,12 @@ func projectResult(toolName string, decoded any) any {
 	switch toolName {
 	case "get_checkin_status":
 		return map[string]any{"status": enumOrOther(object["status"], "idle", "clocked_in", "clocked_out")}
-	case "clock_in", "clock_out":
+	case "clock_in", "clock_out", "review_knowledge_item", "generate_invitation_code", "save_evaluation_draft":
 		if object["status"] == "confirmation_required" {
 			return projectActionProposal(object)
+		}
+		if toolName != "clock_in" && toolName != "clock_out" {
+			return payloadShape(decoded, 0)
 		}
 		return map[string]any{
 			"type": enumOrOther(object["type"], "in", "out"),
@@ -365,6 +391,22 @@ func projectResult(toolName string, decoded any) any {
 			"email_requested": boolOrNil(object["email_requested"]),
 			"announcement_id": numberOrNil(object["announcement_id"]),
 		}
+	case "list_pending_knowledge":
+		return map[string]any{
+			"total":      numberOrNil(object["total"]),
+			"limit":      numberOrNil(object["limit"]),
+			"item_count": arrayLength(object["items"]),
+			"truncated":  boolOrNil(object["truncated"]),
+		}
+	case "get_online_summary":
+		return map[string]any{
+			"as_of_date":    dateOrOther(object["as_of_date"]),
+			"total_members": numberOrNil(object["total_members"]),
+			"online_count":  numberOrNil(object["online_count"]),
+			"self_online":   boolOrNil(object["self_online"]),
+			"name_count":    arrayLength(object["online_members"]),
+			"truncated":     boolOrNil(object["truncated"]),
+		}
 	default:
 		return payloadShape(decoded, 0)
 	}
@@ -373,7 +415,8 @@ func projectResult(toolName string, decoded any) any {
 func projectActionProposal(object map[string]any) map[string]any {
 	return map[string]any{
 		"status": enumOrOther(object["status"], "confirmation_required"),
-		"tool":   enumOrOther(object["tool"], "clock_in", "clock_out", "draft_announcement"),
+		"tool": enumOrOther(object["tool"], "clock_in", "clock_out", "draft_announcement", "review_knowledge_item",
+			"generate_invitation_code", "save_evaluation_draft"),
 	}
 }
 

@@ -51,16 +51,16 @@ func TestKnownToolTelemetryProjectionsSatisfyPersistenceContract(t *testing.T) {
 		{
 			name:          "clock_in",
 			arguments:     `{"private_note":"SECRET_CLOCK_IN_ARGUMENT_913"}`,
-			result:        `{"id":91,"type":"in","date":"2026-09-18","time":"08:30:00","raw_secret":"SECRET_CLOCK_IN_RESULT_913"}`,
+			result:        `{"status":"confirmation_required","tool":"clock_in","token":"SECRET_CLOCK_IN_TOKEN_913","raw_secret":"SECRET_CLOCK_IN_RESULT_913"}`,
 			wantArguments: `{}`,
-			wantResult:    `{"date":"2026-09-18","type":"in"}`,
+			wantResult:    `{"status":"confirmation_required","tool":"clock_in"}`,
 		},
 		{
 			name:          "clock_out",
 			arguments:     `{"private_note":"SECRET_CLOCK_OUT_ARGUMENT_913"}`,
-			result:        `{"id":92,"type":"out","date":"2026-09-18","time":"17:30:00","raw_secret":"SECRET_CLOCK_OUT_RESULT_913"}`,
+			result:        `{"status":"confirmation_required","tool":"clock_out","token":"SECRET_CLOCK_OUT_TOKEN_913","raw_secret":"SECRET_CLOCK_OUT_RESULT_913"}`,
 			wantArguments: `{}`,
-			wantResult:    `{"date":"2026-09-18","type":"out"}`,
+			wantResult:    `{"status":"confirmation_required","tool":"clock_out"}`,
 		},
 		{
 			name:          "get_my_checkin_history",
@@ -123,14 +123,49 @@ func TestKnownToolTelemetryProjectionsSatisfyPersistenceContract(t *testing.T) {
 		{
 			name:          "draft_announcement",
 			arguments:     `{"title":"SECRET_TITLE_913","content":"SECRET_BODY_913","source_note":"SECRET_NOTE_913","pinned":true,"recipient_ids":[901,902],"private_note":"SECRET_ANNOUNCEMENT_ARGUMENT_913"}`,
-			result:        `{"id":77,"status":"draft","pinned":true,"recipient_ids":[901,902],"email_requested":true,"announcement_id":101,"content":"SECRET_ANNOUNCEMENT_BODY_913","raw_secret":"SECRET_ANNOUNCEMENT_RESULT_913"}`,
+			result:        `{"status":"confirmation_required","tool":"draft_announcement","token":"SECRET_ANNOUNCEMENT_TOKEN_913","content":"SECRET_ANNOUNCEMENT_BODY_913","raw_secret":"SECRET_ANNOUNCEMENT_RESULT_913"}`,
 			wantArguments: `{"content_length":15,"pinned":true,"recipient_count":2,"source_note_length":15,"title_length":16}`,
-			wantResult:    `{"announcement_id":101,"email_requested":"[REDACTED]","id":77,"pinned":true,"recipient_count":2,"status":"draft"}`,
+			wantResult:    `{"status":"confirmation_required","tool":"draft_announcement"}`,
+		},
+		{
+			name:          "list_pending_knowledge",
+			arguments:     `{"limit":50,"query":"SECRET_PENDING_QUERY_913"}`,
+			result:        `{"total":2,"limit":50,"items":[{"id":19,"name":"SECRET_PENDING_ONE_913"},{"id":20,"name":"SECRET_PENDING_TWO_913"}],"truncated":false,"storage_key":"SECRET_STORAGE_KEY_913"}`,
+			wantArguments: `{"limit":50}`,
+			wantResult:    `{"item_count":2,"limit":50,"total":2,"truncated":false}`,
+		},
+		{
+			name:          "get_online_summary",
+			arguments:     `{"private_note":"SECRET_ONLINE_ARGUMENT_913"}`,
+			result:        `{"as_of_date":"2026-09-18","total_members":3,"online_count":2,"self_online":true,"online_members":["SECRET_MEMBER_ONE_913","SECRET_MEMBER_TWO_913"],"truncated":false,"ip":"SECRET_IP_913"}`,
+			wantArguments: `{}`,
+			wantResult:    `{"as_of_date":"2026-09-18","name_count":2,"online_count":2,"self_online":true,"total_members":3,"truncated":false}`,
+		},
+		{
+			name:          "review_knowledge_item",
+			arguments:     `{"item_id":19,"decision":"reject","reason":"SECRET_REASON_913","private_note":"SECRET_REVIEW_ARGUMENT_913"}`,
+			result:        `{"status":"confirmation_required","tool":"review_knowledge_item","token":"SECRET_REVIEW_TOKEN_913","reason":"SECRET_REASON_913"}`,
+			wantArguments: `{"decision":"reject","item_id_provided":true,"reason_length":17}`,
+			wantResult:    `{"status":"confirmation_required","tool":"review_knowledge_item"}`,
+		},
+		{
+			name:          "generate_invitation_code",
+			arguments:     `{"type":"captain","private_note":"SECRET_INVITE_ARGUMENT_913"}`,
+			result:        `{"status":"confirmation_required","tool":"generate_invitation_code","token":"SECRET_INVITE_TOKEN_913","code":"SECRET_INVITE_CODE_913"}`,
+			wantArguments: `{"type":"captain"}`,
+			wantResult:    `{"status":"confirmation_required","tool":"generate_invitation_code"}`,
+		},
+		{
+			name:          "save_evaluation_draft",
+			arguments:     `{"mode":"create","snapshot_id":71,"title":"SECRET_TITLE_913","summary_markdown":"SECRET_SUMMARY_913","audience":"captain","private_note":"SECRET_EVALUATION_ARGUMENT_913"}`,
+			result:        `{"status":"confirmation_required","tool":"save_evaluation_draft","token":"SECRET_EVALUATION_TOKEN_913","summary_markdown":"SECRET_SUMMARY_913","members":["SECRET_MEMBER_913"]}`,
+			wantArguments: `{"audience":"captain","mode":"create","snapshot_id_provided":true,"summary_length":18,"title_length":16}`,
+			wantResult:    `{"status":"confirmation_required","tool":"save_evaluation_draft"}`,
 		},
 	}
 
-	if len(tests) != 13 {
-		t.Fatalf("known tool fixture count = %d, want 13", len(tests))
+	if len(tests) != 18 {
+		t.Fatalf("known tool fixture count = %d, want 18", len(tests))
 	}
 	seen := make(map[string]struct{}, len(tests))
 	for _, test := range tests {
@@ -232,6 +267,11 @@ func TestKnownToolTelemetryProjectionsSatisfyPersistenceContract(t *testing.T) {
 		"list_report_periods",
 		"get_report_materials",
 		"draft_announcement",
+		"list_pending_knowledge",
+		"get_online_summary",
+		"review_knowledge_item",
+		"generate_invitation_code",
+		"save_evaluation_draft",
 	} {
 		if _, ok := seen[name]; !ok {
 			t.Errorf("missing audited tool fixture %q", name)

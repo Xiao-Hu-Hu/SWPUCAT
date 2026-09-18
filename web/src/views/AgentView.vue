@@ -374,7 +374,31 @@ function actionToolLabel(tool: string): string {
   if (tool === 'clock_in') return '上班打卡'
   if (tool === 'clock_out') return '下班打卡'
   if (tool === 'draft_announcement') return '创建公告草稿'
+  if (tool === 'review_knowledge_item') return '审核知识条目'
+  if (tool === 'generate_invitation_code') return '生成邀请码'
+  if (tool === 'save_evaluation_draft') return '保存考评草稿'
   return '待确认操作'
+}
+
+function actionParameter(proposal: AgentActionProposal, key: string): string {
+  const value = proposal.parameters?.[key]
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : ''
+}
+
+function invitationCode(result?: AgentActionResult): string {
+  const value = result?.data?.code
+  return typeof value === 'string' ? value : ''
+}
+
+async function copyInvitationCode(result?: AgentActionResult) {
+  const code = invitationCode(result)
+  if (!code) return
+  try {
+    await navigator.clipboard.writeText(code)
+    ElMessage.success('邀请码已复制')
+  } catch {
+    ElMessage.error('复制失败，请手动选择邀请码')
+  }
 }
 
 function actionExpiryLabel(proposal: AgentActionProposal): string {
@@ -736,10 +760,29 @@ async function downloadSource(source: AgentKnowledgeSource) {
                       <div><dt>正文</dt><dd class="action-content-preview">{{ proposal.parameters.content }}</dd></div>
                       <div><dt>置顶</dt><dd>{{ proposal.parameters.pinned ? '是' : '否' }}</dd></div>
                     </dl>
+                    <dl v-else-if="proposal.tool === 'review_knowledge_item'" class="action-parameters">
+                      <div><dt>条目</dt><dd>#{{ actionParameter(proposal, 'item_id') }}</dd></div>
+                      <div><dt>决定</dt><dd>{{ actionParameter(proposal, 'decision') === 'approve' ? '批准' : '拒绝' }}</dd></div>
+                      <div v-if="actionParameter(proposal, 'reason')"><dt>原因</dt><dd>{{ actionParameter(proposal, 'reason') }}</dd></div>
+                    </dl>
+                    <dl v-else-if="proposal.tool === 'generate_invitation_code'" class="action-parameters">
+                      <div><dt>类型</dt><dd>{{ actionParameter(proposal, 'type') === 'captain' ? '队长邀请码' : '成员邀请码' }}</dd></div>
+                    </dl>
+                    <dl v-else-if="proposal.tool === 'save_evaluation_draft'" class="action-parameters">
+                      <div><dt>方式</dt><dd>{{ actionParameter(proposal, 'mode') === 'create' ? '创建草稿' : '更新草稿' }}</dd></div>
+                      <div v-if="actionParameter(proposal, 'snapshot_id')"><dt>快照</dt><dd>#{{ actionParameter(proposal, 'snapshot_id') }}</dd></div>
+                      <div v-if="actionParameter(proposal, 'draft_id')"><dt>草稿</dt><dd>#{{ actionParameter(proposal, 'draft_id') }}</dd></div>
+                      <div><dt>标题</dt><dd>{{ actionParameter(proposal, 'title') }}</dd></div>
+                      <div><dt>总结</dt><dd class="action-content-preview">{{ actionParameter(proposal, 'summary_markdown') }}</dd></div>
+                    </dl>
                     <div class="action-card-expiry" :class="{ expired: actionExpired(proposal) }">{{ actionExpiryLabel(proposal) }}</div>
                     <div v-if="proposal.token && item.actionResults?.[proposal.token]" class="action-result" :class="item.actionResults[proposal.token].status">
                       <strong>{{ item.actionResults[proposal.token].title }}</strong>
                       <span>{{ item.actionResults[proposal.token].message }}</span>
+                      <div v-if="proposal.tool === 'generate_invitation_code' && invitationCode(item.actionResults[proposal.token])" class="invitation-code-result">
+                        <code>{{ invitationCode(item.actionResults[proposal.token]) }}</code>
+                        <el-button text size="small" @click="copyInvitationCode(item.actionResults[proposal.token])">复制邀请码</el-button>
+                      </div>
                       <small v-if="item.actionResults[proposal.token].replayed">已返回此前执行结果</small>
                     </div>
                     <el-button
@@ -1360,6 +1403,21 @@ async function downloadSource(source: AgentKnowledgeSource) {
 
 .action-result.failed strong {
   color: var(--danger);
+}
+
+.invitation-code-result {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.invitation-code-result code {
+  border-radius: 6px;
+  background: var(--bg);
+  padding: 0.25rem 0.45rem;
+  color: var(--text);
+  font-size: 1rem;
+  letter-spacing: 0.12em;
 }
 
 .composer {

@@ -63,6 +63,46 @@ type announcementDraftInput struct {
 	SourceNote   string  `json:"source_note,omitempty" jsonschema_description:"可选的生成依据或说明"`
 }
 
+type knowledgeReviewInput struct {
+	ItemID   int64  `json:"item_id" jsonschema_description:"待审核知识条目 ID，必须来自 list_pending_knowledge"`
+	Decision string `json:"decision" jsonschema_description:"审核决定，只能是 approve 或 reject"`
+	Reason   string `json:"reason,omitempty" jsonschema_description:"拒绝时必填的原因，最多 512 个字符"`
+}
+
+type invitationCodeInput struct {
+	Type string `json:"type" jsonschema_description:"邀请码类型，只能是 member 或 captain；captain 类型仅超级管理员可生成"`
+}
+
+type evaluationDraftInput struct {
+	Mode            string `json:"mode" jsonschema_description:"操作方式，只能是 create 或 update"`
+	DraftID         int64  `json:"draft_id,omitempty" jsonschema_description:"更新时必填的考评草稿 ID"`
+	SnapshotID      int64  `json:"snapshot_id,omitempty" jsonschema_description:"创建时必填的不可变考评快照 ID"`
+	Title           string `json:"title" jsonschema_description:"草稿标题，最多 256 个字符"`
+	SummaryMarkdown string `json:"summary_markdown" jsonschema_description:"草稿总结 Markdown，最多 12000 个字符"`
+	Audience        string `json:"audience,omitempty" jsonschema_description:"创建时的可见范围：captain、team 或 private；默认 captain"`
+}
+
+type pendingKnowledgeInput struct {
+	Limit int `json:"limit,omitempty" jsonschema:"description=最多返回多少条待审核资料，默认 20，最大 50"`
+}
+
+type pendingKnowledgeItem struct {
+	ID           int64  `json:"id"`
+	Type         string `json:"type"`
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	CategoryName string `json:"category_name"`
+	UploaderName string `json:"uploader_name"`
+	CreatedAt    string `json:"created_at"`
+}
+
+type pendingKnowledgeResult struct {
+	Total     int                    `json:"total"`
+	Limit     int                    `json:"limit"`
+	Truncated bool                   `json:"truncated,omitempty"`
+	Items     []pendingKnowledgeItem `json:"items"`
+}
+
 type reportMaterial struct {
 	ReportID     int64          `json:"report_id"`
 	Version      int            `json:"version"`
@@ -471,9 +511,161 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
-	result := []tool.BaseTool{statusTool, personalWorkHoursTool, checkinHistoryTool, checkinRequirementsTool, knowledgeTool, recommendTool, teamQueryTool, statsTool, reportPeriodsTool, reportTool}
+	pendingKnowledgeTool, err := toolutils.InferTool[pendingKnowledgeInput, string](
+		"list_pending_knowledge",
+		"仅供队长或超级管理员查看待审核知识条目的受限摘要；不返回文件存储键或完整正文。",
+		func(ctx context.Context, input pendingKnowledgeInput) (string, error) {
+			identity := business.RequestContextFrom(ctx)
+			if identity.Role != "captain" && identity.Role != "super_admin" {
+				return "", fmt.Errorf("captain or super_admin role is required")
+			}
+			limit := input.Limit
+			if limit == 0 {
+				limit = 20
+			}
+			if limit < 1 || limit > 50 {
+				return "", fmt.Errorf("limit must be between 1 and 50")
+			}
+			items, err := r.client.ListPendingKnowledge(ctx)
+			if err != nil {
+				return "", err
+			}
+			capacity := len(items)
+			if capacity > limit {
+				capacity = limit
+			}
+			result := pendingKnowledgeResult{Total: len(items), Limit: limit, Items: make([]pendingKnowledgeItem, 0, capacity)}
+			for _, item := range items {
+				if len(result.Items) >= limit {
+					result.Truncated = true
+					break
+				}
+				result.Items = append(result.Items, pendingKnowledgeItem{
+					ID: item.ID, Type: truncateToolRunes(item.Type, 32), Name: truncateToolRunes(item.Name, 256),
+					Description: truncateToolRunes(item.Description, 600), CategoryName: truncateToolRunes(item.CategoryName, 128),
+					UploaderName: truncateToolRunes(item.UploaderName, 128), CreatedAt: truncateToolRunes(item.CreatedAt, 64),
+				})
+			}
+			return marshal(result)
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	onlineSummaryTool, err := toolutils.InferTool[emptyInput, string](
+		"get_online_summary",
+		"查询今天的在线摘要。普通成员只获得在线人数和本人状态；队长或超级管理员可获得最多 50 个在线成员显示名。不会返回用户 ID、令牌、IP 或活动轨迹。",
+		func(ctx context.Context, _ emptyInput) (string, error) {
+			result, err := r.client.GetOnlineSummary(ctx)
+			if err != nil {
+				return "", err
+			}
+			for index := range result.OnlineMembers {
+				result.OnlineMembers[index] = truncateToolRunes(result.OnlineMembers[index], 128)
+			}
+			if len(result.OnlineMembers) > 50 {
+				result.OnlineMembers = result.OnlineMembers[:50]
+				result.Truncated = true
+			}
+			return marshal(result)
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	result := []tool.BaseTool{statusTool, personalWorkHoursTool, checkinHistoryTool, checkinRequirementsTool, knowledgeTool, recommendTool, teamQueryTool, statsTool, reportPeriodsTool, reportTool, pendingKnowledgeTool, onlineSummaryTool}
 	if r.writeEnabled {
 		result = append(result, announcementDraftTool)
+		knowledgeReviewTool, err := toolutils.InferTool[knowledgeReviewInput, string](
+			"review_knowledge_item",
+			"仅供队长或超级管理员提出批准或拒绝待审核知识条目的操作。只生成待确认提议，确认前不会改变条目状态。",
+			func(ctx context.Context, input knowledgeReviewInput) (string, error) {
+				identity := business.RequestContextFrom(ctx)
+				if identity.Role != "captain" && identity.Role != "super_admin" {
+					return "", fmt.Errorf("captain or super_admin role is required")
+				}
+				decision, reason := strings.ToLower(strings.TrimSpace(input.Decision)), strings.TrimSpace(input.Reason)
+				if input.ItemID <= 0 || decision != "approve" && decision != "reject" {
+					return "", fmt.Errorf("item_id and a valid decision are required")
+				}
+				if decision == "reject" && reason == "" {
+					return "", fmt.Errorf("reason is required when rejecting knowledge")
+				}
+				if len([]rune(reason)) > 512 {
+					return "", fmt.Errorf("reason must be at most 512 characters")
+				}
+				label := "批准"
+				if decision == "reject" {
+					label = "拒绝"
+				}
+				return r.propose(ctx, confirmation.ToolReviewKnowledge, label+"知识条目", fmt.Sprintf("确认后将%s待审核知识条目 #%d。", label, input.ItemID), confirmation.KnowledgeReviewParameters{
+					ItemID: input.ItemID, Decision: decision, Reason: reason,
+				})
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
+		invitationTool, err := toolutils.InferTool[invitationCodeInput, string](
+			"generate_invitation_code",
+			"仅供授权角色提出生成邀请码的操作。队长只能生成成员邀请码，超级管理员可生成成员或队长邀请码；确认前不会生成，结果代码只显示在服务端结果卡片中。",
+			func(ctx context.Context, input invitationCodeInput) (string, error) {
+				identity := business.RequestContextFrom(ctx)
+				if identity.Role != "captain" && identity.Role != "super_admin" {
+					return "", fmt.Errorf("captain or super_admin role is required")
+				}
+				codeType := strings.ToLower(strings.TrimSpace(input.Type))
+				if codeType != "member" && codeType != "captain" {
+					return "", fmt.Errorf("type must be member or captain")
+				}
+				if codeType == "captain" && identity.Role != "super_admin" {
+					return "", fmt.Errorf("only super_admin can generate captain invitation codes")
+				}
+				return r.propose(ctx, confirmation.ToolGenerateInvite, "生成邀请码", "确认后将生成一个 10 分钟有效的邀请码；代码只会显示在结果卡片中。", confirmation.InvitationParameters{Type: codeType})
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
+		evaluationTool, err := toolutils.InferTool[evaluationDraftInput, string](
+			"save_evaluation_draft",
+			"仅供队长或超级管理员提出创建或更新考评草稿的操作。只能保存 draft，不会审核、发布或通知成员；确认前不写入。",
+			func(ctx context.Context, input evaluationDraftInput) (string, error) {
+				identity := business.RequestContextFrom(ctx)
+				if identity.Role != "captain" && identity.Role != "super_admin" {
+					return "", fmt.Errorf("captain or super_admin role is required")
+				}
+				mode, title, summary := strings.ToLower(strings.TrimSpace(input.Mode)), strings.TrimSpace(input.Title), strings.TrimSpace(input.SummaryMarkdown)
+				if mode != "create" && mode != "update" || title == "" || len([]rune(title)) > 256 || len([]rune(summary)) > 12000 {
+					return "", fmt.Errorf("mode, title or summary_markdown is invalid")
+				}
+				audience := strings.ToLower(strings.TrimSpace(input.Audience))
+				if mode == "create" {
+					if input.SnapshotID <= 0 || input.DraftID != 0 {
+						return "", fmt.Errorf("create requires snapshot_id and must not include draft_id")
+					}
+					if audience == "" {
+						audience = "captain"
+					}
+					if audience != "captain" && audience != "team" && audience != "private" {
+						return "", fmt.Errorf("audience is invalid")
+					}
+				} else if input.DraftID <= 0 || input.SnapshotID != 0 || audience != "" {
+					return "", fmt.Errorf("update requires draft_id and cannot change snapshot or audience")
+				}
+				verb := "创建"
+				if mode == "update" {
+					verb = "更新"
+				}
+				return r.propose(ctx, confirmation.ToolSaveEvaluation, verb+"考评草稿", "确认后只保存草稿，不会审核、发布或发送通知。", confirmation.EvaluationDraftParameters{
+					Mode: mode, DraftID: input.DraftID, SnapshotID: input.SnapshotID, Title: title,
+					SummaryMarkdown: summary, Audience: audience,
+				})
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
 		clockInTool, err := toolutils.InferTool[emptyInput, string](
 			"clock_in",
 			"提出为当前登录成员上班打卡的待确认操作；不会立即打卡，用户必须在界面确认。",
@@ -494,7 +686,7 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, clockInTool, clockOutTool)
+		result = append(result, knowledgeReviewTool, invitationTool, evaluationTool, clockInTool, clockOutTool)
 	}
 	return result, nil
 }

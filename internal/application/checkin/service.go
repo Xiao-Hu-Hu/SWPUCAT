@@ -417,8 +417,10 @@ func (s *CheckinService) AutoClockOut(ctx context.Context, date string) error {
 }
 
 func (s *CheckinService) GetOnlineMembers(ctx context.Context) ([]OnlineMemberDTO, error) {
-	today := time.Now().Format("2006-01-02")
+	return s.getOnlineMembersAt(ctx, s.now().Format("2006-01-02"))
+}
 
+func (s *CheckinService) getOnlineMembersAt(ctx context.Context, date string) ([]OnlineMemberDTO, error) {
 	users, err := s.userRepo.FindAll(ctx)
 	if err != nil {
 		return nil, err
@@ -426,13 +428,55 @@ func (s *CheckinService) GetOnlineMembers(ctx context.Context) ([]OnlineMemberDT
 
 	result := make([]OnlineMemberDTO, 0, len(users))
 	for _, u := range users {
-		lastRecord, _ := s.checkinRepo.GetLastByUserAndDate(ctx, u.ID, today)
+		lastRecord, _ := s.checkinRepo.GetLastByUserAndDate(ctx, u.ID, date)
 		online := lastRecord != nil && lastRecord.Type == checkin.CheckinTypeIn
 		result = append(result, OnlineMemberDTO{
 			UserID:   u.ID,
 			Nickname: u.DisplayName(),
 			Online:   online,
 		})
+	}
+	return result, nil
+}
+
+func (s *CheckinService) GetOnlineSummary(ctx context.Context, viewerID int64, includeMemberNames bool) (*OnlineSummaryDTO, error) {
+	if viewerID <= 0 {
+		return nil, shared.ErrValidation
+	}
+	now := s.now()
+	members, err := s.getOnlineMembersAt(ctx, now.Format("2006-01-02"))
+	if err != nil {
+		return nil, err
+	}
+	result := &OnlineSummaryDTO{
+		AsOfDate: now.Format("2006-01-02"), TotalMembers: len(members),
+		OnlineMembers: make([]string, 0),
+	}
+	selfOnline := false
+	selfFound := false
+	for _, member := range members {
+		if member.UserID == viewerID {
+			selfOnline, selfFound = member.Online, true
+		}
+		if !member.Online {
+			continue
+		}
+		result.OnlineCount++
+		if includeMemberNames {
+			result.OnlineMembers = append(result.OnlineMembers, member.Nickname)
+		}
+	}
+	if selfFound {
+		result.SelfOnline = &selfOnline
+	}
+	if includeMemberNames {
+		sort.Strings(result.OnlineMembers)
+		if len(result.OnlineMembers) > 50 {
+			result.OnlineMembers = result.OnlineMembers[:50]
+			result.Truncated = true
+		}
+	} else {
+		result.OnlineMembers = nil
 	}
 	return result, nil
 }

@@ -49,6 +49,9 @@ func TestWriteToolsOnlyCollectSignedConfirmationProposals(t *testing.T) {
 		{name: confirmation.ToolClockIn, arguments: `{}`},
 		{name: confirmation.ToolClockOut, arguments: `{}`},
 		{name: confirmation.ToolDraftAnnouncement, arguments: `{"title":"值班安排","content":"请按新表值班","pinned":true}`},
+		{name: confirmation.ToolReviewKnowledge, arguments: `{"item_id":19,"decision":"approve"}`},
+		{name: confirmation.ToolGenerateInvite, arguments: `{"type":"member"}`},
+		{name: confirmation.ToolSaveEvaluation, arguments: `{"mode":"create","snapshot_id":23,"title":"九月考评","summary_markdown":"仅保存草稿","audience":"captain"}`},
 	}
 	for _, test := range tests {
 		invokable, ok := findRegisteredTool(t, registered, test.name).(einotool.InvokableTool)
@@ -81,6 +84,160 @@ func TestWriteToolsOnlyCollectSignedConfirmationProposals(t *testing.T) {
 		if _, _, err := signer.Verify(proposal.Token, 7, "session-7", proposal.Tool, proposal.Parameters); err != nil {
 			t.Fatalf("verify proposal %d: %v", index, err)
 		}
+	}
+}
+
+func TestPendingKnowledgeToolEnforcesRoleAndReturnsBoundedProjection(t *testing.T) {
+	var requests atomic.Int32
+	longName := strings.Repeat("知", 300)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.Method != http.MethodGet || r.URL.Path != "/api/knowledge/items/pending" || r.URL.RawQuery != "" {
+			t.Fatalf("unexpected request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+		}
+		if r.Header.Get("Authorization") != "Bearer captain-token" {
+			t.Fatalf("authorization = %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":[` +
+			`{"id":19,"type":"file","name":"` + longName + `","description":"说明","category_name":"制度","uploader_name":"上传者","status":"pending","created_at":"2026-09-18T10:00:00+08:00","storage_key":"SECRET_STORAGE_KEY","content":"SECRET_FULL_TEXT"},` +
+			`{"id":20,"type":"article","name":"第二项","description":"说明","category_name":"制度","uploader_name":"上传者","status":"pending","created_at":"2026-09-18T11:00:00+08:00"}]}`))
+	}))
+	defer server.Close()
+	client, err := business.NewClient(server.URL, "", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered, err := NewRegistry(client, false).Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	invokable, ok := findRegisteredTool(t, registered, "list_pending_knowledge").(einotool.InvokableTool)
+	if !ok {
+		t.Fatal("list_pending_knowledge is not invokable")
+	}
+	memberCtx := business.WithRequestContext(context.Background(), business.RequestContext{Authorization: "Bearer member-token", UserID: 7, Role: "member"})
+	if _, err := invokable.InvokableRun(memberCtx, `{}`); err == nil {
+		t.Fatal("member unexpectedly listed pending knowledge")
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("unauthorized invocation issued %d HTTP requests", requests.Load())
+	}
+	captainCtx := business.WithRequestContext(context.Background(), business.RequestContext{Authorization: "Bearer captain-token", UserID: 9, Role: "captain"})
+	output, err := invokable.InvokableRun(captainCtx, `{"limit":1}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result pendingKnowledgeResult
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 2 || result.Limit != 1 || !result.Truncated || len(result.Items) != 1 || result.Items[0].ID != 19 {
+		t.Fatalf("pending result = %+v", result)
+	}
+	if len([]rune(result.Items[0].Name)) != 257 || !strings.HasSuffix(result.Items[0].Name, "…") {
+		t.Fatalf("bounded name length=%d value=%q", len([]rune(result.Items[0].Name)), result.Items[0].Name)
+	}
+	for _, forbidden := range []string{"SECRET_STORAGE_KEY", "SECRET_FULL_TEXT", "storage_key", "content"} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("pending projection leaked %q: %s", forbidden, output)
+		}
+	}
+}
+
+func TestOnlineSummaryToolUsesDedicatedPrivacyEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/checkin/online-summary" || r.URL.RawQuery != "" {
+			t.Fatalf("unexpected request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"as_of_date":"2026-09-18","total_members":12,"online_count":4,"self_online":true}}`))
+	}))
+	defer server.Close()
+	client, err := business.NewClient(server.URL, "", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered, err := NewRegistry(client, false).Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	invokable, ok := findRegisteredTool(t, registered, "get_online_summary").(einotool.InvokableTool)
+	if !ok {
+		t.Fatal("get_online_summary is not invokable")
+	}
+	ctx := business.WithRequestContext(context.Background(), business.RequestContext{Authorization: "Bearer member-token", UserID: 7, Role: "member"})
+	output, err := invokable.InvokableRun(ctx, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result business.OnlineSummary
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.TotalMembers != 12 || result.OnlineCount != 4 || result.SelfOnline == nil || !*result.SelfOnline || result.OnlineMembers != nil {
+		t.Fatalf("online summary = %+v", result)
+	}
+	for _, forbidden := range []string{"user_id", "token", "ip", "device", "activity"} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("online output leaked %q: %s", forbidden, output)
+		}
+	}
+}
+
+func TestGovernedWriteToolsRejectInvalidRolesAndArgumentsBeforeProposal(t *testing.T) {
+	client, err := business.NewClient("http://127.0.0.1:1", "", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := confirmation.NewSigner(strings.Repeat("s", 32), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered, err := NewRegistry(client, true, signer).Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name      string
+		role      string
+		arguments string
+	}{
+		{name: confirmation.ToolReviewKnowledge, role: "member", arguments: `{"item_id":19,"decision":"approve"}`},
+		{name: confirmation.ToolReviewKnowledge, role: "captain", arguments: `{"item_id":19,"decision":"reject"}`},
+		{name: confirmation.ToolGenerateInvite, role: "captain", arguments: `{"type":"captain"}`},
+		{name: confirmation.ToolGenerateInvite, role: "captain", arguments: `{"type":"owner"}`},
+		{name: confirmation.ToolSaveEvaluation, role: "captain", arguments: `{"mode":"create","title":"缺少快照","summary_markdown":"草稿"}`},
+		{name: confirmation.ToolSaveEvaluation, role: "captain", arguments: `{"mode":"update","draft_id":3,"snapshot_id":4,"title":"非法更新","summary_markdown":"草稿"}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name+"_"+test.role+"_"+test.arguments, func(t *testing.T) {
+			collector := business.NewActionProposalCollector()
+			ctx := business.WithActionProposalCollector(
+				business.WithRequestContext(context.Background(), business.RequestContext{UserID: 9, Role: test.role, SessionID: "session-9"}),
+				collector,
+			)
+			invokable := findRegisteredTool(t, registered, test.name).(einotool.InvokableTool)
+			if _, err := invokable.InvokableRun(ctx, test.arguments); err == nil {
+				t.Fatal("invalid invocation unexpectedly generated a proposal")
+			}
+			if len(collector.List()) != 0 {
+				t.Fatalf("invalid invocation collected proposals: %+v", collector.List())
+			}
+		})
+	}
+
+	collector := business.NewActionProposalCollector()
+	superCtx := business.WithActionProposalCollector(
+		business.WithRequestContext(context.Background(), business.RequestContext{UserID: 1, Role: "super_admin", SessionID: "session-1"}),
+		collector,
+	)
+	invokable := findRegisteredTool(t, registered, confirmation.ToolGenerateInvite).(einotool.InvokableTool)
+	if _, err := invokable.InvokableRun(superCtx, `{"type":"captain"}`); err != nil {
+		t.Fatalf("super-admin captain invitation proposal failed: %v", err)
+	}
+	if proposals := collector.List(); len(proposals) != 1 || proposals[0].Tool != confirmation.ToolGenerateInvite || strings.Contains(string(proposals[0].Parameters), "code") {
+		t.Fatalf("invitation proposal = %+v", proposals)
 	}
 }
 

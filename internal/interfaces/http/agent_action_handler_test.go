@@ -16,6 +16,9 @@ import (
 	"SWPUCAT/internal/application/agentaction"
 	announcementdraftapp "SWPUCAT/internal/application/announcementdraft"
 	checkinapp "SWPUCAT/internal/application/checkin"
+	evaluationapp "SWPUCAT/internal/application/evaluation"
+	invitationapp "SWPUCAT/internal/application/invitation"
+	domaininvitation "SWPUCAT/internal/domain/invitation"
 	"SWPUCAT/internal/domain/shared"
 
 	"github.com/gin-gonic/gin"
@@ -79,6 +82,46 @@ type actionHandlerDrafts struct{ calls int }
 func (w *actionHandlerDrafts) Create(_ context.Context, actorID int64, req announcementdraftapp.CreateRequest) (*announcementdraftapp.DraftDTO, error) {
 	w.calls++
 	return &announcementdraftapp.DraftDTO{ID: 41, Status: "draft", Title: req.Title, Content: req.Content, CreatedBy: actorID}, nil
+}
+
+type actionHandlerKnowledge struct {
+	approveCalls int
+	rejectCalls  int
+	reviewerName string
+}
+
+func (w *actionHandlerKnowledge) ApproveItem(_ context.Context, _, _ int64, reviewerName string) error {
+	w.approveCalls++
+	w.reviewerName = reviewerName
+	return nil
+}
+
+func (w *actionHandlerKnowledge) RejectItem(_ context.Context, _, _ int64, reviewerName, _ string) (string, error) {
+	w.rejectCalls++
+	w.reviewerName = reviewerName
+	return "rejected", nil
+}
+
+type actionHandlerInvitations struct{ calls int }
+
+func (w *actionHandlerInvitations) GenerateCode(_ context.Context, _ int64, codeType domaininvitation.InvitationType) (*invitationapp.InvitationDTO, error) {
+	w.calls++
+	return &invitationapp.InvitationDTO{ID: 51, Code: "HANDLER-INVITE-51", Type: string(codeType), ExpiresAt: "2026-09-18 12:10:00"}, nil
+}
+
+type actionHandlerEvaluations struct {
+	createCalls int
+	updateCalls int
+}
+
+func (w *actionHandlerEvaluations) CreateDraft(_ context.Context, _ int64, req evaluationapp.CreateDraftRequest) (*evaluationapp.DraftDTO, error) {
+	w.createCalls++
+	return &evaluationapp.DraftDTO{ID: 61, SnapshotID: req.SnapshotID, PeriodID: 31, Status: "draft", Audience: string(req.Audience), Title: req.Title}, nil
+}
+
+func (w *actionHandlerEvaluations) UpdateDraft(_ context.Context, id, _ int64, req evaluationapp.UpdateDraftRequest) (*evaluationapp.DraftDTO, error) {
+	w.updateCalls++
+	return &evaluationapp.DraftDTO{ID: id, SnapshotID: 71, PeriodID: 31, Status: "draft", Audience: "captain", Title: req.Title}, nil
 }
 
 type actionHandlerEnvelope struct {
@@ -199,6 +242,54 @@ func TestConfirmActionReturnsAndReplaysStructuredBusinessFailure(t *testing.T) {
 	}
 }
 
+func TestConfirmActionExecutesGovernedToolsThroughPublicEndpoint(t *testing.T) {
+	signer := newActionHandlerSigner(t, time.Minute)
+
+	t.Run("knowledge review", func(t *testing.T) {
+		proposal, err := signer.Propose(9, "session-review", confirmation.ToolReviewKnowledge, "批准知识", "确认", confirmation.KnowledgeReviewParameters{ItemID: 19, Decision: "approve"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		writer := &actionHandlerKnowledge{}
+		handler := &AgentHandler{actions: agentaction.NewService(true, &actionHandlerRepo{}, signer, nil, nil, agentaction.WithKnowledgeReviews(writer))}
+		for attempt := 0; attempt < 2; attempt++ {
+			status, response := performActionConfirmation(t, handler, 9, "captain", proposal.Tool, proposal.Token, "session-review", proposal.Parameters)
+			if status != http.StatusOK || response.Data == nil || response.Data.Status != "success" || response.Data.Replayed != (attempt == 1) {
+				t.Fatalf("attempt %d status=%d response=%+v", attempt, status, response)
+			}
+		}
+		if writer.approveCalls != 1 || writer.reviewerName != "测试用户" {
+			t.Fatalf("knowledge writer = %+v", writer)
+		}
+	})
+
+	t.Run("invitation", func(t *testing.T) {
+		proposal, err := signer.Propose(1, "session-invite", confirmation.ToolGenerateInvite, "生成邀请码", "确认", confirmation.InvitationParameters{Type: "captain"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		writer := &actionHandlerInvitations{}
+		handler := &AgentHandler{actions: agentaction.NewService(true, &actionHandlerRepo{}, signer, nil, nil, agentaction.WithInvitations(writer))}
+		status, response := performActionConfirmation(t, handler, 1, "super_admin", proposal.Tool, proposal.Token, "session-invite", proposal.Parameters)
+		if status != http.StatusOK || response.Data == nil || response.Data.Status != "success" || !strings.Contains(string(response.Data.Data), "HANDLER-INVITE-51") || writer.calls != 1 {
+			t.Fatalf("status=%d response=%+v calls=%d", status, response, writer.calls)
+		}
+	})
+
+	t.Run("evaluation draft", func(t *testing.T) {
+		proposal, err := signer.Propose(9, "session-evaluation", confirmation.ToolSaveEvaluation, "保存考评草稿", "确认", confirmation.EvaluationDraftParameters{Mode: "create", SnapshotID: 71, Title: "九月考评", SummaryMarkdown: "草稿", Audience: "captain"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		writer := &actionHandlerEvaluations{}
+		handler := &AgentHandler{actions: agentaction.NewService(true, &actionHandlerRepo{}, signer, nil, nil, agentaction.WithEvaluationDrafts(writer))}
+		status, response := performActionConfirmation(t, handler, 9, "captain", proposal.Tool, proposal.Token, "session-evaluation", proposal.Parameters)
+		if status != http.StatusOK || response.Data == nil || response.Data.Status != "success" || writer.createCalls != 1 || writer.updateCalls != 0 {
+			t.Fatalf("status=%d response=%+v writer=%+v", status, response, writer)
+		}
+	})
+}
+
 func TestPersistedActionCardsNeverContainRawConfirmationToken(t *testing.T) {
 	original := []confirmation.Proposal{{
 		Tool: confirmation.ToolClockIn, Title: "上班打卡", Summary: "请确认",
@@ -240,6 +331,7 @@ func performActionConfirmation(t *testing.T, handler *AgentHandler, userID int64
 	ctx.Request.Header.Set("Content-Type", "application/json")
 	ctx.Set(ContextUserID, userID)
 	ctx.Set(ContextRole, role)
+	ctx.Set(ContextUsername, "测试用户")
 	handler.ConfirmAction(ctx)
 	var response actionHandlerEnvelope
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {

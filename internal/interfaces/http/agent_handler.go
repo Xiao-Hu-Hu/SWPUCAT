@@ -664,7 +664,7 @@ func (h *AgentHandler) ConfirmAction(c *gin.Context) {
 		return
 	}
 	result, err := h.actions.Execute(c.Request.Context(), agentaction.ExecuteRequest{
-		UserID: GetUserID(c), Role: GetRole(c), SessionID: sessionID,
+		UserID: GetUserID(c), Role: GetRole(c), ActorName: GetUsername(c), SessionID: sessionID,
 		Tool: strings.TrimSpace(req.Tool), Token: strings.TrimSpace(req.Token), Parameters: req.Parameters,
 	})
 	if err != nil {

@@ -567,7 +567,7 @@ func projectPayloadEnvelope(value any) (map[string]any, bool) {
 func projectKnownArguments(toolName string, object map[string]any) map[string]any {
 	result := make(map[string]any)
 	switch toolName {
-	case "get_checkin_status", "get_my_work_hours", "get_checkin_requirements", "clock_in", "clock_out":
+	case "get_checkin_status", "get_my_work_hours", "get_checkin_requirements", "get_online_summary", "clock_in", "clock_out":
 	case "get_my_checkin_history":
 		addIntegerOrInvalidField(result, object, "limit", 0, 100)
 	case "search_knowledge":
@@ -597,6 +597,21 @@ func projectKnownArguments(toolName string, object map[string]any) map[string]an
 		addIntegerField(result, object, "source_note_length", false, 0, 1<<20)
 		addBoolOrInvalidField(result, object, "pinned", true)
 		addIntegerField(result, object, "recipient_count", false, 0, 1000000)
+	case "list_pending_knowledge":
+		addIntegerOrInvalidField(result, object, "limit", 0, 50)
+	case "review_knowledge_item":
+		addTrueField(result, object, "item_id_provided")
+		addEnumField(result, object, "decision", false, "", "approve", "reject", "other")
+		addIntegerField(result, object, "reason_length", false, 0, 1<<20)
+	case "generate_invitation_code":
+		addEnumField(result, object, "type", false, "", "member", "captain", "other")
+	case "save_evaluation_draft":
+		addEnumField(result, object, "mode", false, "", "create", "update", "other")
+		addTrueField(result, object, "draft_id_provided")
+		addTrueField(result, object, "snapshot_id_provided")
+		addIntegerField(result, object, "title_length", false, 0, 1<<20)
+		addIntegerField(result, object, "summary_length", false, 0, 1<<20)
+		addEnumField(result, object, "audience", false, "", "captain", "team", "private", "other")
 	}
 	return result
 }
@@ -607,6 +622,9 @@ func projectKnownResult(toolName string, object map[string]any) map[string]any {
 	case "get_checkin_status":
 		addEnumField(result, object, "status", true, "idle", "clocked_in", "clocked_out", "other")
 	case "clock_in", "clock_out":
+		if projectConfirmationProposal(result, object) {
+			break
+		}
 		addEnumField(result, object, "type", true, "in", "out", "other")
 		addDateField(result, object, "date", true)
 	case "get_my_work_hours":
@@ -656,6 +674,9 @@ func projectKnownResult(toolName string, object map[string]any) map[string]any {
 		}
 		addObjectArrayField(result, object, "materials", projectReportMaterialProjection)
 	case "draft_announcement":
+		if projectConfirmationProposal(result, object) {
+			break
+		}
 		addNumberField(result, object, "id", true, -math.MaxFloat64, math.MaxFloat64)
 		addEnumField(result, object, "status", true, "draft", "confirmed", "published", "discarded", "other")
 		addBoolField(result, object, "pinned", true)
@@ -664,8 +685,32 @@ func projectKnownResult(toolName string, object map[string]any) map[string]any {
 			result["email_requested"] = value
 		}
 		addNumberField(result, object, "announcement_id", true, -math.MaxFloat64, math.MaxFloat64)
+	case "review_knowledge_item", "generate_invitation_code", "save_evaluation_draft":
+		projectConfirmationProposal(result, object)
+	case "list_pending_knowledge":
+		addNumberField(result, object, "total", true, 0, math.MaxFloat64)
+		addNumberField(result, object, "limit", true, 0, math.MaxFloat64)
+		addIntegerField(result, object, "item_count", false, 0, math.MaxInt64)
+		addBoolField(result, object, "truncated", true)
+	case "get_online_summary":
+		addDateField(result, object, "as_of_date", true)
+		addNumberField(result, object, "total_members", true, 0, math.MaxFloat64)
+		addNumberField(result, object, "online_count", true, 0, math.MaxFloat64)
+		addBoolField(result, object, "self_online", true)
+		addIntegerField(result, object, "name_count", false, 0, maxPayloadProjectionItems)
+		addBoolField(result, object, "truncated", true)
 	}
 	return result
+}
+
+func projectConfirmationProposal(result, object map[string]any) bool {
+	status, _ := object["status"].(string)
+	if status != "confirmation_required" {
+		return false
+	}
+	addEnumField(result, object, "status", true, "confirmation_required", "other")
+	addEnumField(result, object, "tool", true, "clock_in", "clock_out", "draft_announcement", "review_knowledge_item", "generate_invitation_code", "save_evaluation_draft", "other")
+	return true
 }
 
 func projectPeriodStatsProjection(object map[string]any) map[string]any {
@@ -1340,7 +1385,7 @@ func validCount(value int) bool { return value >= 0 && value <= maxTelemetryCoun
 
 func knownAuditedTool(value string) bool {
 	switch value {
-	case "get_checkin_status", "get_my_work_hours", "get_checkin_requirements", "clock_in", "clock_out", "get_my_checkin_history", "search_knowledge", "recommend_knowledge", "query_team_members", "get_checkin_stats", "list_report_periods", "get_report_materials", "draft_announcement":
+	case "get_checkin_status", "get_my_work_hours", "get_checkin_requirements", "clock_in", "clock_out", "get_my_checkin_history", "search_knowledge", "recommend_knowledge", "query_team_members", "get_checkin_stats", "list_report_periods", "get_report_materials", "draft_announcement", "list_pending_knowledge", "get_online_summary", "review_knowledge_item", "generate_invitation_code", "save_evaluation_draft":
 		return true
 	default:
 		return false
@@ -1349,9 +1394,9 @@ func knownAuditedTool(value string) bool {
 
 func isWriteOrUnknownTool(value string) bool {
 	switch value {
-	case "clock_in", "clock_out", "draft_announcement":
+	case "clock_in", "clock_out", "draft_announcement", "review_knowledge_item", "generate_invitation_code", "save_evaluation_draft":
 		return true
-	case "get_checkin_status", "get_my_work_hours", "get_checkin_requirements", "get_my_checkin_history", "search_knowledge", "recommend_knowledge", "query_team_members", "get_checkin_stats", "list_report_periods", "get_report_materials":
+	case "get_checkin_status", "get_my_work_hours", "get_checkin_requirements", "get_my_checkin_history", "search_knowledge", "recommend_knowledge", "query_team_members", "get_checkin_stats", "list_report_periods", "get_report_materials", "list_pending_knowledge", "get_online_summary":
 		return false
 	default:
 		// Unknown tools are conservatively classified as writes until an

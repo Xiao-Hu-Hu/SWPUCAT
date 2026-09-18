@@ -36,21 +36,33 @@ var allToolNames = []string{
 	"get_checkin_stats",
 	"list_report_periods",
 	"get_report_materials",
+	"list_pending_knowledge",
+	"get_online_summary",
 	"draft_announcement",
+	"review_knowledge_item",
+	"generate_invitation_code",
+	"save_evaluation_draft",
 	"clock_in",
 	"clock_out",
 }
 
 var writeToolNames = map[string]struct{}{
-	"clock_in":           {},
-	"clock_out":          {},
-	"draft_announcement": {},
+	"clock_in":                 {},
+	"clock_out":                {},
+	"draft_announcement":       {},
+	"review_knowledge_item":    {},
+	"generate_invitation_code": {},
+	"save_evaluation_draft":    {},
 }
 
 var memberForbiddenTools = map[string]struct{}{
-	"query_team_members": {},
-	"get_checkin_stats":  {},
-	"draft_announcement": {},
+	"query_team_members":       {},
+	"get_checkin_stats":        {},
+	"list_pending_knowledge":   {},
+	"draft_announcement":       {},
+	"review_knowledge_item":    {},
+	"generate_invitation_code": {},
+	"save_evaluation_draft":    {},
 }
 
 var argumentProjectionKeys = map[string]map[string]struct{}{
@@ -64,7 +76,12 @@ var argumentProjectionKeys = map[string]map[string]struct{}{
 	"get_checkin_stats":        stringSet([]string{"period"}),
 	"list_report_periods":      stringSet([]string{"limit", "period_key", "status"}),
 	"get_report_materials":     stringSet([]string{"period_id_provided", "offset", "limit", "scope"}),
+	"list_pending_knowledge":   stringSet([]string{"limit"}),
+	"get_online_summary":       {},
 	"draft_announcement":       stringSet([]string{"title_length", "content_length", "source_note_length", "pinned", "recipient_count"}),
+	"review_knowledge_item":    stringSet([]string{"item_id_provided", "decision", "reason_length"}),
+	"generate_invitation_code": stringSet([]string{"type"}),
+	"save_evaluation_draft":    stringSet([]string{"mode", "draft_id_provided", "snapshot_id_provided", "title_length", "summary_length", "audience"}),
 	"clock_in":                 {},
 	"clock_out":                {},
 }
@@ -255,7 +272,7 @@ func (s *Suite) Validate() error {
 
 	knownTools := stringSet(allToolNames)
 	if !sameStringSet(manifest.RequiredTools, allToolNames) {
-		issues = append(issues, "manifest required_tools must equal the production 13-tool contract")
+		issues = append(issues, "manifest required_tools must equal the production 18-tool contract")
 	}
 	if len(s.Fixtures.Tools) == 0 {
 		issues = append(issues, "business fixtures are empty")
@@ -523,7 +540,7 @@ func (s *Suite) Validate() error {
 
 func toolAcceptsArguments(toolName string) bool {
 	switch toolName {
-	case "get_my_checkin_history", "query_team_members", "get_checkin_stats", "list_report_periods", "get_report_materials", "draft_announcement":
+	case "get_my_checkin_history", "query_team_members", "get_checkin_stats", "list_report_periods", "get_report_materials", "list_pending_knowledge", "draft_announcement", "review_knowledge_item", "generate_invitation_code", "save_evaluation_draft":
 		return true
 	default:
 		return false

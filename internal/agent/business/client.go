@@ -166,6 +166,26 @@ type KnowledgeItem struct {
 	CreatedAt    string  `json:"created_at,omitempty"`
 }
 
+type PendingKnowledgeItem struct {
+	ID           int64  `json:"id"`
+	Type         string `json:"type"`
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	CategoryName string `json:"category_name"`
+	UploaderName string `json:"uploader_name"`
+	Status       string `json:"status"`
+	CreatedAt    string `json:"created_at"`
+}
+
+type OnlineSummary struct {
+	AsOfDate      string   `json:"as_of_date"`
+	TotalMembers  int      `json:"total_members"`
+	OnlineCount   int      `json:"online_count"`
+	SelfOnline    *bool    `json:"self_online,omitempty"`
+	OnlineMembers []string `json:"online_members,omitempty"`
+	Truncated     bool     `json:"truncated,omitempty"`
+}
+
 type KnowledgeRecommendation struct {
 	ItemID          int64    `json:"item_id"`
 	Type            string   `json:"type"`
@@ -493,6 +513,18 @@ func (c *Client) RecommendKnowledge(ctx context.Context, query string) ([]Knowle
 	params.Set("q", query)
 	var result []KnowledgeRecommendation
 	err := c.do(ctx, http.MethodGet, "/api/knowledge/recommendations", params, nil, &result)
+	return result, err
+}
+
+func (c *Client) ListPendingKnowledge(ctx context.Context) ([]PendingKnowledgeItem, error) {
+	var result []PendingKnowledgeItem
+	err := c.do(ctx, http.MethodGet, "/api/knowledge/items/pending", nil, nil, &result)
+	return result, err
+}
+
+func (c *Client) GetOnlineSummary(ctx context.Context) (OnlineSummary, error) {
+	var result OnlineSummary
+	err := c.do(ctx, http.MethodGet, "/api/checkin/online-summary", nil, nil, &result)
 	return result, err
 }
 
