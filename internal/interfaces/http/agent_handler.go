@@ -16,8 +16,11 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"SWPUCAT/internal/agent/telemetry"
+	agentauditapp "SWPUCAT/internal/application/agentaudit"
 	conversationapp "SWPUCAT/internal/application/conversation"
 	"SWPUCAT/internal/application/knowledgeindex"
+	"SWPUCAT/internal/domain/agentaudit"
 	"SWPUCAT/internal/domain/conversation"
 	"SWPUCAT/internal/domain/shared"
 	"SWPUCAT/internal/infrastructure/agentclient"
@@ -29,6 +32,7 @@ type AgentHandler struct {
 	client        agentChatClient
 	conversations *conversationapp.Service
 	retrieval     *knowledgeindex.Service
+	audits        *agentauditapp.Service
 	// Keep the synchronous prefetch path bounded on the 2-core/2G deployment.
 	// Agent tool calls are already serialized separately, but multiple users can
 	// otherwise trigger concurrent embedding/database searches before reaching
@@ -41,16 +45,16 @@ type agentChatClient interface {
 	Chat(context.Context, agentclient.ChatRequest, string, string) (agentclient.ChatResponse, error)
 }
 
-func NewAgentHandler(client *agentclient.Client, conversations *conversationapp.Service, retrieval *knowledgeindex.Service) *AgentHandler {
+func NewAgentHandler(client *agentclient.Client, conversations *conversationapp.Service, retrieval *knowledgeindex.Service, audits *agentauditapp.Service) *AgentHandler {
 	var boundary agentChatClient
 	if client != nil {
 		boundary = client
 	}
-	return newAgentHandler(boundary, conversations, retrieval)
+	return newAgentHandler(boundary, conversations, retrieval, audits)
 }
 
-func newAgentHandler(client agentChatClient, conversations *conversationapp.Service, retrieval *knowledgeindex.Service) *AgentHandler {
-	return &AgentHandler{client: client, conversations: conversations, retrieval: retrieval, retrievalSlots: make(chan struct{}, 1)}
+func newAgentHandler(client agentChatClient, conversations *conversationapp.Service, retrieval *knowledgeindex.Service, audits *agentauditapp.Service) *AgentHandler {
+	return &AgentHandler{client: client, conversations: conversations, retrieval: retrieval, audits: audits, retrievalSlots: make(chan struct{}, 1)}
 }
 
 type agentChatRequest struct {
@@ -69,7 +73,25 @@ type agentUpdateConversationRequest struct {
 const (
 	agentConversationListLimit    = 100
 	agentConversationHistoryLimit = 200
+	agentAuditWriteTimeout        = 3 * time.Second
+	clientClosedRequestStatus     = 499
 )
+
+type agentChatAuditOutcome struct {
+	requestID             string
+	userID                *int64
+	conversationID        *int64
+	sessionID             *string
+	actorRole             *string
+	status                agentaudit.RunStatus
+	failure               *agentauditapp.Failure
+	startedAt             time.Time
+	finishedAt            time.Time
+	httpStatus            *int
+	conversationPersisted *bool
+	telemetryStatus       agentaudit.TelemetryStatus
+	snapshot              *telemetry.Snapshot
+}
 
 func (h *AgentHandler) ListConversations(c *gin.Context) {
 	if h == nil || h.conversations == nil {
@@ -180,37 +202,53 @@ func (h *AgentHandler) UpdateConversationTitle(c *gin.Context) {
 }
 
 func (h *AgentHandler) Chat(c *gin.Context) {
+	outcome := newAgentChatAuditOutcome(c)
+	requestContext := c.Request.Context()
+	defer func() {
+		outcome.finishedAt = time.Now()
+		httpStatus := c.Writer.Status()
+		outcome.httpStatus = &httpStatus
+		h.recordAgentChatAudit(requestContext, outcome)
+	}()
+
 	if h == nil || h.client == nil || h.conversations == nil {
+		outcome.fail(agentaudit.RunStatusUnavailable, "main", "configuration", "agent_not_configured", false)
 		Error(c, http.StatusServiceUnavailable, 503, "agent service is not configured")
 		return
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
 	var req agentChatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		outcome.fail(agentaudit.RunStatusRejected, "main", "validation", "invalid_request_body", false)
 		BadRequest(c, "invalid request body")
 		return
 	}
 	req.Message = strings.TrimSpace(req.Message)
 	if req.Message == "" || utf8.RuneCountInString(req.Message) > 4000 {
+		outcome.fail(agentaudit.RunStatusRejected, "main", "validation", "invalid_message", false)
 		BadRequest(c, "message is required and must be at most 4000 characters")
 		return
 	}
 	sessionID, err := normalizeAgentSessionID(req.SessionID)
 	if err != nil {
+		outcome.fail(agentaudit.RunStatusRejected, "main", "validation", "invalid_session", false)
 		BadRequest(c, "session_id is invalid")
 		return
 	}
 	userID := GetUserID(c)
+	outcome.setSessionID(sessionID)
 	unlock := h.lockConversation(userID, sessionID)
 	defer unlock()
 
-	if _, err := h.conversations.GetOrCreate(c.Request.Context(), userID, sessionID, truncateAgentText(req.Message, 80)); err != nil {
-		InternalError(c, "failed to initialize agent conversation")
+	conversationRecord, err := h.conversations.GetOrCreate(c.Request.Context(), userID, sessionID, truncateAgentText(req.Message, 80))
+	if err != nil {
+		writeAgentConversationFailure(c, outcome, err, "conversation_initialize", "failed to initialize agent conversation")
 		return
 	}
+	outcome.setConversationID(conversationRecord.ID)
 	conversationContext, err := h.conversations.LoadContext(c.Request.Context(), userID, sessionID, 20)
 	if err != nil {
-		InternalError(c, "failed to load agent conversation")
+		writeAgentConversationFailure(c, outcome, err, "conversation_load", "failed to load agent conversation")
 		return
 	}
 
@@ -246,32 +284,11 @@ func (h *AgentHandler) Chat(c *gin.Context) {
 		PreviousSources:  previousSources,
 	}, c.GetHeader("Authorization"), GetRequestID(c))
 	if err != nil {
-		var httpErr *agentclient.HTTPError
-		if errors.As(err, &httpErr) {
-			switch httpErr.StatusCode {
-			case http.StatusBadRequest:
-				BadRequest(c, httpErr.Message)
-			case http.StatusUnauthorized:
-				Unauthorized(c, "agent authentication failed")
-			case http.StatusForbidden:
-				Forbidden(c, "agent access denied")
-			case http.StatusServiceUnavailable:
-				Error(c, http.StatusServiceUnavailable, 503, "agent service is unavailable")
-			case http.StatusGatewayTimeout:
-				Error(c, http.StatusGatewayTimeout, 504, "agent service timed out")
-			default:
-				Error(c, http.StatusBadGateway, 502, "agent service request failed")
-			}
-			return
-		}
-		var netErr net.Error
-		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
-			Error(c, http.StatusGatewayTimeout, 504, "agent service timed out")
-			return
-		}
-		InternalError(c, "agent service request failed")
+		outcome.applyAgentClientFailure(err)
+		writeAgentChatClientError(c, err)
 		return
 	}
+	outcome.succeed(result.Audit)
 	result.SessionID = sessionID
 	sourcesJSON, marshalErr := json.Marshal(result.Sources)
 	if marshalErr != nil {
@@ -288,13 +305,328 @@ func (h *AgentHandler) Chat(c *gin.Context) {
 	persistCtx, cancelPersist := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 3*time.Second)
 	defer cancelPersist()
 	if _, persistErr := h.conversations.RecordTurn(persistCtx, userID, sessionID, record); persistErr != nil {
+		outcome.setConversationPersisted(false)
 		// A tool may already have changed business state. Return that result to
 		// the user instead of encouraging an unsafe retry, while exposing the
 		// durability issue to operators.
 		log.Printf("agent conversation persistence failed for user %d: %v", userID, persistErr)
 		c.Header("X-Agent-Conversation-Persisted", "false")
+	} else {
+		outcome.setConversationPersisted(true)
 	}
 	Success(c, result)
+}
+
+func newAgentChatAuditOutcome(c *gin.Context) *agentChatAuditOutcome {
+	retryable := false
+	outcome := &agentChatAuditOutcome{
+		status:          agentaudit.RunStatusError,
+		telemetryStatus: agentaudit.TelemetryNotStarted,
+		startedAt:       time.Now(),
+		failure: &agentauditapp.Failure{
+			Source:    "main",
+			Category:  "internal",
+			Code:      "unclassified_failure",
+			Retryable: &retryable,
+		},
+	}
+	if c == nil {
+		return outcome
+	}
+	outcome.requestID = GetRequestID(c)
+	if userID := GetUserID(c); userID > 0 {
+		outcome.userID = &userID
+		role := GetRole(c)
+		switch role {
+		case "member", "captain", "super_admin":
+			outcome.actorRole = &role
+		}
+	}
+	return outcome
+}
+
+func (o *agentChatAuditOutcome) fail(status agentaudit.RunStatus, source, category, code string, retryable bool) {
+	if o == nil {
+		return
+	}
+	retryableCopy := retryable
+	o.status = status
+	o.failure = &agentauditapp.Failure{
+		Source:    source,
+		Category:  category,
+		Code:      code,
+		Retryable: &retryableCopy,
+	}
+}
+
+func (o *agentChatAuditOutcome) succeed(audit *telemetry.AuditSummary) {
+	if o == nil {
+		return
+	}
+	o.status = agentaudit.RunStatusSuccess
+	o.failure = nil
+	o.applyAudit(audit)
+	if audit != nil && o.requestID != "" && audit.RequestID == o.requestID && audit.Telemetry == nil {
+		// A successful private Agent response must carry its terminal snapshot.
+		// A request-ID-only envelope is meaningful only for pre-engine failures.
+		o.telemetryStatus = agentaudit.TelemetryInvalid
+	}
+}
+
+func (o *agentChatAuditOutcome) setSessionID(sessionID string) {
+	if o == nil {
+		return
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return
+	}
+	o.sessionID = &sessionID
+}
+
+func (o *agentChatAuditOutcome) setConversationID(conversationID int64) {
+	if o == nil || conversationID <= 0 {
+		return
+	}
+	o.conversationID = &conversationID
+}
+
+func (o *agentChatAuditOutcome) setConversationPersisted(persisted bool) {
+	if o == nil || o.conversationID == nil {
+		return
+	}
+	persistedCopy := persisted
+	o.conversationPersisted = &persistedCopy
+}
+
+func (o *agentChatAuditOutcome) applyAudit(audit *telemetry.AuditSummary) {
+	if o == nil {
+		return
+	}
+	o.snapshot = nil
+	switch {
+	case audit == nil:
+		o.telemetryStatus = agentaudit.TelemetryUnavailable
+	case o.requestID == "" || audit.RequestID != o.requestID:
+		o.telemetryStatus = agentaudit.TelemetryInvalid
+	case audit.Telemetry == nil:
+		o.telemetryStatus = agentaudit.TelemetryNotStarted
+	default:
+		o.telemetryStatus = agentaudit.TelemetryCaptured
+		o.snapshot = audit.Telemetry
+	}
+}
+
+func (o *agentChatAuditOutcome) applyAgentClientFailure(err error) {
+	if o == nil {
+		return
+	}
+	o.applyAudit(nil)
+
+	var clientErr *agentclient.ClientError
+	if errors.As(err, &clientErr) && clientErr != nil {
+		o.applyAudit(clientErr.Audit)
+		o.applyAgentClientClassification(clientErr.Kind, clientErr.FailureCode, clientErr.StatusCode)
+		return
+	}
+
+	var httpErr *agentclient.HTTPError
+	if errors.As(err, &httpErr) && httpErr != nil {
+		o.applyAudit(httpErr.Audit)
+		o.applyAgentClientClassification(httpErr.Kind, httpErr.FailureCode, httpErr.StatusCode)
+		return
+	}
+
+	var netErr net.Error
+	switch {
+	case errors.Is(err, context.Canceled):
+		o.fail(agentaudit.RunStatusCanceled, "transport", "canceled", string(agentclient.FailureCodeRequestCanceled), false)
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr) && netErr.Timeout():
+		o.fail(agentaudit.RunStatusTimeout, "transport", "timeout", string(agentclient.FailureCodeExecutionTimeout), true)
+	case errors.As(err, &netErr):
+		o.fail(agentaudit.RunStatusUnavailable, "transport", "network", string(agentclient.FailureCodeTransport), true)
+	default:
+		o.fail(agentaudit.RunStatusError, "main", "internal", "agent_client_failure", false)
+	}
+}
+
+func (o *agentChatAuditOutcome) applyAgentClientClassification(kind agentclient.ErrorKind, code agentclient.FailureCode, statusCode int) {
+	switch kind {
+	case agentclient.KindTimeout:
+		o.fail(agentaudit.RunStatusTimeout, "transport", "timeout", string(agentclient.FailureCodeExecutionTimeout), true)
+		return
+	case agentclient.KindCanceled:
+		o.fail(agentaudit.RunStatusCanceled, "transport", "canceled", string(agentclient.FailureCodeRequestCanceled), false)
+		return
+	case agentclient.KindTransport:
+		o.fail(agentaudit.RunStatusUnavailable, "transport", "network", string(agentclient.FailureCodeTransport), true)
+		return
+	case agentclient.KindProtocol:
+		o.fail(agentaudit.RunStatusError, "transport", "protocol", string(agentclient.FailureCodeProtocol), false)
+		return
+	}
+
+	switch code {
+	case agentclient.FailureCodeTransport:
+		o.fail(agentaudit.RunStatusUnavailable, "transport", "network", string(agentclient.FailureCodeTransport), true)
+	case agentclient.FailureCodeProtocol:
+		o.fail(agentaudit.RunStatusError, "transport", "protocol", string(agentclient.FailureCodeProtocol), false)
+	case agentclient.FailureCodeAgentDisabled:
+		o.fail(agentaudit.RunStatusUnavailable, "agent", "availability", string(code), false)
+	case agentclient.FailureCodeInvalidInternalSecret:
+		o.fail(agentaudit.RunStatusRejected, "agent", "authentication", string(code), false)
+	case agentclient.FailureCodeInvalidRequestBody,
+		agentclient.FailureCodeInvalidMessage,
+		agentclient.FailureCodeInvalidSession,
+		agentclient.FailureCodeInvalidHistory:
+		o.fail(agentaudit.RunStatusRejected, "agent", "validation", string(code), false)
+	case agentclient.FailureCodeAgentBusy:
+		o.fail(agentaudit.RunStatusBusy, "agent", "capacity", string(code), true)
+	case agentclient.FailureCodeRequestCanceled:
+		o.fail(agentaudit.RunStatusCanceled, "agent", "canceled", string(code), false)
+	case agentclient.FailureCodeExecutionTimeout:
+		o.fail(agentaudit.RunStatusTimeout, "agent", "timeout", string(code), true)
+	case agentclient.FailureCodeExecutionFailed:
+		o.fail(agentaudit.RunStatusError, "agent", "execution", string(code), false)
+	case agentclient.FailureCodeLegacy, "":
+		o.applyLegacyAgentFailure(statusCode)
+	default:
+		// The transport boundary rejects unknown codes, but keep this public
+		// boundary closed as well for fakes and older alternate clients.
+		o.fail(agentaudit.RunStatusError, "transport", "protocol", string(agentclient.FailureCodeProtocol), false)
+	}
+}
+
+func (o *agentChatAuditOutcome) applyLegacyAgentFailure(statusCode int) {
+	const legacyCode = string(agentclient.FailureCodeLegacy)
+	switch {
+	case statusCode == http.StatusRequestTimeout || statusCode == http.StatusGatewayTimeout:
+		o.fail(agentaudit.RunStatusTimeout, "agent", "timeout", legacyCode, true)
+	case statusCode == http.StatusTooManyRequests:
+		o.fail(agentaudit.RunStatusBusy, "agent", "capacity", legacyCode, true)
+	case statusCode == http.StatusServiceUnavailable:
+		o.fail(agentaudit.RunStatusUnavailable, "agent", "availability", legacyCode, true)
+	case statusCode >= http.StatusBadRequest && statusCode < http.StatusInternalServerError:
+		o.fail(agentaudit.RunStatusRejected, "agent", "http", legacyCode, false)
+	case statusCode >= http.StatusInternalServerError:
+		o.fail(agentaudit.RunStatusError, "agent", "execution", legacyCode, true)
+	default:
+		o.fail(agentaudit.RunStatusError, "agent", "protocol", legacyCode, false)
+	}
+}
+
+func writeAgentConversationFailure(c *gin.Context, outcome *agentChatAuditOutcome, err error, operation, message string) {
+	var netErr net.Error
+	switch {
+	case errors.Is(err, context.Canceled):
+		outcome.fail(agentaudit.RunStatusCanceled, "main", "persistence", operation+"_canceled", false)
+		Error(c, clientClosedRequestStatus, clientClosedRequestStatus, "request was canceled")
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr) && netErr.Timeout():
+		outcome.fail(agentaudit.RunStatusTimeout, "main", "persistence", operation+"_timeout", true)
+		Error(c, http.StatusGatewayTimeout, http.StatusGatewayTimeout, "agent service timed out")
+	default:
+		outcome.fail(agentaudit.RunStatusError, "main", "persistence", operation+"_failed", true)
+		InternalError(c, message)
+	}
+}
+
+func writeAgentChatClientError(c *gin.Context, err error) {
+	var clientErr *agentclient.ClientError
+	if errors.As(err, &clientErr) && clientErr != nil {
+		switch clientErr.Kind {
+		case agentclient.KindTimeout:
+			Error(c, http.StatusGatewayTimeout, 504, "agent service timed out")
+			return
+		case agentclient.KindProtocol:
+			Error(c, http.StatusBadGateway, 502, "agent service request failed")
+			return
+		case agentclient.KindCanceled:
+			Error(c, clientClosedRequestStatus, clientClosedRequestStatus, "request was canceled")
+			return
+		case agentclient.KindTransport:
+			InternalError(c, "agent service request failed")
+			return
+		}
+		writeAgentChatHTTPError(c, clientErr.StatusCode, clientErr.Message)
+		return
+	}
+
+	var httpErr *agentclient.HTTPError
+	if errors.As(err, &httpErr) && httpErr != nil {
+		switch httpErr.Kind {
+		case agentclient.KindTimeout:
+			Error(c, http.StatusGatewayTimeout, 504, "agent service timed out")
+			return
+		case agentclient.KindProtocol:
+			Error(c, http.StatusBadGateway, 502, "agent service request failed")
+			return
+		case agentclient.KindCanceled:
+			Error(c, clientClosedRequestStatus, clientClosedRequestStatus, "request was canceled")
+			return
+		case agentclient.KindTransport:
+			InternalError(c, "agent service request failed")
+			return
+		}
+		writeAgentChatHTTPError(c, httpErr.StatusCode, httpErr.Message)
+		return
+	}
+
+	var netErr net.Error
+	if errors.Is(err, context.Canceled) {
+		Error(c, clientClosedRequestStatus, clientClosedRequestStatus, "request was canceled")
+		return
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &netErr) && netErr.Timeout() {
+		Error(c, http.StatusGatewayTimeout, 504, "agent service timed out")
+		return
+	}
+	InternalError(c, "agent service request failed")
+}
+
+func writeAgentChatHTTPError(c *gin.Context, statusCode int, message string) {
+	switch statusCode {
+	case http.StatusBadRequest:
+		BadRequest(c, message)
+	case http.StatusUnauthorized:
+		Unauthorized(c, "agent authentication failed")
+	case http.StatusForbidden:
+		Forbidden(c, "agent access denied")
+	case http.StatusServiceUnavailable:
+		Error(c, http.StatusServiceUnavailable, 503, "agent service is unavailable")
+	case http.StatusGatewayTimeout:
+		Error(c, http.StatusGatewayTimeout, 504, "agent service timed out")
+	default:
+		Error(c, http.StatusBadGateway, 502, "agent service request failed")
+	}
+}
+
+func (h *AgentHandler) recordAgentChatAudit(parent context.Context, outcome *agentChatAuditOutcome) {
+	if h == nil || h.audits == nil || outcome == nil {
+		return
+	}
+	if parent == nil {
+		parent = context.Background()
+	}
+	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(parent), agentAuditWriteTimeout)
+	defer cancel()
+	_, err := h.audits.Record(auditCtx, agentauditapp.RecordRequest{
+		RequestID:             outcome.requestID,
+		UserID:                outcome.userID,
+		ConversationID:        outcome.conversationID,
+		SessionID:             outcome.sessionID,
+		ActorRole:             outcome.actorRole,
+		Status:                outcome.status,
+		HTTPStatus:            outcome.httpStatus,
+		Failure:               outcome.failure,
+		StartedAt:             outcome.startedAt,
+		FinishedAt:            outcome.finishedAt,
+		ConversationPersisted: outcome.conversationPersisted,
+		TelemetryStatus:       outcome.telemetryStatus,
+		Snapshot:              outcome.snapshot,
+	})
+	if err != nil {
+		log.Printf("agent audit persistence failed for request %s: %v", outcome.requestID, err)
+	}
 }
 
 func (h *AgentHandler) prefetchKnowledge(ctx context.Context, query string) []agentclient.KnowledgeSource {

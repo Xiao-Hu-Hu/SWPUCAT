@@ -199,7 +199,7 @@ func (r *publicAgentConversationRepo) RecordTurn(_ context.Context, userID int64
 
 func publicAgentRouter(client agentChatClient) *gin.Engine {
 	repository := &publicAgentConversationRepo{}
-	handler := newAgentHandler(client, conversationapp.NewService(repository), nil)
+	handler := newAgentHandler(client, conversationapp.NewService(repository), nil, nil)
 	engine := gin.New()
 	engine.Use(RequestIDMiddleware())
 	engine.POST("/api/agent/chat", func(c *gin.Context) {
@@ -316,7 +316,7 @@ func TestAgentChatMapsTimeoutsToGatewayTimeout(t *testing.T) {
 }
 
 func TestNewAgentHandlerNormalizesNilClient(t *testing.T) {
-	handler := NewAgentHandler(nil, nil, nil)
+	handler := NewAgentHandler(nil, nil, nil, nil)
 	engine := gin.New()
 	engine.Use(RequestIDMiddleware())
 	engine.POST("/api/agent/chat", handler.Chat)

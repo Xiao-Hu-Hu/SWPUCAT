@@ -23,11 +23,29 @@ type chatEngine interface {
 }
 
 type responseEnvelope struct {
-	Code    int                     `json:"code"`
-	Message string                  `json:"message"`
-	Data    any                     `json:"data,omitempty"`
-	Audit   *telemetry.AuditSummary `json:"audit,omitempty"`
+	Code        int                     `json:"code"`
+	Message     string                  `json:"message"`
+	FailureCode failureCode             `json:"failure_code,omitempty"`
+	Data        any                     `json:"data,omitempty"`
+	Audit       *telemetry.AuditSummary `json:"audit,omitempty"`
 }
+
+// failureCode is the private HTTP contract consumed by agentclient. Keep these
+// identifiers stable; callers must never derive them from Message.
+type failureCode string
+
+const (
+	failureAgentDisabled         failureCode = "agent_disabled"
+	failureInvalidInternalSecret failureCode = "invalid_internal_secret"
+	failureInvalidRequestBody    failureCode = "invalid_request_body"
+	failureInvalidMessage        failureCode = "invalid_message"
+	failureInvalidSession        failureCode = "invalid_session"
+	failureInvalidHistory        failureCode = "invalid_history"
+	failureAgentBusy             failureCode = "agent_busy"
+	failureRequestCanceled       failureCode = "request_canceled"
+	failureExecutionTimeout      failureCode = "execution_timeout"
+	failureExecutionFailed       failureCode = "execution_failed"
+)
 
 func NewHandler(engine *agent.Engine, internalSecret string) *Handler {
 	var boundary chatEngine
@@ -52,17 +70,17 @@ func (h *Handler) Chat(c *gin.Context) {
 		c.Header("X-Request-ID", requestID)
 	}
 	if h == nil || h.engine == nil {
-		writeResponse(c, http.StatusServiceUnavailable, 503, "agent is disabled", nil, requestAudit(requestID, nil))
+		writeResponse(c, http.StatusServiceUnavailable, 503, "agent is disabled", failureAgentDisabled, nil, requestAudit(requestID, nil))
 		return
 	}
 	if h.engine.Enabled() && (h.internalSecret == "" || c.GetHeader("X-Agent-Internal-Secret") != h.internalSecret) {
-		writeResponse(c, http.StatusUnauthorized, 401, "invalid internal secret", nil, nil)
+		writeResponse(c, http.StatusUnauthorized, 401, "invalid internal secret", failureInvalidInternalSecret, nil, nil)
 		return
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
 	var req agent.ChatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		writeResponse(c, http.StatusBadRequest, 400, "invalid request body", nil, requestAudit(requestID, nil))
+		writeResponse(c, http.StatusBadRequest, 400, "invalid request body", failureInvalidRequestBody, nil, requestAudit(requestID, nil))
 		return
 	}
 	req.Authorization = c.GetHeader("Authorization")
@@ -73,25 +91,29 @@ func (h *Handler) Chat(c *gin.Context) {
 		var netErr net.Error
 		switch {
 		case errors.Is(err, agent.ErrDisabled):
-			writeResponse(c, http.StatusServiceUnavailable, 503, "agent is disabled", nil, audit)
+			writeResponse(c, http.StatusServiceUnavailable, 503, "agent is disabled", failureAgentDisabled, nil, audit)
 		case errors.Is(err, agent.ErrInvalidMessage):
-			writeResponse(c, http.StatusBadRequest, 400, err.Error(), nil, audit)
-		case errors.Is(err, agent.ErrInvalidSession), errors.Is(err, agent.ErrInvalidHistory):
-			writeResponse(c, http.StatusBadRequest, 400, err.Error(), nil, audit)
+			writeResponse(c, http.StatusBadRequest, 400, err.Error(), failureInvalidMessage, nil, audit)
+		case errors.Is(err, agent.ErrInvalidSession):
+			writeResponse(c, http.StatusBadRequest, 400, err.Error(), failureInvalidSession, nil, audit)
+		case errors.Is(err, agent.ErrInvalidHistory):
+			writeResponse(c, http.StatusBadRequest, 400, err.Error(), failureInvalidHistory, nil, audit)
 		case errors.Is(err, agent.ErrBusy):
-			writeResponse(c, http.StatusServiceUnavailable, 503, "agent is busy; please retry shortly", nil, audit)
+			writeResponse(c, http.StatusServiceUnavailable, 503, "agent is busy; please retry shortly", failureAgentBusy, nil, audit)
+		case errors.Is(err, context.Canceled):
+			writeResponse(c, http.StatusBadGateway, 502, "agent execution failed", failureRequestCanceled, nil, audit)
 		case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr) && netErr.Timeout():
-			writeResponse(c, http.StatusGatewayTimeout, 504, "agent execution timed out", nil, audit)
+			writeResponse(c, http.StatusGatewayTimeout, 504, "agent execution timed out", failureExecutionTimeout, nil, audit)
 		default:
-			writeResponse(c, http.StatusBadGateway, 502, "agent execution failed", nil, audit)
+			writeResponse(c, http.StatusBadGateway, 502, "agent execution failed", failureExecutionFailed, nil, audit)
 		}
 		return
 	}
-	writeResponse(c, http.StatusOK, 0, "success", result, audit)
+	writeResponse(c, http.StatusOK, 0, "success", "", result, audit)
 }
 
-func writeResponse(c *gin.Context, status, code int, message string, data any, audit *telemetry.AuditSummary) {
-	c.JSON(status, responseEnvelope{Code: code, Message: message, Data: data, Audit: audit})
+func writeResponse(c *gin.Context, status, code int, message string, failure failureCode, data any, audit *telemetry.AuditSummary) {
+	c.JSON(status, responseEnvelope{Code: code, Message: message, FailureCode: failure, Data: data, Audit: audit})
 }
 
 func requestAudit(requestID string, snapshot *telemetry.Snapshot) *telemetry.AuditSummary {

@@ -43,10 +43,11 @@ func (e *stubChatEngine) Chat(_ context.Context, req agent.ChatRequest) (agent.C
 }
 
 type decodedEnvelope struct {
-	Code    int                     `json:"code"`
-	Message string                  `json:"message"`
-	Data    json.RawMessage         `json:"data"`
-	Audit   *telemetry.AuditSummary `json:"audit"`
+	Code        int                     `json:"code"`
+	Message     string                  `json:"message"`
+	FailureCode failureCode             `json:"failure_code"`
+	Data        json.RawMessage         `json:"data"`
+	Audit       *telemetry.AuditSummary `json:"audit"`
 }
 
 func testSnapshot() telemetry.Snapshot {
@@ -154,6 +155,9 @@ func TestChatSuccessIncludesPrivateAuditOutsideData(t *testing.T) {
 	if envelope.Code != 0 || envelope.Message != "success" {
 		t.Fatalf("envelope = %#v", envelope)
 	}
+	if envelope.FailureCode != "" || strings.Contains(recorder.Body.String(), "failure_code") {
+		t.Fatalf("success response included failure code: %s", recorder.Body.String())
+	}
 	assertAuditSnapshot(t, envelope.Audit, testRequestID)
 	if engine.calls != 1 || len(engine.requests) != 1 {
 		t.Fatalf("engine calls = %d, requests = %d, want one", engine.calls, len(engine.requests))
@@ -183,10 +187,14 @@ func TestChatExecutionErrorsIncludeAudit(t *testing.T) {
 		wantStatus  int
 		wantCode    int
 		wantMessage string
+		wantFailure failureCode
 	}{
-		{name: "busy", err: agent.ErrBusy, wantStatus: http.StatusServiceUnavailable, wantCode: 503, wantMessage: "agent is busy; please retry shortly"},
-		{name: "disabled", err: agent.ErrDisabled, wantStatus: http.StatusServiceUnavailable, wantCode: 503, wantMessage: "agent is disabled"},
-		{name: "ordinary failure", err: errors.New("provider response contained private detail"), wantStatus: http.StatusBadGateway, wantCode: 502, wantMessage: "agent execution failed"},
+		{name: "busy", err: agent.ErrBusy, wantStatus: http.StatusServiceUnavailable, wantCode: 503, wantMessage: "agent is busy; please retry shortly", wantFailure: failureAgentBusy},
+		{name: "disabled", err: agent.ErrDisabled, wantStatus: http.StatusServiceUnavailable, wantCode: 503, wantMessage: "agent is disabled", wantFailure: failureAgentDisabled},
+		{name: "invalid message", err: agent.ErrInvalidMessage, wantStatus: http.StatusBadRequest, wantCode: 400, wantMessage: agent.ErrInvalidMessage.Error(), wantFailure: failureInvalidMessage},
+		{name: "invalid session", err: agent.ErrInvalidSession, wantStatus: http.StatusBadRequest, wantCode: 400, wantMessage: agent.ErrInvalidSession.Error(), wantFailure: failureInvalidSession},
+		{name: "invalid history", err: agent.ErrInvalidHistory, wantStatus: http.StatusBadRequest, wantCode: 400, wantMessage: agent.ErrInvalidHistory.Error(), wantFailure: failureInvalidHistory},
+		{name: "ordinary failure", err: errors.New("provider response contained private detail"), wantStatus: http.StatusBadGateway, wantCode: 502, wantMessage: "agent execution failed", wantFailure: failureExecutionFailed},
 	}
 
 	for _, tt := range tests {
@@ -203,6 +211,9 @@ func TestChatExecutionErrorsIncludeAudit(t *testing.T) {
 			}
 			if envelope.Code != tt.wantCode || envelope.Message != tt.wantMessage {
 				t.Fatalf("response = %#v, want code=%d message=%q", envelope, tt.wantCode, tt.wantMessage)
+			}
+			if envelope.FailureCode != tt.wantFailure {
+				t.Fatalf("failure_code = %q, want %q", envelope.FailureCode, tt.wantFailure)
 			}
 			if len(envelope.Data) != 0 {
 				t.Fatalf("data = %s, want omitted", envelope.Data)
@@ -237,12 +248,32 @@ func TestChatTimeoutsReturnGatewayTimeoutWithAudit(t *testing.T) {
 			if envelope.Code != 504 || envelope.Message != "agent execution timed out" {
 				t.Fatalf("response = %#v", envelope)
 			}
+			if envelope.FailureCode != failureExecutionTimeout {
+				t.Fatalf("failure_code = %q, want %q", envelope.FailureCode, failureExecutionTimeout)
+			}
 			assertAuditSnapshot(t, envelope.Audit, testRequestID)
 			if strings.Contains(recorder.Body.String(), "private detail") {
 				t.Fatalf("timeout response leaked internal detail: %s", recorder.Body.String())
 			}
 		})
 	}
+}
+
+func TestChatCancellationKeepsExistingGatewayResponseAndStableCode(t *testing.T) {
+	engine := &stubChatEngine{
+		enabled:  true,
+		response: agent.ChatResponse{Telemetry: testSnapshot()},
+		err:      context.Canceled,
+	}
+	recorder, envelope := performChat(t, chatRouter(engine, "internal-secret"), `{"message":"执行任务"}`, testRequestID, "internal-secret")
+
+	if recorder.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusBadGateway, recorder.Body.String())
+	}
+	if envelope.Code != 502 || envelope.Message != "agent execution failed" || envelope.FailureCode != failureRequestCanceled {
+		t.Fatalf("response = %#v", envelope)
+	}
+	assertAuditSnapshot(t, envelope.Audit, testRequestID)
 }
 
 func TestChatRejectsInvalidSecretWithoutExecutionOrAudit(t *testing.T) {
@@ -257,6 +288,9 @@ func TestChatRejectsInvalidSecretWithoutExecutionOrAudit(t *testing.T) {
 	}
 	if envelope.Code != 401 || envelope.Message != "invalid internal secret" {
 		t.Fatalf("response = %#v", envelope)
+	}
+	if envelope.FailureCode != failureInvalidInternalSecret {
+		t.Fatalf("failure_code = %q, want %q", envelope.FailureCode, failureInvalidInternalSecret)
 	}
 	if engine.calls != 0 {
 		t.Fatalf("engine calls = %d, want 0", engine.calls)
@@ -282,6 +316,9 @@ func TestNewHandlerNormalizesNilEngine(t *testing.T) {
 	if recorder.Code != http.StatusServiceUnavailable || envelope.Code != 503 || envelope.Message != "agent is disabled" {
 		t.Fatalf("chat response = %d %#v", recorder.Code, envelope)
 	}
+	if envelope.FailureCode != failureAgentDisabled {
+		t.Fatalf("failure_code = %q, want %q", envelope.FailureCode, failureAgentDisabled)
+	}
 	if envelope.Audit == nil || envelope.Audit.RequestID != testRequestID || envelope.Audit.Telemetry != nil {
 		t.Fatalf("nil-engine audit = %#v", envelope.Audit)
 	}
@@ -296,6 +333,9 @@ func TestChatInvalidJSONReturnsOnlySafeCorrelationMetadata(t *testing.T) {
 	}
 	if envelope.Code != 400 || envelope.Message != "invalid request body" {
 		t.Fatalf("response = %#v", envelope)
+	}
+	if envelope.FailureCode != failureInvalidRequestBody {
+		t.Fatalf("failure_code = %q, want %q", envelope.FailureCode, failureInvalidRequestBody)
 	}
 	if engine.calls != 0 {
 		t.Fatalf("engine calls = %d, want 0", engine.calls)

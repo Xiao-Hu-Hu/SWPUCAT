@@ -1,6 +1,7 @@
 package main
 
 import (
+	agentauditapp "SWPUCAT/internal/application/agentaudit"
 	"SWPUCAT/internal/application/announcement"
 	announcementdraftapp "SWPUCAT/internal/application/announcementdraft"
 	"SWPUCAT/internal/application/approval"
@@ -72,6 +73,7 @@ func main() {
 	registrationRepo := repository.NewRegistrationRepo(db)
 	settingsRepo := repository.NewSettingsRepo(db)
 	conversationRepo := repository.NewConversationRepo(db)
+	agentAuditRepo := repository.NewAgentAuditRepo(db)
 
 	// Initialize infrastructure services
 	jwtSvc := auth.NewJWTService(&cfg.JWT)
@@ -141,6 +143,7 @@ func main() {
 	dashboardSvc := dashboard.NewDashboardService(userRepo, checkinRepo, annRepo, knowledgeRepo)
 	authzSvc := authorization.NewService(userRepo)
 	conversationSvc := conversationapp.NewService(conversationRepo)
+	agentAuditSvc := agentauditapp.NewService(agentAuditRepo)
 
 	// Initialize handlers
 	authHandler := httpInterface.NewAuthHandler(userSvc)
@@ -155,7 +158,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize agent client: %v", err)
 	}
-	agentHandler := httpInterface.NewAgentHandler(agentClient, conversationSvc, knowledgeIndexSvc)
+	agentHandler := httpInterface.NewAgentHandler(agentClient, conversationSvc, knowledgeIndexSvc, agentAuditSvc)
 	reportHandler := httpInterface.NewReportHandler(reportSvc)
 	evaluationHandler := httpInterface.NewEvaluationHandler(evaluationSvc)
 	notificationHandler := httpInterface.NewNotificationHandler(notificationSvc)
