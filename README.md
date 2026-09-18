@@ -60,6 +60,7 @@ CSA（Computer Science Association）实验室管理系统 — 基于 Vue 3 + Go
 SWPUCAT/
 ├── cmd/server/              # 主站应用入口
 ├── cmd/agent/               # Eino Agent 入口
+├── cmd/agent_eval/          # Agent 角色化评测入口
 ├── cmd/migrate/             # 数据库迁移入口
 ├── internal/
 │   ├── application/         # 应用层（服务、DTO）
@@ -176,6 +177,22 @@ CSA_MIGRATION_BASELINE=true
 迁移器会校验旧版 `001` 至 `015` 所需的表和字段，只将这 15 个旧迁移标记为基线，再正常执行 `016` 之后的新迁移。迁移成功后可将该值恢复为 `false`。
 
 如果修改了 `CSA_DATABASE_PASSWORD` 或 `CSA_DATABASE_DBNAME`，已有 PostgreSQL 数据卷不会自动修改数据库角色密码或创建新数据库。必须先在数据库内同步修改，或者在确认测试数据可删除后重新创建数据卷。
+
+## Agent 角色化评测
+
+仓库内置 54 个 `member`、`captain`、`super_admin` 场景，覆盖生产 13 个工具、权限边界、写开关、引用、提示注入与隐私哨兵。默认命令只做严格离线校验，不读取模型凭据或访问网络：
+
+```bash
+make agent-eval
+```
+
+只有显式选择 `live` 才会调用已配置的模型；业务 API 始终替换为进程内 fixture，不连接真实主站或数据库：
+
+```bash
+go run -buildvcs=false ./cmd/agent_eval -mode=live -suite=v1 -role=all -repeat=3 -format=json
+```
+
+数据集结构、评分契约和安全约束见 [`internal/agent/eval/testdata/v1/README.md`](internal/agent/eval/testdata/v1/README.md)。
 
 ## 部署到生产服务器
 

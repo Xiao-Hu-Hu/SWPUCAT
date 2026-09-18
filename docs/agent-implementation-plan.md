@@ -68,7 +68,7 @@
 
 计划提交：`fix(checkin): restore member work-hour bar chart`
 
-### [ ] P02：收口并提交角色化 Agent 评测框架
+### [x] P02：收口并提交角色化 Agent 评测框架
 
 范围：
 
@@ -267,6 +267,7 @@
 |---|---|---|---|---|
 | 2026-09-18 | P00 | 完成 | 已建立范围、验收标准和提交计划；暂存区仅包含本文档 | `docs(agent): add complete implementation roadmap` |
 | 2026-09-18 | P01 | 完成 | 修复仅有超级管理员时被前端过滤为空的问题；增加安全数据归一化、空状态、失败重试、请求竞态保护、ResizeObserver 与销毁清理；数据测试和生产构建通过 | `fix(checkin): restore member work-hour bar chart` |
+| 2026-09-18 | P02 | 完成 | 54 个场景离线校验全部通过；覆盖 3 种角色、13 个工具、权限、提示注入、隐私、引用、无数据和写开关；评测包、CLI、fixture、评分器和文档测试通过 | `feat(agent): add role-based evaluation suite` |
 
 ## 8. 当前基线
 

@@ -134,9 +134,9 @@ func projectArguments(toolName string, decoded any) any {
 		projectArgumentNumber(result, object, "limit", 0, 100, true)
 		return result
 	case "search_knowledge":
-		return map[string]any{"query_length": stringLength(object["query"])}
+		return map[string]any{"query_length": trimmedStringLength(object["query"])}
 	case "recommend_knowledge":
-		return map[string]any{"need_length": stringLength(object["need"])}
+		return map[string]any{"need_length": trimmedStringLength(object["need"])}
 	case "query_team_members":
 		result := make(map[string]any)
 		projectArgumentPresence(result, object, "period_id")
@@ -164,9 +164,9 @@ func projectArguments(toolName string, decoded any) any {
 		return result
 	case "draft_announcement":
 		return map[string]any{
-			"title_length":       stringLength(object["title"]),
-			"content_length":     stringLength(object["content"]),
-			"source_note_length": stringLength(object["source_note"]),
+			"title_length":       trimmedStringLength(object["title"]),
+			"content_length":     trimmedStringLength(object["content"]),
+			"source_note_length": trimmedStringLength(object["source_note"]),
 			"pinned":             argumentBool(object, "pinned"),
 			"recipient_count":    arrayLength(object["recipient_ids"]),
 		}
@@ -241,6 +241,7 @@ func projectArgumentEnum(result map[string]any, object map[string]any, field str
 		result[field] = "invalid"
 		return
 	}
+	text = strings.TrimSpace(text)
 	for _, candidate := range allowed {
 		if text == candidate || text == "" {
 			result[field] = text
@@ -256,11 +257,17 @@ func projectArgumentPeriodKey(result map[string]any, object map[string]any, fiel
 		return
 	}
 	text, ok := value.(string)
+	text = strings.TrimSpace(text)
 	if ok && (text == "" || periodKeyPattern.MatchString(text)) {
 		result[field] = text
 		return
 	}
 	result[field] = "invalid"
+}
+
+func trimmedStringLength(value any) int {
+	text, _ := value.(string)
+	return utf8.RuneCountInString(strings.TrimSpace(text))
 }
 
 func argumentBool(object map[string]any, field string) any {

@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "suite_id": "swpucat-agent-role-eval-v1",
+  "description": "SWPUCAT 智能助手 P1 角色化离线评测集，覆盖成员、队长和超级管理员的工具选择、权限边界、引用、提示注入与写操作安全。",
+  "expected_case_count": 54,
+  "min_cases": 50,
+  "max_cases": 60,
+  "case_files": ["member_cases.json", "captain_cases.json", "super_admin_cases.json"],
+  "fixture_file": "business_fixtures.json",
+  "role_counts": {"member": 18, "captain": 18, "super_admin": 18},
+  "required_tools": [
+    "get_checkin_status",
+    "get_my_work_hours",
+    "get_my_checkin_history",
+    "get_checkin_requirements",
+    "search_knowledge",
+    "recommend_knowledge",
+    "query_team_members",
+    "get_checkin_stats",
+    "list_report_periods",
+    "get_report_materials",
+    "draft_announcement",
+    "clock_in",
+    "clock_out"
+  ],
+  "required_outcomes": ["support", "refuse", "clarify", "no_data"],
+  "required_tags": ["p1-hours", "p1-history", "p1-requirements", "p1-period", "knowledge", "report", "authz", "injection", "write", "no-data"]
+}

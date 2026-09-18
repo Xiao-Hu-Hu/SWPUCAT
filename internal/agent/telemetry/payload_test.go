@@ -113,6 +113,14 @@ func TestToolPayloadSafeProjections(t *testing.T) {
 			required:  []string{`"period_key":"invalid"`},
 		},
 		{
+			name:      "effective trimmed arguments",
+			tool:      "list_report_periods",
+			kind:      payloadArguments,
+			raw:       `{"period_key":" 2026-09 ","status":" open "}`,
+			forbidden: []string{" 2026-09 ", " open "},
+			required:  []string{`"period_key":"2026-09"`, `"status":"open"`},
+		},
+		{
 			name:      "real clock in result",
 			tool:      "clock_in",
 			kind:      payloadResult,
