@@ -282,6 +282,9 @@ func (e *Engine) acquireWorker(ctx context.Context) (func(), error) {
 	if e == nil || e.concurrency == nil {
 		return nil, ErrExecution
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	wait := e.queueTimeout
 	if wait <= 0 {
 		wait = 5 * time.Second
@@ -295,6 +298,9 @@ func (e *Engine) acquireWorker(ctx context.Context) (func(), error) {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-acquireCtx.Done():
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return nil, ErrQueueTimeout
 	}
 }
