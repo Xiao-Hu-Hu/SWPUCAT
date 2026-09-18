@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   agentApi,
@@ -16,12 +16,21 @@ interface ChatMessage {
   content: string
   createdAt: string
   sources?: AgentKnowledgeSource[]
+  id?: number
+  localId: string
+  status: 'completed' | 'pending' | 'streaming' | 'failed' | 'stopped'
+  clientTurnId?: string
+  generationId?: string
+  requestId?: string
+  sourceMessage?: string
+  regenerate?: boolean
+  feedback?: boolean
 }
 
 const greetingMessage = '你好，我可以协助查询知识库、查看打卡状态，也可以按你的请求执行打卡操作。'
 
 function newGreetingMessage(): ChatMessage {
-  return { role: 'assistant', content: greetingMessage, createdAt: new Date().toISOString() }
+  return { role: 'assistant', content: greetingMessage, createdAt: new Date().toISOString(), localId: `greeting-${Date.now()}`, status: 'completed' }
 }
 
 const authStore = useAuthStore()
@@ -40,11 +49,17 @@ const editingSessionId = ref('')
 const editingTitle = ref('')
 const renamingSessionId = ref('')
 const deletingSessionId = ref('')
+const activeAbortController = ref<AbortController | null>(null)
+const feedbackSaving = ref<Record<string, boolean>>({})
 
 const sessionStorageKey = () => `swpucat-agent-session:${authStore.user?.id || 'anonymous'}`
 
 onMounted(() => {
   void initializeConversations()
+})
+
+onBeforeUnmount(() => {
+  activeAbortController.value?.abort()
 })
 
 async function initializeConversations() {
@@ -164,6 +179,14 @@ async function loadConversation(targetSessionId: string) {
     messages.value = res.data.messages
       .filter((item) => item.role === 'user' || item.role === 'assistant')
       .map(messageFromHistory)
+    let lastUserMessage = ''
+    for (const item of messages.value) {
+      if (item.role === 'user') {
+        lastUserMessage = item.content
+      } else if (item.clientTurnId) {
+        item.sourceMessage = lastUserMessage
+      }
+    }
     if (messages.value.length === 0) {
       messages.value = [newGreetingMessage()]
     }
@@ -191,7 +214,14 @@ function messageFromHistory(message: AgentConversationMessage): ChatMessage {
     role: message.role === 'user' ? 'user' : 'assistant',
     content: message.content,
     createdAt: message.created_at,
-    sources: message.role === 'assistant' ? parseSources(message.citations_json) : undefined
+    sources: message.role === 'assistant' ? parseSources(message.citations_json) : undefined,
+    id: message.id,
+    localId: `message-${message.id}`,
+    status: 'completed',
+    clientTurnId: message.client_turn_id,
+    generationId: message.generation_id,
+    requestId: message.request_id,
+    sourceMessage: message.role === 'assistant' ? undefined : message.content
   }
 }
 
@@ -220,31 +250,145 @@ async function sendMessage() {
   if (!message || conversationsLoading.value || loading.value || historyLoading.value || editingSessionId.value || renamingSessionId.value) return
   if (!(await ensureConversation())) return
 
-  const targetSessionId = sessionId.value
-  messages.value.push({ role: 'user', content: message, createdAt: new Date().toISOString() })
+  const clientTurnId = newTurnIdentifier()
+  const generationId = newTurnIdentifier()
+  messages.value.push({
+    role: 'user', content: message, createdAt: new Date().toISOString(), localId: `user-${clientTurnId}`,
+    status: 'completed', clientTurnId, generationId, sourceMessage: message
+  })
+  const assistantIndex = messages.value.push({
+    role: 'assistant', content: '', createdAt: new Date().toISOString(), localId: `assistant-${clientTurnId}`,
+    status: 'pending', clientTurnId, generationId, sourceMessage: message, regenerate: false, sources: []
+  }) - 1
   input.value = ''
-  loading.value = true
   await scrollToBottom()
+  await runGeneration(assistantIndex)
+}
+
+function newTurnIdentifier(): string {
+  const bytes = new Uint8Array(16)
+  crypto.getRandomValues(bytes)
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('')
+}
+
+async function runGeneration(assistantIndex: number) {
+  const target = messages.value[assistantIndex]
+  if (!target || target.role !== 'assistant' || !target.sourceMessage || !target.clientTurnId || !target.generationId || loading.value) return
+  const targetSessionId = sessionId.value
+  const controller = new AbortController()
+  activeAbortController.value = controller
+  loading.value = true
+  target.status = 'pending'
+  const previousContent = target.content
+  const previousSources = target.sources
+  const previousMessageID = target.id
+  const previousRequestID = target.requestId
+  const regeneration = Boolean(target.regenerate)
+  target.content = ''
+  target.sources = []
+  target.feedback = undefined
   try {
-    const res = await agentApi.chat(message, targetSessionId)
-    const data = res.data
+    const data = await agentApi.chatStream(
+      target.sourceMessage,
+      targetSessionId,
+      target.clientTurnId,
+      target.generationId,
+      Boolean(target.regenerate),
+      (delta) => {
+        if (messages.value[assistantIndex] !== target) return
+        target.status = 'streaming'
+        target.content += delta
+        void scrollToBottom()
+      },
+      controller.signal
+    )
     if (data.session_id && data.session_id !== sessionId.value) {
       sessionId.value = data.session_id
       localStorage.setItem(sessionStorageKey(), data.session_id)
     }
-    messages.value.push({
-      role: 'assistant',
-      content: data.answer,
-      createdAt: new Date().toISOString(),
-      sources: data.sources || []
-    })
-    await refreshConversationList()
+    target.content = data.answer
+    target.sources = data.sources || []
+    target.createdAt = new Date().toISOString()
+    target.id = data.message_id
+    target.clientTurnId = data.client_turn_id || target.clientTurnId
+    target.generationId = data.generation_id || target.generationId
+    target.requestId = data.request_id
+    target.status = data.conversation_persisted ? 'completed' : 'failed'
+    target.regenerate = data.conversation_persisted ? false : regeneration
+    if (!data.conversation_persisted) {
+      ElMessage.warning('回答已生成，但会话记录保存失败；可点击重试再次保存')
+    } else {
+      await refreshConversationList()
+    }
   } catch (error: any) {
-    const detail = error?.response?.data?.message
-    ElMessage.error(detail || 'Agent 暂时不可用，请稍后重试')
+    const stopped = controller.signal.aborted || error?.name === 'AbortError'
+    if (target.regenerate && previousContent) {
+      target.content = previousContent
+      target.sources = previousSources
+      target.id = previousMessageID
+      target.requestId = previousRequestID
+    }
+    target.status = stopped ? 'stopped' : 'failed'
+    if (stopped) {
+      ElMessage.info('已停止生成，未保存本次部分回答')
+    } else {
+      const detail = error?.message || error?.response?.data?.message
+      ElMessage.error(detail || '智能助手暂时不可用，请稍后重试')
+    }
   } finally {
+    if (activeAbortController.value === controller) activeAbortController.value = null
     loading.value = false
     await scrollToBottom()
+  }
+}
+
+function stopGeneration() {
+  activeAbortController.value?.abort()
+}
+
+async function retryGeneration(index: number) {
+  if (loading.value) return
+  await runGeneration(index)
+}
+
+async function regenerateResponse(index: number) {
+  const target = messages.value[index]
+  if (!target || target.role !== 'assistant' || !target.clientTurnId || !target.sourceMessage || loading.value) return
+  target.generationId = newTurnIdentifier()
+  target.regenerate = true
+  await runGeneration(index)
+}
+
+function isLastAssistant(index: number): boolean {
+  for (let cursor = messages.value.length - 1; cursor > index; cursor--) {
+    if (messages.value[cursor].role === 'assistant' && messages.value[cursor].clientTurnId) return false
+  }
+  return true
+}
+
+async function copyResponse(item: ChatMessage) {
+  if (!item.content) return
+  try {
+    await navigator.clipboard.writeText(item.content)
+    ElMessage.success('回答已复制')
+  } catch {
+    ElMessage.error('复制失败，请手动选择文本')
+  }
+}
+
+async function saveFeedback(item: ChatMessage, helpful: boolean) {
+  if (!item.id || !item.requestId || item.status !== 'completed') return
+  const key = item.localId
+  if (feedbackSaving.value[key]) return
+  feedbackSaving.value[key] = true
+  try {
+    await agentApi.saveFeedback(item.id, item.requestId, helpful)
+    item.feedback = helpful
+    ElMessage.success('感谢你的反馈')
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.message || '反馈保存失败，请稍后重试')
+  } finally {
+    delete feedbackSaving.value[key]
   }
 }
 
@@ -484,9 +628,12 @@ async function downloadSource(source: AgentKnowledgeSource) {
         <div ref="messagesRef" class="messages">
           <div v-if="historyLoading" class="history-placeholder">正在加载会话记录…</div>
           <template v-else>
-            <div v-for="(item, index) in messages" :key="`${sessionId}-${index}-${item.createdAt}`" class="message-row" :class="item.role">
+            <div v-for="(item, index) in messages" :key="`${sessionId}-${item.localId}`" class="message-row" :class="item.role">
               <div class="message-content">
-                <div v-if="item.role === 'assistant'" class="message-bubble assistant-bubble markdown-body" v-html="renderMarkdown(item.content)"></div>
+                <div v-if="item.role === 'assistant' && item.content" class="message-bubble assistant-bubble markdown-body" v-html="renderMarkdown(item.content)"></div>
+                <div v-else-if="item.role === 'assistant'" class="message-bubble pending">
+                  {{ item.status === 'pending' ? '正在思考…' : '暂未生成回答' }}
+                </div>
                 <div v-else class="message-bubble">{{ item.content }}</div>
                 <div v-if="item.role === 'assistant' && item.sources?.length" class="source-list">
                   <div class="source-list-title">参考资料</div>
@@ -518,12 +665,43 @@ async function downloadSource(source: AgentKnowledgeSource) {
                     </div>
                   </div>
                 </div>
+                <div v-if="item.role === 'assistant' && item.clientTurnId" class="message-actions">
+                  <span v-if="item.status === 'streaming'" class="message-state">正在生成</span>
+                  <span v-else-if="item.status === 'failed'" class="message-state error">生成失败</span>
+                  <span v-else-if="item.status === 'stopped'" class="message-state">已停止，未保存</span>
+                  <el-button v-if="item.content" text size="small" @click="copyResponse(item)">复制</el-button>
+                  <el-button
+                    v-if="item.status === 'failed' || item.status === 'stopped'"
+                    text
+                    size="small"
+                    :disabled="loading"
+                    @click="retryGeneration(index)"
+                  >重试</el-button>
+                  <el-button
+                    v-if="item.status === 'completed' && isLastAssistant(index)"
+                    text
+                    size="small"
+                    :disabled="loading"
+                    @click="regenerateResponse(index)"
+                  >重新生成</el-button>
+                  <template v-if="item.status === 'completed' && item.id && item.requestId">
+                    <el-button
+                      text
+                      size="small"
+                      :type="item.feedback === true ? 'primary' : ''"
+                      :loading="feedbackSaving[item.localId]"
+                      @click="saveFeedback(item, true)"
+                    >有用</el-button>
+                    <el-button
+                      text
+                      size="small"
+                      :type="item.feedback === false ? 'danger' : ''"
+                      :loading="feedbackSaving[item.localId]"
+                      @click="saveFeedback(item, false)"
+                    >无用</el-button>
+                  </template>
+                </div>
                 <time v-if="formatMessageTime(item.createdAt)" class="message-time" :datetime="item.createdAt">{{ formatMessageTime(item.createdAt) }}</time>
-              </div>
-            </div>
-            <div v-if="loading" class="message-row assistant">
-              <div class="message-content">
-                <div class="message-bubble pending">正在思考…</div>
               </div>
             </div>
           </template>
@@ -542,7 +720,8 @@ async function downloadSource(source: AgentKnowledgeSource) {
           />
           <div class="composer-footer">
             <span>Enter 发送，Shift + Enter 换行</span>
-            <el-button type="primary" :loading="loading" :disabled="conversationsLoading || historyLoading || Boolean(editingSessionId) || Boolean(renamingSessionId) || !input.trim()" @click="sendMessage">发送</el-button>
+            <el-button v-if="loading" type="danger" plain @click="stopGeneration">停止生成</el-button>
+            <el-button v-else type="primary" :disabled="conversationsLoading || historyLoading || Boolean(editingSessionId) || Boolean(renamingSessionId) || !input.trim()" @click="sendMessage">发送</el-button>
           </div>
         </div>
       </section>
@@ -791,6 +970,25 @@ async function downloadSource(source: AgentKnowledgeSource) {
   color: var(--text-muted);
   font-size: 0.68rem;
   line-height: 1.2;
+}
+
+.message-actions {
+  min-height: 28px;
+  margin-top: 0.25rem;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.1rem;
+}
+
+.message-state {
+  margin-right: 0.3rem;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+.message-state.error {
+  color: var(--danger);
 }
 
 .message-row.user .message-time {

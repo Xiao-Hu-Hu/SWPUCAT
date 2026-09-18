@@ -1,6 +1,7 @@
 package agentclient
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -77,6 +78,12 @@ type ChatResponse struct {
 	Audit     *telemetry.AuditSummary `json:"-"`
 }
 
+type ChatStreamDelta struct {
+	Delta string
+}
+
+type ChatStreamCallback func(ChatStreamDelta) error
+
 type KnowledgeSource struct {
 	ID           int64   `json:"id"`
 	Type         string  `json:"type"`
@@ -97,6 +104,16 @@ type apiResponse struct {
 	Message     string                  `json:"message"`
 	FailureCode FailureCode             `json:"failure_code,omitempty"`
 	Data        json.RawMessage         `json:"data"`
+	Audit       *telemetry.AuditSummary `json:"audit,omitempty"`
+}
+
+type streamResponse struct {
+	Type        string                  `json:"type"`
+	Delta       string                  `json:"delta,omitempty"`
+	Code        int                     `json:"code,omitempty"`
+	Message     string                  `json:"message,omitempty"`
+	FailureCode FailureCode             `json:"failure_code,omitempty"`
+	Data        json.RawMessage         `json:"data,omitempty"`
 	Audit       *telemetry.AuditSummary `json:"audit,omitempty"`
 }
 
@@ -339,4 +356,116 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest, authorization, reque
 	result.RequestID = requestID
 	result.Audit = envelope.Audit
 	return result, nil
+}
+
+func (c *Client) ChatStream(ctx context.Context, req ChatRequest, authorization, requestID string, callback ChatStreamCallback) (ChatResponse, error) {
+	if callback == nil {
+		return ChatResponse{}, newProtocolError("stream callback is required", requestID, nil, nil, 0)
+	}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return ChatResponse{}, newProtocolError("encode agent request", requestID, nil, err, 0)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/chat/stream", bytes.NewReader(payload))
+	if err != nil {
+		return ChatResponse{}, newProtocolError("create agent stream request", requestID, nil, err, 0)
+	}
+	httpReq.Header.Set("Accept", "application/x-ndjson")
+	httpReq.Header.Set("Content-Type", "application/json")
+	if authorization != "" {
+		httpReq.Header.Set("Authorization", authorization)
+	}
+	if requestID != "" {
+		httpReq.Header.Set("X-Request-ID", requestID)
+	}
+	if c.internalSecret != "" {
+		httpReq.Header.Set("X-Agent-Internal-Secret", c.internalSecret)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return ChatResponse{}, newTransportError(fmt.Errorf("agent stream request: %w", err), requestID)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxAgentResponseBytes+1))
+		if readErr != nil {
+			return ChatResponse{}, newTransportError(fmt.Errorf("read agent stream response: %w", readErr), requestID)
+		}
+		if len(body) > maxAgentResponseBytes {
+			return ChatResponse{}, newProtocolError("agent response is too large", requestID, nil, nil, http.StatusBadGateway)
+		}
+		var envelope apiResponse
+		if err := json.Unmarshal(body, &envelope); err != nil {
+			return ChatResponse{}, newProtocolError("invalid agent stream response", requestID, nil, err, resp.StatusCode)
+		}
+		if envelope.Audit != nil && requestID != "" && envelope.Audit.RequestID != requestID {
+			return ChatResponse{}, newProtocolError("invalid agent stream audit", requestID, nil, nil, http.StatusBadGateway)
+		}
+		if envelope.FailureCode != "" && !matchesDownstreamFailure(resp.StatusCode, envelope.Code, envelope.FailureCode) {
+			return ChatResponse{}, newProtocolError("invalid agent stream response", requestID, envelope.Audit, nil, resp.StatusCode)
+		}
+		return ChatResponse{}, newDownstreamError(resp.StatusCode, envelope.Message, requestID, envelope.Audit, envelope.FailureCode)
+	}
+	if !strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "application/x-ndjson") {
+		return ChatResponse{}, newProtocolError("invalid agent stream content type", requestID, nil, nil, http.StatusBadGateway)
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 32<<10), maxAgentResponseBytes)
+	totalBytes := 0
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		totalBytes += len(line)
+		if totalBytes > maxAgentResponseBytes {
+			return ChatResponse{}, newProtocolError("agent response is too large", requestID, nil, nil, http.StatusBadGateway)
+		}
+		var event streamResponse
+		if err := json.Unmarshal(line, &event); err != nil {
+			return ChatResponse{}, newProtocolError("invalid agent stream event", requestID, nil, err, http.StatusBadGateway)
+		}
+		switch event.Type {
+		case "delta":
+			if event.Delta == "" {
+				return ChatResponse{}, newProtocolError("empty agent stream delta", requestID, event.Audit, nil, http.StatusBadGateway)
+			}
+			if err := callback(ChatStreamDelta{Delta: event.Delta}); err != nil {
+				return ChatResponse{}, newTransportError(err, requestID)
+			}
+		case "done":
+			if event.Audit != nil && requestID != "" && event.Audit.RequestID != requestID {
+				return ChatResponse{}, newProtocolError("invalid agent stream audit", requestID, nil, nil, http.StatusBadGateway)
+			}
+			var result ChatResponse
+			if len(event.Data) == 0 || string(event.Data) == "null" {
+				return ChatResponse{}, newProtocolError("agent stream result is missing", requestID, event.Audit, nil, http.StatusBadGateway)
+			}
+			if err := json.Unmarshal(event.Data, &result); err != nil {
+				return ChatResponse{}, newProtocolError("decode agent stream result", requestID, event.Audit, err, http.StatusBadGateway)
+			}
+			if strings.TrimSpace(result.Answer) == "" || strings.TrimSpace(result.SessionID) == "" {
+				return ChatResponse{}, newProtocolError("agent stream result is incomplete", requestID, event.Audit, nil, http.StatusBadGateway)
+			}
+			result.RequestID = requestID
+			result.Audit = event.Audit
+			return result, nil
+		case "error":
+			if event.Audit != nil && requestID != "" && event.Audit.RequestID != requestID {
+				return ChatResponse{}, newProtocolError("invalid agent stream audit", requestID, nil, nil, http.StatusBadGateway)
+			}
+			if event.FailureCode == "" || !matchesDownstreamFailure(event.Code, event.Code, event.FailureCode) {
+				return ChatResponse{}, newProtocolError("invalid agent stream error", requestID, event.Audit, nil, http.StatusBadGateway)
+			}
+			return ChatResponse{}, newDownstreamError(event.Code, event.Message, requestID, event.Audit, event.FailureCode)
+		default:
+			return ChatResponse{}, newProtocolError("unknown agent stream event", requestID, event.Audit, nil, http.StatusBadGateway)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return ChatResponse{}, newTransportError(fmt.Errorf("read agent stream: %w", err), requestID)
+	}
+	if err := ctx.Err(); err != nil {
+		return ChatResponse{}, newTransportError(err, requestID)
+	}
+	return ChatResponse{}, newProtocolError("agent stream ended without result", requestID, nil, nil, http.StatusBadGateway)
 }

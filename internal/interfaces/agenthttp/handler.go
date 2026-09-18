@@ -2,6 +2,7 @@ package agenthttp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -22,9 +23,24 @@ type chatEngine interface {
 	Chat(context.Context, agent.ChatRequest) (agent.ChatResponse, error)
 }
 
+type streamingChatEngine interface {
+	chatEngine
+	ChatStream(context.Context, agent.ChatRequest, agent.ChatStreamEmitter) (agent.ChatResponse, error)
+}
+
 type responseEnvelope struct {
 	Code        int                     `json:"code"`
 	Message     string                  `json:"message"`
+	FailureCode failureCode             `json:"failure_code,omitempty"`
+	Data        any                     `json:"data,omitempty"`
+	Audit       *telemetry.AuditSummary `json:"audit,omitempty"`
+}
+
+type streamEnvelope struct {
+	Type        string                  `json:"type"`
+	Delta       string                  `json:"delta,omitempty"`
+	Code        int                     `json:"code,omitempty"`
+	Message     string                  `json:"message,omitempty"`
 	FailureCode failureCode             `json:"failure_code,omitempty"`
 	Data        any                     `json:"data,omitempty"`
 	Audit       *telemetry.AuditSummary `json:"audit,omitempty"`
@@ -113,6 +129,83 @@ func (h *Handler) Chat(c *gin.Context) {
 		return
 	}
 	writeResponse(c, http.StatusOK, 0, "success", "", result, audit)
+}
+
+func (h *Handler) ChatStream(c *gin.Context) {
+	requestID := normalizeRequestID(c.GetHeader("X-Request-ID"))
+	if requestID != "" {
+		c.Header("X-Request-ID", requestID)
+	}
+	if h == nil || h.engine == nil {
+		writeResponse(c, http.StatusServiceUnavailable, 503, "agent streaming is disabled", failureAgentDisabled, nil, requestAudit(requestID, nil))
+		return
+	}
+	streamEngine, ok := h.engine.(streamingChatEngine)
+	if !ok {
+		writeResponse(c, http.StatusServiceUnavailable, 503, "agent streaming is disabled", failureAgentDisabled, nil, requestAudit(requestID, nil))
+		return
+	}
+	if h.engine.Enabled() && (h.internalSecret == "" || c.GetHeader("X-Agent-Internal-Secret") != h.internalSecret) {
+		writeResponse(c, http.StatusUnauthorized, 401, "invalid internal secret", failureInvalidInternalSecret, nil, nil)
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+	var req agent.ChatRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeResponse(c, http.StatusBadRequest, 400, "invalid request body", failureInvalidRequestBody, nil, requestAudit(requestID, nil))
+		return
+	}
+	req.Authorization = c.GetHeader("Authorization")
+	req.RequestID = requestID
+	c.Header("Content-Type", "application/x-ndjson")
+	c.Header("Cache-Control", "no-cache, no-store")
+	c.Header("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
+	encoder := json.NewEncoder(c.Writer)
+	writeEvent := func(event streamEnvelope) error {
+		if err := encoder.Encode(event); err != nil {
+			return err
+		}
+		c.Writer.Flush()
+		return nil
+	}
+	result, err := streamEngine.ChatStream(c.Request.Context(), req, func(event agent.ChatStreamEvent) error {
+		if event.Delta == "" {
+			return nil
+		}
+		return writeEvent(streamEnvelope{Type: "delta", Delta: event.Delta})
+	})
+	audit := requestAudit(requestID, &result.Telemetry)
+	if err != nil {
+		code, message, failure := classifyAgentError(err)
+		_ = writeEvent(streamEnvelope{Type: "error", Code: code, Message: message, FailureCode: failure, Audit: audit})
+		return
+	}
+	_ = writeEvent(streamEnvelope{Type: "done", Data: result, Audit: audit})
+}
+
+func classifyAgentError(err error) (code int, message string, failure failureCode) {
+	var netErr net.Error
+	switch {
+	case errors.Is(err, agent.ErrDisabled):
+		return http.StatusServiceUnavailable, "agent is disabled", failureAgentDisabled
+	case errors.Is(err, agent.ErrInvalidMessage):
+		return http.StatusBadRequest, err.Error(), failureInvalidMessage
+	case errors.Is(err, agent.ErrInvalidSession):
+		return http.StatusBadRequest, err.Error(), failureInvalidSession
+	case errors.Is(err, agent.ErrInvalidHistory):
+		return http.StatusBadRequest, err.Error(), failureInvalidHistory
+	case errors.Is(err, agent.ErrBusy):
+		return http.StatusServiceUnavailable, "agent is busy; please retry shortly", failureAgentBusy
+	case errors.Is(err, agent.ErrQueueTimeout):
+		return http.StatusServiceUnavailable, "agent queue wait timed out; please retry shortly", failureQueueTimeout
+	case errors.Is(err, context.Canceled):
+		return http.StatusBadGateway, "agent execution failed", failureRequestCanceled
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr) && netErr.Timeout():
+		return http.StatusGatewayTimeout, "agent execution timed out", failureExecutionTimeout
+	default:
+		return http.StatusBadGateway, "agent execution failed", failureExecutionFailed
+	}
 }
 
 func writeResponse(c *gin.Context, status, code int, message string, failure failureCode, data any, audit *telemetry.AuditSummary) {

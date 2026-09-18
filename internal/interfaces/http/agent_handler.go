@@ -45,6 +45,10 @@ type agentChatClient interface {
 	Chat(context.Context, agentclient.ChatRequest, string, string) (agentclient.ChatResponse, error)
 }
 
+type agentStreamingChatClient interface {
+	ChatStream(context.Context, agentclient.ChatRequest, string, string, agentclient.ChatStreamCallback) (agentclient.ChatResponse, error)
+}
+
 func NewAgentHandler(client *agentclient.Client, conversations *conversationapp.Service, retrieval *knowledgeindex.Service, audits *agentauditapp.Service) *AgentHandler {
 	var boundary agentChatClient
 	if client != nil {
@@ -58,8 +62,40 @@ func newAgentHandler(client agentChatClient, conversations *conversationapp.Serv
 }
 
 type agentChatRequest struct {
-	Message   string `json:"message"`
-	SessionID string `json:"session_id,omitempty"`
+	Message      string `json:"message"`
+	SessionID    string `json:"session_id,omitempty"`
+	ClientTurnID string `json:"client_turn_id,omitempty"`
+	GenerationID string `json:"generation_id,omitempty"`
+	Regenerate   bool   `json:"regenerate,omitempty"`
+}
+
+type agentPublicChatResponse struct {
+	Answer                string                        `json:"answer"`
+	SessionID             string                        `json:"session_id"`
+	Sources               []agentclient.KnowledgeSource `json:"sources,omitempty"`
+	UserMessageID         int64                         `json:"user_message_id,omitempty"`
+	MessageID             int64                         `json:"message_id,omitempty"`
+	ClientTurnID          string                        `json:"client_turn_id"`
+	GenerationID          string                        `json:"generation_id"`
+	RequestID             string                        `json:"request_id,omitempty"`
+	Cached                bool                          `json:"cached,omitempty"`
+	ConversationPersisted bool                          `json:"conversation_persisted"`
+}
+
+type agentPublicStreamEnvelope struct {
+	Type        string                   `json:"type"`
+	Delta       string                   `json:"delta,omitempty"`
+	Code        int                      `json:"code,omitempty"`
+	Message     string                   `json:"message,omitempty"`
+	FailureCode string                   `json:"failure_code,omitempty"`
+	Retryable   bool                     `json:"retryable,omitempty"`
+	Data        *agentPublicChatResponse `json:"data,omitempty"`
+}
+
+type agentFeedbackRequest struct {
+	Helpful   *bool  `json:"helpful"`
+	Note      string `json:"note,omitempty"`
+	RequestID string `json:"request_id"`
 }
 
 type agentCreateConversationRequest struct {
@@ -345,6 +381,308 @@ func (h *AgentHandler) Chat(c *gin.Context) {
 		outcome.setConversationPersisted(true)
 	}
 	Success(c, result)
+}
+
+func (h *AgentHandler) ChatStream(c *gin.Context) {
+	outcome := newAgentChatAuditOutcome(c)
+	requestContext := c.Request.Context()
+	defer func() {
+		outcome.finishedAt = time.Now()
+		if outcome.httpStatus == nil {
+			status := c.Writer.Status()
+			outcome.httpStatus = &status
+		}
+		h.recordAgentChatAudit(requestContext, outcome)
+	}()
+
+	if h == nil || h.client == nil || h.conversations == nil {
+		outcome.fail(agentaudit.RunStatusUnavailable, "main", "configuration", "agent_stream_not_configured", false)
+		Error(c, http.StatusServiceUnavailable, 503, "agent streaming is not configured")
+		return
+	}
+	streamer, streamAvailable := h.client.(agentStreamingChatClient)
+	if !streamAvailable {
+		outcome.fail(agentaudit.RunStatusUnavailable, "main", "configuration", "agent_stream_not_configured", false)
+		Error(c, http.StatusServiceUnavailable, 503, "agent streaming is not configured")
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+	var req agentChatRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		outcome.fail(agentaudit.RunStatusRejected, "main", "validation", "invalid_request_body", false)
+		BadRequest(c, "invalid request body")
+		return
+	}
+	req.Message = strings.TrimSpace(req.Message)
+	if req.Message == "" || utf8.RuneCountInString(req.Message) > 4000 {
+		outcome.fail(agentaudit.RunStatusRejected, "main", "validation", "invalid_message", false)
+		BadRequest(c, "message is required and must be at most 4000 characters")
+		return
+	}
+	sessionID, err := normalizeAgentSessionID(req.SessionID)
+	if err != nil {
+		outcome.fail(agentaudit.RunStatusRejected, "main", "validation", "invalid_session", false)
+		BadRequest(c, "session_id is invalid")
+		return
+	}
+	hadClientTurnID := strings.TrimSpace(req.ClientTurnID) != ""
+	if req.Regenerate && !hadClientTurnID {
+		outcome.fail(agentaudit.RunStatusRejected, "main", "validation", "missing_client_turn_id", false)
+		BadRequest(c, "client_turn_id is required for regeneration")
+		return
+	}
+	if req.ClientTurnID == "" {
+		req.ClientTurnID, err = newAgentIdentifier()
+	} else if !validAgentIdentifier(req.ClientTurnID) {
+		err = errors.New("invalid client turn id")
+	}
+	if err == nil {
+		if req.GenerationID == "" {
+			req.GenerationID, err = newAgentIdentifier()
+		} else if !validAgentIdentifier(req.GenerationID) {
+			err = errors.New("invalid generation id")
+		}
+	}
+	if err != nil {
+		outcome.fail(agentaudit.RunStatusRejected, "main", "validation", "invalid_turn_identifier", false)
+		BadRequest(c, "client_turn_id and generation_id must be lowercase hexadecimal identifiers")
+		return
+	}
+
+	userID := GetUserID(c)
+	outcome.setSessionID(sessionID)
+	unlock := h.lockConversation(userID, sessionID)
+	defer unlock()
+	conversationRecord, err := h.conversations.GetOrCreate(c.Request.Context(), userID, sessionID, truncateAgentText(req.Message, 80))
+	if err != nil {
+		writeAgentConversationFailure(c, outcome, err, "conversation_initialize", "failed to initialize agent conversation")
+		return
+	}
+	outcome.setConversationID(conversationRecord.ID)
+	conversationContext, err := h.conversations.LoadContext(c.Request.Context(), userID, sessionID, 20)
+	if err != nil {
+		writeAgentConversationFailure(c, outcome, err, "conversation_load", "failed to load agent conversation")
+		return
+	}
+
+	existingTurn, findErr := h.conversations.FindTurn(c.Request.Context(), userID, sessionID, req.ClientTurnID)
+	if findErr != nil && !errors.Is(findErr, shared.ErrNotFound) {
+		writeAgentConversationFailure(c, outcome, findErr, "turn_lookup", "failed to load agent turn")
+		return
+	}
+	if existingTurn != nil {
+		if existingTurn.UserMessage.Content != req.Message {
+			outcome.fail(agentaudit.RunStatusRejected, "main", "idempotency", "client_turn_conflict", false)
+			Conflict(c, "client_turn_id is already bound to different content")
+			return
+		}
+		if existingTurn.AssistantMessage.GenerationID == req.GenerationID {
+			outcome.succeed(nil)
+			outcome.setConversationPersisted(true)
+			status := http.StatusOK
+			outcome.httpStatus = &status
+			writer := newAgentStreamWriter(c)
+			result := publicAgentResponseFromTurn(existingTurn, true)
+			_ = writer(agentPublicStreamEnvelope{Type: "done", Data: &result})
+			return
+		}
+		if !req.Regenerate {
+			outcome.fail(agentaudit.RunStatusRejected, "main", "idempotency", "generation_conflict", false)
+			Conflict(c, "client_turn_id already has a completed generation")
+			return
+		}
+	} else if req.Regenerate {
+		outcome.fail(agentaudit.RunStatusRejected, "main", "idempotency", "regeneration_turn_not_found", false)
+		NotFound(c, "the response to regenerate was not found")
+		return
+	}
+
+	contextMessages := conversationContext.Messages
+	if req.Regenerate {
+		filtered := make([]conversationapp.MessageDTO, 0, len(contextMessages))
+		for _, message := range contextMessages {
+			if message.ClientTurnID != req.ClientTurnID {
+				filtered = append(filtered, message)
+			}
+		}
+		contextMessages = filtered
+	}
+	boundedMessages := boundConversationHistory(contextMessages, 24000)
+	history := make([]agentclient.HistoryMessage, 0, len(boundedMessages))
+	for _, message := range boundedMessages {
+		if message.Role == "user" || message.Role == "assistant" {
+			history = append(history, agentclient.HistoryMessage{Role: message.Role, Content: message.Content})
+		}
+	}
+	searchQuery := contextualKnowledgeQuery(req.Message, contextMessages)
+	knowledgeContext := make([]agentclient.KnowledgeSource, 0)
+	if h.retrieval != nil && shouldPrefetchKnowledge(req.Message) {
+		knowledgeContext = h.prefetchKnowledge(c.Request.Context(), searchQuery)
+	}
+	previousSources := make([]agentclient.KnowledgeSource, 0)
+	if isContextualFollowUp(req.Message) && conversationContext.Conversation.LastSourcesJSON != "" {
+		if err := json.Unmarshal([]byte(conversationContext.Conversation.LastSourcesJSON), &previousSources); err != nil {
+			previousSources = nil
+		}
+	}
+
+	writeEvent := newAgentStreamWriter(c)
+	result, err := streamer.ChatStream(c.Request.Context(), agentclient.ChatRequest{
+		Message: req.Message, SessionID: sessionID, UserID: userID, Role: GetRole(c),
+		HistoryProvided: true, History: history, RollingSummary: conversationContext.Conversation.RollingSummary,
+		KnowledgeContext: knowledgeContext, PreviousSources: previousSources,
+	}, c.GetHeader("Authorization"), GetRequestID(c), func(delta agentclient.ChatStreamDelta) error {
+		if err := c.Request.Context().Err(); err != nil {
+			return err
+		}
+		return writeEvent(agentPublicStreamEnvelope{Type: "delta", Delta: delta.Delta})
+	})
+	if err != nil {
+		outcome.applyAgentClientFailure(err)
+		status, message, failureCode, retryable := publicAgentStreamFailure(outcome)
+		outcome.httpStatus = &status
+		if c.Request.Context().Err() == nil {
+			_ = writeEvent(agentPublicStreamEnvelope{Type: "error", Code: status, Message: message, FailureCode: failureCode, Retryable: retryable})
+		}
+		return
+	}
+	outcome.succeed(result.Audit)
+	if err := c.Request.Context().Err(); err != nil {
+		outcome.fail(agentaudit.RunStatusCanceled, "transport", "canceled", string(agentclient.FailureCodeRequestCanceled), false)
+		status := clientClosedRequestStatus
+		outcome.httpStatus = &status
+		return
+	}
+
+	result.SessionID = sessionID
+	sourcesJSON, marshalErr := json.Marshal(result.Sources)
+	if marshalErr != nil {
+		sourcesJSON = []byte("[]")
+	}
+	rollingSummary, changed := compactEvictedHistory(conversationContext.Conversation.RollingSummary, contextMessages)
+	record := conversationapp.RecordTurnRequest{
+		UserContent: req.Message, AssistantContent: result.Answer, CitationsJSON: string(sourcesJSON),
+		LastSourcesJSON: agentStringPointer(string(sourcesJSON)), ClientTurnID: req.ClientTurnID,
+		GenerationID: req.GenerationID, RequestID: GetRequestID(c), Regenerate: req.Regenerate,
+	}
+	if changed {
+		record.RollingSummary = agentStringPointer(rollingSummary)
+	}
+	// Streaming persistence remains attached to the browser request: a disconnect
+	// between the final model chunk and the commit must not leave a hidden turn
+	// that the browser believes was stopped.
+	persistCtx, cancelPersist := context.WithTimeout(c.Request.Context(), 3*time.Second)
+	turn, persistErr := h.conversations.CommitTurn(persistCtx, userID, sessionID, record)
+	cancelPersist()
+	if err := c.Request.Context().Err(); err != nil {
+		outcome.fail(agentaudit.RunStatusCanceled, "transport", "canceled", string(agentclient.FailureCodeRequestCanceled), false)
+		outcome.setConversationPersisted(false)
+		status := clientClosedRequestStatus
+		outcome.httpStatus = &status
+		return
+	}
+	publicResult := agentPublicChatResponse{
+		Answer: result.Answer, SessionID: sessionID, Sources: result.Sources,
+		ClientTurnID: req.ClientTurnID, GenerationID: req.GenerationID, RequestID: GetRequestID(c),
+	}
+	if persistErr != nil {
+		outcome.setConversationPersisted(false)
+		log.Printf("agent conversation persistence failed for user %d: %v", userID, persistErr)
+	} else {
+		outcome.setConversationPersisted(true)
+		publicResult = publicAgentResponseFromTurn(turn, false)
+	}
+	status := http.StatusOK
+	outcome.httpStatus = &status
+	_ = writeEvent(agentPublicStreamEnvelope{Type: "done", Data: &publicResult})
+}
+
+func (h *AgentHandler) SaveResponseFeedback(c *gin.Context) {
+	if h == nil || h.conversations == nil {
+		Error(c, http.StatusServiceUnavailable, 503, "agent service is not configured")
+		return
+	}
+	messageID, err := strconv.ParseInt(strings.TrimSpace(c.Param("message_id")), 10, 64)
+	if err != nil || messageID <= 0 {
+		BadRequest(c, "message_id is invalid")
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16<<10)
+	var req agentFeedbackRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Helpful == nil {
+		BadRequest(c, "helpful and request_id are required")
+		return
+	}
+	err = h.conversations.SaveResponseFeedback(c.Request.Context(), GetUserID(c), conversationapp.ResponseFeedbackRequest{
+		MessageID: messageID, RequestID: strings.TrimSpace(req.RequestID), Helpful: *req.Helpful, Note: req.Note,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, shared.ErrValidation):
+			BadRequest(c, "feedback is invalid")
+		case errors.Is(err, shared.ErrNotFound):
+			NotFound(c, "assistant response or matching audit was not found")
+		default:
+			InternalError(c, "failed to save response feedback")
+		}
+		return
+	}
+	Success(c, nil)
+}
+
+func newAgentStreamWriter(c *gin.Context) func(agentPublicStreamEnvelope) error {
+	c.Header("Content-Type", "application/x-ndjson")
+	c.Header("Cache-Control", "no-cache, no-store")
+	c.Header("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
+	encoder := json.NewEncoder(c.Writer)
+	return func(event agentPublicStreamEnvelope) error {
+		if err := encoder.Encode(event); err != nil {
+			return err
+		}
+		c.Writer.Flush()
+		return nil
+	}
+}
+
+func publicAgentResponseFromTurn(turn *conversationapp.TurnDTO, cached bool) agentPublicChatResponse {
+	result := agentPublicChatResponse{Cached: cached, ConversationPersisted: true}
+	if turn == nil {
+		return result
+	}
+	result.Answer = turn.AssistantMessage.Content
+	result.SessionID = turn.Conversation.SessionID
+	result.UserMessageID = turn.UserMessage.ID
+	result.MessageID = turn.AssistantMessage.ID
+	result.ClientTurnID = turn.AssistantMessage.ClientTurnID
+	result.GenerationID = turn.AssistantMessage.GenerationID
+	result.RequestID = turn.AssistantMessage.RequestID
+	_ = json.Unmarshal([]byte(turn.AssistantMessage.CitationsJSON), &result.Sources)
+	return result
+}
+
+func publicAgentStreamFailure(outcome *agentChatAuditOutcome) (int, string, string, bool) {
+	status := http.StatusBadGateway
+	message := "智能助手生成失败，请稍后重试"
+	switch outcome.status {
+	case agentaudit.RunStatusRejected:
+		status, message = http.StatusBadRequest, "智能助手拒绝了当前请求"
+	case agentaudit.RunStatusBusy, agentaudit.RunStatusUnavailable:
+		status, message = http.StatusServiceUnavailable, "智能助手暂时不可用，请稍后重试"
+	case agentaudit.RunStatusTimeout:
+		status, message = http.StatusGatewayTimeout, "智能助手响应超时，请稍后重试"
+	case agentaudit.RunStatusCanceled:
+		status, message = clientClosedRequestStatus, "生成已停止"
+	}
+	failureCode := "agent_stream_failed"
+	retryable := false
+	if outcome.failure != nil {
+		failureCode = outcome.failure.Code
+		if outcome.failure.Retryable != nil {
+			retryable = *outcome.failure.Retryable
+		}
+	}
+	return status, message, failureCode, retryable
 }
 
 func newAgentChatAuditOutcome(c *gin.Context) *agentChatAuditOutcome {
@@ -714,6 +1052,26 @@ func normalizeAgentSessionID(value string) (string, error) {
 		return "", errors.New("session id contains unsupported characters")
 	}
 	return value, nil
+}
+
+func newAgentIdentifier() (string, error) {
+	var data [16]byte
+	if _, err := rand.Read(data[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(data[:]), nil
+}
+
+func validAgentIdentifier(value string) bool {
+	if len(value) != conversation.IdentifierLength {
+		return false
+	}
+	for _, char := range value {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *AgentHandler) lockConversation(userID int64, sessionID string) func() {

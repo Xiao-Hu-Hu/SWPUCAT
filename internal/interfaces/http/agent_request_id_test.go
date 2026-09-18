@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -155,8 +156,10 @@ func (c *publicAgentClient) Chat(_ context.Context, _ agentclient.ChatRequest, _
 
 type publicAgentConversationRepo struct {
 	conversation.Repository
-	item   *conversation.Conversation
-	nextID int64
+	item     *conversation.Conversation
+	messages []*conversation.Message
+	nextID   int64
+	feedback *conversation.ResponseFeedback
 }
 
 func (r *publicAgentConversationRepo) Create(_ context.Context, item *conversation.Conversation) error {
@@ -185,16 +188,90 @@ func (r *publicAgentConversationRepo) ListRecentMessages(_ context.Context, user
 	if r.item == nil || r.item.UserID != userID || r.item.SessionID != sessionID {
 		return nil, shared.ErrNotFound
 	}
-	return []*conversation.Message{}, nil
+	result := make([]*conversation.Message, 0, len(r.messages))
+	for _, message := range r.messages {
+		copy := *message
+		result = append(result, &copy)
+	}
+	return result, nil
 }
 
-func (r *publicAgentConversationRepo) RecordTurn(_ context.Context, userID int64, sessionID, title string, titleCustomized bool, _, _ *conversation.Message, summary, sources string, activeAt time.Time) error {
+func (r *publicAgentConversationRepo) RecordTurn(_ context.Context, userID int64, sessionID, title string, titleCustomized bool, userMessage, assistantMessage *conversation.Message, summary, sources string, activeAt time.Time) error {
 	if r.item == nil || r.item.UserID != userID || r.item.SessionID != sessionID {
 		return shared.ErrNotFound
+	}
+	for _, message := range []*conversation.Message{userMessage, assistantMessage} {
+		message.ID = r.nextID
+		r.nextID++
+		copy := *message
+		r.messages = append(r.messages, &copy)
 	}
 	r.item.Title = title
 	r.item.TitleCustomized = titleCustomized
 	return r.item.UpdateContext(summary, sources, activeAt)
+}
+
+func (r *publicAgentConversationRepo) FindTurnByClientID(_ context.Context, userID int64, sessionID, clientTurnID string) (*conversation.Message, *conversation.Message, error) {
+	if r.item == nil || r.item.UserID != userID || r.item.SessionID != sessionID {
+		return nil, nil, shared.ErrNotFound
+	}
+	var userMessage, assistantMessage *conversation.Message
+	for _, message := range r.messages {
+		if message.ClientTurnID != clientTurnID {
+			continue
+		}
+		copy := *message
+		if message.Role == conversation.RoleUser {
+			userMessage = &copy
+		} else if message.Role == conversation.RoleAssistant {
+			assistantMessage = &copy
+		}
+	}
+	if userMessage == nil {
+		return nil, nil, conversation.ErrTurnNotFound
+	}
+	return userMessage, assistantMessage, nil
+}
+
+func (r *publicAgentConversationRepo) CommitTurn(ctx context.Context, userID int64, sessionID, title string, titleCustomized bool, userMessage, assistantMessage *conversation.Message, summary, sources string, activeAt time.Time, regenerate bool) error {
+	storedUser, storedAssistant, err := r.FindTurnByClientID(ctx, userID, sessionID, userMessage.ClientTurnID)
+	if err == nil {
+		if storedUser.Content != userMessage.Content {
+			return conversation.ErrTurnConflict
+		}
+		if storedAssistant != nil && storedAssistant.GenerationID == assistantMessage.GenerationID {
+			*userMessage, *assistantMessage = *storedUser, *storedAssistant
+			return nil
+		}
+		if storedAssistant != nil && !regenerate {
+			return conversation.ErrTurnConflict
+		}
+		for index, message := range r.messages {
+			if message.Role == conversation.RoleAssistant && message.ClientTurnID == userMessage.ClientTurnID {
+				assistantMessage.ID = message.ID
+				copy := *assistantMessage
+				r.messages[index] = &copy
+				*userMessage = *storedUser
+				r.feedback = nil
+				return r.item.UpdateContext(summary, sources, activeAt)
+			}
+		}
+	}
+	if err != nil && !errors.Is(err, conversation.ErrTurnNotFound) {
+		return err
+	}
+	return r.RecordTurn(ctx, userID, sessionID, title, titleCustomized, userMessage, assistantMessage, summary, sources, activeAt)
+}
+
+func (r *publicAgentConversationRepo) SaveResponseFeedback(_ context.Context, feedback *conversation.ResponseFeedback) error {
+	for _, message := range r.messages {
+		if message.ID == feedback.MessageID && message.Role == conversation.RoleAssistant && message.RequestID == feedback.RequestID {
+			copy := *feedback
+			r.feedback = &copy
+			return nil
+		}
+	}
+	return conversation.ErrInvalidFeedback
 }
 
 func publicAgentRouter(client agentChatClient) *gin.Engine {

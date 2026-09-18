@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"runtime/debug"
 	"strings"
@@ -62,6 +63,12 @@ type ChatResponse struct {
 	Sources   []business.KnowledgeSource `json:"sources,omitempty"`
 	Telemetry telemetry.Snapshot         `json:"-"`
 }
+
+type ChatStreamEvent struct {
+	Delta string `json:"delta"`
+}
+
+type ChatStreamEmitter func(ChatStreamEvent) error
 
 // Engine owns the Eino ChatModelAgent and the short-lived session history.
 // Business data stays behind the HTTP client and Eino tools so the Agent
@@ -139,6 +146,17 @@ func NewEngine(ctx context.Context, cfg config.AgentConfig) (*Engine, error) {
 func (e *Engine) Enabled() bool { return e.enabled }
 
 func (e *Engine) Chat(ctx context.Context, req ChatRequest) (response ChatResponse, err error) {
+	return e.executeChat(ctx, req, nil)
+}
+
+func (e *Engine) ChatStream(ctx context.Context, req ChatRequest, emit ChatStreamEmitter) (response ChatResponse, err error) {
+	if emit == nil {
+		return ChatResponse{}, ErrExecution
+	}
+	return e.executeChat(ctx, req, emit)
+}
+
+func (e *Engine) executeChat(ctx context.Context, req ChatRequest, emit ChatStreamEmitter) (response ChatResponse, err error) {
 	collector := telemetry.NewCollector()
 	ctx = telemetry.WithCollector(ctx, collector)
 	defer func() {
@@ -261,7 +279,7 @@ func (e *Engine) Chat(ctx context.Context, req ChatRequest) (response ChatRespon
 		if event.Output == nil || event.Output.MessageOutput == nil || event.Output.MessageOutput.Role != schema.Assistant {
 			continue
 		}
-		msg, err := event.Output.MessageOutput.GetMessage()
+		msg, err := consumeAgentMessage(event.Output.MessageOutput, emit)
 		if err != nil {
 			return ChatResponse{}, fmt.Errorf("read agent response: %w", err)
 		}
@@ -276,6 +294,48 @@ func (e *Engine) Chat(ctx context.Context, req ChatRequest) (response ChatRespon
 		e.sessions.append(storeKey, schema.UserMessage(message), schema.AssistantMessage(answer, nil))
 	}
 	return ChatResponse{Answer: answer, SessionID: sessionID, Sources: citedKnowledgeSources(answer, sourceCollector.List())}, nil
+}
+
+func consumeAgentMessage(output *adk.MessageVariant, emit ChatStreamEmitter) (*schema.Message, error) {
+	if output == nil {
+		return nil, nil
+	}
+	if !output.IsStreaming || output.MessageStream == nil {
+		if output.Message != nil && output.Role == schema.Assistant && output.Message.Content != "" && emit != nil {
+			if err := emit(ChatStreamEvent{Delta: output.Message.Content}); err != nil {
+				return nil, err
+			}
+		}
+		return output.Message, nil
+	}
+	defer output.MessageStream.Close()
+	chunks := make([]*schema.Message, 0, 16)
+	for {
+		chunk, err := output.MessageStream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if chunk == nil {
+			continue
+		}
+		chunks = append(chunks, chunk)
+		if output.Role == schema.Assistant && chunk.Content != "" && emit != nil {
+			if err := emit(ChatStreamEvent{Delta: chunk.Content}); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if len(chunks) == 0 {
+		return nil, nil
+	}
+	message, err := schema.ConcatMessages(chunks)
+	if err != nil {
+		return nil, err
+	}
+	return message, nil
 }
 
 func (e *Engine) acquireWorker(ctx context.Context) (func(), error) {

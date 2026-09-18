@@ -33,6 +33,7 @@ func main() {
 	handler := agenthttp.NewHandler(engine, cfg.Agent.InternalSecret)
 	router.GET("/healthz", handler.Health)
 	router.POST("/v1/chat", handler.Chat)
+	router.POST("/v1/chat/stream", handler.ChatStream)
 
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Agent.Port),

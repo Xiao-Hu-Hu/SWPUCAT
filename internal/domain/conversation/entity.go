@@ -16,12 +16,17 @@ const (
 	MaxSummaryRunes   = 32000
 	MaxMessageRunes   = 120000
 	MaxToolNameRunes  = 128
+	IdentifierLength  = 32
+	MaxFeedbackRunes  = 500
 )
 
 var (
 	ErrInvalidConversation = errors.New("invalid conversation")
 	ErrInvalidMessage      = errors.New("invalid conversation message")
 	ErrDeletedConversation = errors.New("conversation was permanently deleted")
+	ErrTurnNotFound        = errors.New("conversation turn was not found")
+	ErrTurnConflict        = errors.New("conversation turn conflicts with an existing request")
+	ErrInvalidFeedback     = errors.New("invalid conversation feedback")
 )
 
 type MessageRole string
@@ -67,7 +72,21 @@ type Message struct {
 	ToolResult     string
 	CitationsJSON  string
 	TokenCount     int
+	ClientTurnID   string
+	GenerationID   string
+	RequestID      string
 	CreatedAt      time.Time
+}
+
+type ResponseFeedback struct {
+	ID        int64
+	UserID    int64
+	MessageID int64
+	RequestID string
+	Helpful   bool
+	Note      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 func New(userID int64, sessionID, title string) (*Conversation, error) {

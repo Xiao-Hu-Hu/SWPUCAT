@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"time"
 
 	"SWPUCAT/internal/domain/conversation"
@@ -288,6 +289,204 @@ func (r *ConversationRepo) RecordTurn(ctx context.Context, userID int64, session
 	})
 }
 
+func (r *ConversationRepo) FindTurnByClientID(ctx context.Context, userID int64, sessionID, clientTurnID string) (*conversation.Message, *conversation.Message, error) {
+	if r == nil || r.db == nil || userID <= 0 || strings.TrimSpace(sessionID) == "" || strings.TrimSpace(clientTurnID) == "" {
+		return nil, nil, conversation.ErrInvalidMessage
+	}
+	var models []database.AgentMessageModel
+	err := r.db.WithContext(ctx).
+		Table((database.AgentMessageModel{}).TableName()).
+		Select("agent_messages.*").
+		Joins("JOIN agent_conversations ON agent_conversations.id = agent_messages.conversation_id").
+		Where("agent_conversations.user_id = ? AND agent_conversations.session_id = ? AND agent_messages.client_turn_id = ?", userID, sessionID, clientTurnID).
+		Where("agent_messages.role IN ?", []string{string(conversation.RoleUser), string(conversation.RoleAssistant)}).
+		Order("agent_messages.id ASC").
+		Find(&models).Error
+	if err != nil {
+		return nil, nil, err
+	}
+	var userMessage, assistantMessage *conversation.Message
+	for index := range models {
+		message := toDomainMessage(&models[index])
+		switch message.Role {
+		case conversation.RoleUser:
+			userMessage = message
+		case conversation.RoleAssistant:
+			assistantMessage = message
+		}
+	}
+	if userMessage == nil {
+		return nil, nil, conversation.ErrTurnNotFound
+	}
+	return userMessage, assistantMessage, nil
+}
+
+func (r *ConversationRepo) CommitTurn(ctx context.Context, userID int64, sessionID, title string, titleCustomized bool, userMessage, assistantMessage *conversation.Message, summary, lastSourcesJSON string, activeAt time.Time, regenerate bool) error {
+	if r == nil || r.db == nil || userID <= 0 || userMessage == nil || assistantMessage == nil || activeAt.IsZero() ||
+		strings.TrimSpace(userMessage.ClientTurnID) == "" || userMessage.ClientTurnID != assistantMessage.ClientTurnID ||
+		strings.TrimSpace(assistantMessage.GenerationID) == "" || strings.TrimSpace(assistantMessage.RequestID) == "" {
+		return conversation.ErrInvalidMessage
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var record database.AgentConversationModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND session_id = ?", userID, sessionID).First(&record).Error; err != nil {
+			return err
+		}
+
+		var stored []database.AgentMessageModel
+		if err := tx.Where("conversation_id = ? AND client_turn_id = ?", record.ID, userMessage.ClientTurnID).
+			Where("role IN ?", []string{string(conversation.RoleUser), string(conversation.RoleAssistant)}).
+			Order("id ASC").Find(&stored).Error; err != nil {
+			return err
+		}
+		var storedUser, storedAssistant *database.AgentMessageModel
+		for index := range stored {
+			switch stored[index].Role {
+			case string(conversation.RoleUser):
+				storedUser = &stored[index]
+			case string(conversation.RoleAssistant):
+				storedAssistant = &stored[index]
+			}
+		}
+		if storedUser != nil && storedUser.Content != userMessage.Content {
+			return conversation.ErrTurnConflict
+		}
+		if storedAssistant != nil && storedUser == nil {
+			return conversation.ErrInvalidMessage
+		}
+		if regenerate && storedUser == nil {
+			return conversation.ErrTurnNotFound
+		}
+		if storedAssistant != nil {
+			storedGenerationID := stringValue(storedAssistant.GenerationID)
+			if storedGenerationID == assistantMessage.GenerationID {
+				*userMessage = *toDomainMessage(storedUser)
+				*assistantMessage = *toDomainMessage(storedAssistant)
+				return nil
+			}
+			if !regenerate {
+				return conversation.ErrTurnConflict
+			}
+		}
+
+		if storedUser == nil {
+			if userMessage.ConversationID != record.ID {
+				return conversation.ErrInvalidMessage
+			}
+			model := agentMessageModel(userMessage)
+			if err := tx.Create(model).Error; err != nil {
+				return err
+			}
+			userMessage.ID = model.ID
+			userMessage.CreatedAt = model.CreatedAt
+		} else {
+			*userMessage = *toDomainMessage(storedUser)
+		}
+
+		if storedAssistant == nil {
+			if assistantMessage.ConversationID != record.ID {
+				return conversation.ErrInvalidMessage
+			}
+			model := agentMessageModel(assistantMessage)
+			if err := tx.Create(model).Error; err != nil {
+				return err
+			}
+			assistantMessage.ID = model.ID
+			assistantMessage.CreatedAt = model.CreatedAt
+		} else {
+			if err := tx.Where("message_id = ?", storedAssistant.ID).Delete(&database.AgentResponseFeedbackModel{}).Error; err != nil {
+				return err
+			}
+			result := tx.Model(&database.AgentMessageModel{}).Where("id = ? AND conversation_id = ? AND role = ?", storedAssistant.ID, record.ID, string(conversation.RoleAssistant)).Updates(map[string]interface{}{
+				"content":        assistantMessage.Content,
+				"tool_name":      assistantMessage.ToolName,
+				"tool_result":    assistantMessage.ToolResult,
+				"citations_json": assistantMessage.CitationsJSON,
+				"token_count":    assistantMessage.TokenCount,
+				"generation_id":  assistantMessage.GenerationID,
+				"request_id":     assistantMessage.RequestID,
+				"created_at":     assistantMessage.CreatedAt,
+			})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return conversation.ErrTurnNotFound
+			}
+			assistantMessage.ID = storedAssistant.ID
+		}
+
+		result := tx.Model(&database.AgentConversationModel{}).Where("id = ? AND user_id = ?", record.ID, userID).Updates(map[string]interface{}{
+			"title": title, "title_customized": titleCustomized, "rolling_summary": summary,
+			"last_sources_json": lastSourcesJSON, "last_active_at": activeAt, "updated_at": activeAt,
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
+}
+
+func (r *ConversationRepo) SaveResponseFeedback(ctx context.Context, feedback *conversation.ResponseFeedback) error {
+	if r == nil || r.db == nil || feedback == nil || feedback.UserID <= 0 || feedback.MessageID <= 0 ||
+		strings.TrimSpace(feedback.RequestID) == "" || feedback.CreatedAt.IsZero() || feedback.UpdatedAt.IsZero() {
+		return conversation.ErrInvalidFeedback
+	}
+	result := r.db.WithContext(ctx).Exec(`
+		INSERT INTO agent_response_feedback (user_id, message_id, request_id, helpful, note, created_at, updated_at)
+		SELECT ?, messages.id, ?, ?, ?, ?, ?
+		FROM agent_messages AS messages
+		JOIN agent_conversations AS conversations ON conversations.id = messages.conversation_id
+		JOIN agent_runs AS runs ON runs.request_id = ?
+			AND runs.user_id = conversations.user_id
+			AND runs.conversation_id = conversations.id
+		WHERE conversations.user_id = ?
+			AND messages.id = ?
+			AND messages.role = 'assistant'
+			AND messages.request_id = ?
+		ON CONFLICT (user_id, message_id) DO UPDATE SET
+			request_id = EXCLUDED.request_id,
+			helpful = EXCLUDED.helpful,
+			note = EXCLUDED.note,
+			updated_at = EXCLUDED.updated_at`,
+		feedback.UserID, feedback.RequestID, feedback.Helpful, feedback.Note, feedback.CreatedAt, feedback.UpdatedAt,
+		feedback.RequestID, feedback.UserID, feedback.MessageID, feedback.RequestID)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return conversation.ErrInvalidFeedback
+	}
+	return nil
+}
+
+func agentMessageModel(message *conversation.Message) *database.AgentMessageModel {
+	return &database.AgentMessageModel{
+		ConversationID: message.ConversationID, Role: string(message.Role), Content: message.Content,
+		ToolName: message.ToolName, ToolResult: message.ToolResult, CitationsJSON: message.CitationsJSON,
+		TokenCount: message.TokenCount, ClientTurnID: stringPointer(message.ClientTurnID),
+		GenerationID: stringPointer(message.GenerationID), RequestID: stringPointer(message.RequestID), CreatedAt: message.CreatedAt,
+	}
+}
+
+func stringPointer(value string) *string {
+	if value == "" {
+		return nil
+	}
+	copy := value
+	return &copy
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
 func toDomainConversation(model *database.AgentConversationModel) *conversation.Conversation {
 	return &conversation.Conversation{
 		ID:              model.ID,
@@ -313,9 +512,13 @@ func toDomainMessage(model *database.AgentMessageModel) *conversation.Message {
 		ToolResult:     model.ToolResult,
 		CitationsJSON:  model.CitationsJSON,
 		TokenCount:     model.TokenCount,
+		ClientTurnID:   stringValue(model.ClientTurnID),
+		GenerationID:   stringValue(model.GenerationID),
+		RequestID:      stringValue(model.RequestID),
 		CreatedAt:      model.CreatedAt,
 	}
 }
 
 var _ conversation.Repository = (*ConversationRepo)(nil)
 var _ conversation.LifecycleRepository = (*ConversationRepo)(nil)
+var _ conversation.TurnRepository = (*ConversationRepo)(nil)

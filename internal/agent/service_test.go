@@ -81,6 +81,29 @@ func TestAcquireWorkerHonorsCallerCancellation(t *testing.T) {
 	}
 }
 
+func TestConsumeAgentMessageEmitsChunksBeforeConcatenation(t *testing.T) {
+	stream := schema.StreamReaderFromArray([]*schema.Message{
+		schema.AssistantMessage("第一段", nil),
+		schema.AssistantMessage("第二段", nil),
+	})
+	var deltas []string
+	message, err := consumeAgentMessage(&adk.MessageVariant{
+		IsStreaming: true, MessageStream: stream, Role: schema.Assistant,
+	}, func(event ChatStreamEvent) error {
+		deltas = append(deltas, event.Delta)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message == nil || message.Content != "第一段第二段" {
+		t.Fatalf("concatenated message = %#v", message)
+	}
+	if len(deltas) != 2 || deltas[0] != "第一段" || deltas[1] != "第二段" {
+		t.Fatalf("stream deltas = %#v", deltas)
+	}
+}
+
 func TestChatResponseDoesNotSerializeTelemetry(t *testing.T) {
 	engine, err := NewEngine(context.Background(), config.AgentConfig{
 		Enabled:           false,

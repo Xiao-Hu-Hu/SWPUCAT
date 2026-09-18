@@ -514,3 +514,85 @@ func TestChatRejectsOversizedResponseWithoutTrustingPartialAudit(t *testing.T) {
 		t.Fatalf("oversized response metadata = %+v", httpErr)
 	}
 }
+
+func TestChatStreamForwardsDeltasBeforeTerminalResult(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/stream" || r.Header.Get("Accept") != "application/x-ndjson" {
+			t.Fatalf("unexpected stream request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("test response does not support flushing")
+		}
+		_, _ = fmt.Fprintln(w, `{"type":"delta","delta":"第一段"}`)
+		flusher.Flush()
+		_, _ = fmt.Fprintln(w, `{"type":"delta","delta":"第二段"}`)
+		flusher.Flush()
+		_, _ = fmt.Fprintln(w, `{"type":"done","data":{"answer":"第一段第二段","session_id":"session-1"},"audit":{"request_id":"`+testRequestID+`"}}`)
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var deltas []string
+	result, err := client.ChatStream(context.Background(), ChatRequest{Message: "hello"}, "", testRequestID, func(delta ChatStreamDelta) error {
+		deltas = append(deltas, delta.Delta)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(deltas, "") != "第一段第二段" || result.Answer != "第一段第二段" || result.SessionID != "session-1" {
+		t.Fatalf("stream result = deltas %#v result %+v", deltas, result)
+	}
+	if result.Audit == nil || result.Audit.RequestID != testRequestID {
+		t.Fatalf("stream audit = %#v", result.Audit)
+	}
+}
+
+func TestChatStreamCallbackCancellationRemainsDetectable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = fmt.Fprintln(w, `{"type":"delta","delta":"partial"}`)
+		_, _ = fmt.Fprintln(w, `{"type":"done","data":{"answer":"partial","session_id":"session-1"}}`)
+	}))
+	defer server.Close()
+	client, _ := NewClient(server.URL, "", time.Second)
+	_, err := client.ChatStream(context.Background(), ChatRequest{Message: "hello"}, "", testRequestID, func(ChatStreamDelta) error {
+		return context.Canceled
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("callback cancellation was lost: %T %v", err, err)
+	}
+	var clientErr *ClientError
+	if !errors.As(err, &clientErr) || clientErr.Kind != KindCanceled || clientErr.FailureCode != FailureCodeRequestCanceled {
+		t.Fatalf("callback cancellation classification = %#v", clientErr)
+	}
+}
+
+func TestChatStreamRejectsPrematureEndAndMismatchedAudit(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "premature end", body: `{"type":"delta","delta":"partial"}` + "\n"},
+		{name: "mismatched audit", body: `{"type":"done","data":{"answer":"ok","session_id":"s1"},"audit":{"request_id":"ffffffffffffffffffffffffffffffff"}}` + "\n"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/x-ndjson")
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer server.Close()
+			client, _ := NewClient(server.URL, "", time.Second)
+			_, err := client.ChatStream(context.Background(), ChatRequest{Message: "hello"}, "", testRequestID, func(ChatStreamDelta) error { return nil })
+			var clientErr *ClientError
+			if !errors.As(err, &clientErr) || clientErr.Kind != KindProtocol || clientErr.FailureCode != FailureCodeProtocol {
+				t.Fatalf("stream protocol error = %T %#v", err, err)
+			}
+		})
+	}
+}

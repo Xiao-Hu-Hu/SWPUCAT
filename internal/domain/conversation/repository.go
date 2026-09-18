@@ -27,3 +27,12 @@ type LifecycleRepository interface {
 	CountExpired(ctx context.Context, before time.Time) (int64, error)
 	DeleteExpired(ctx context.Context, before time.Time, limit int, deletedAt time.Time) (int64, error)
 }
+
+// TurnRepository adds durable idempotency and response feedback without
+// changing the legacy Repository contract used by older integrations.
+type TurnRepository interface {
+	Repository
+	FindTurnByClientID(ctx context.Context, userID int64, sessionID, clientTurnID string) (userMessage, assistantMessage *Message, err error)
+	CommitTurn(ctx context.Context, userID int64, sessionID, title string, titleCustomized bool, userMessage, assistantMessage *Message, summary, lastSourcesJSON string, activeAt time.Time, regenerate bool) error
+	SaveResponseFeedback(ctx context.Context, feedback *ResponseFeedback) error
+}

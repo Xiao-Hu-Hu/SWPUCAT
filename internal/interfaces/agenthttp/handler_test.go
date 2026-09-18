@@ -26,6 +26,22 @@ type stubChatEngine struct {
 	requests []agent.ChatRequest
 }
 
+type stubStreamingEngine struct {
+	*stubChatEngine
+	deltas []string
+}
+
+func (e *stubStreamingEngine) ChatStream(_ context.Context, req agent.ChatRequest, emit agent.ChatStreamEmitter) (agent.ChatResponse, error) {
+	e.calls++
+	e.requests = append(e.requests, req)
+	for _, delta := range e.deltas {
+		if err := emit(agent.ChatStreamEvent{Delta: delta}); err != nil {
+			return agent.ChatResponse{}, err
+		}
+	}
+	return e.response, e.err
+}
+
 type timeoutError struct{}
 
 func (timeoutError) Error() string   { return "provider timeout with private detail" }
@@ -90,6 +106,13 @@ func chatRouter(engine chatEngine, secret string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.POST("/chat", newHandler(engine, secret).Chat)
+	return router
+}
+
+func streamRouter(engine chatEngine, secret string) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/chat/stream", newHandler(engine, secret).ChatStream)
 	return router
 }
 
@@ -177,6 +200,56 @@ func TestChatSuccessIncludesPrivateAuditOutsideData(t *testing.T) {
 		if _, ok := data[forbidden]; ok {
 			t.Fatalf("data unexpectedly contains %q: %#v", forbidden, data)
 		}
+	}
+}
+
+func TestChatStreamEmitsDeltasBeforeDone(t *testing.T) {
+	engine := &stubStreamingEngine{
+		stubChatEngine: &stubChatEngine{
+			enabled:  true,
+			response: agent.ChatResponse{Answer: "第一段第二段", SessionID: "session-1", Telemetry: testSnapshot()},
+		},
+		deltas: []string{"第一段", "第二段"},
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/chat/stream", strings.NewReader(`{"message":"查询工时"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Request-ID", testRequestID)
+	request.Header.Set("X-Agent-Internal-Secret", "secret")
+	streamRouter(engine, "secret").ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK || !strings.HasPrefix(recorder.Header().Get("Content-Type"), "application/x-ndjson") {
+		t.Fatalf("stream response = %d %q", recorder.Code, recorder.Header().Get("Content-Type"))
+	}
+	body := recorder.Body.String()
+	first := strings.Index(body, `"type":"delta","delta":"第一段"`)
+	second := strings.Index(body, `"type":"delta","delta":"第二段"`)
+	done := strings.Index(body, `"type":"done"`)
+	if first < 0 || second <= first || done <= second {
+		t.Fatalf("stream order is invalid: %s", body)
+	}
+	if !strings.Contains(body, `"request_id":"`+testRequestID+`"`) || engine.calls != 1 {
+		t.Fatalf("stream correlation/calls = body %s calls %d", body, engine.calls)
+	}
+}
+
+func TestChatStreamReturnsStableTerminalErrorEvent(t *testing.T) {
+	engine := &stubStreamingEngine{
+		stubChatEngine: &stubChatEngine{enabled: true, response: agent.ChatResponse{Telemetry: testSnapshot()}, err: agent.ErrQueueTimeout},
+		deltas:         []string{"partial"},
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/chat/stream", strings.NewReader(`{"message":"查询工时"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Request-ID", testRequestID)
+	request.Header.Set("X-Agent-Internal-Secret", "secret")
+	streamRouter(engine, "secret").ServeHTTP(recorder, request)
+	body := recorder.Body.String()
+	if recorder.Code != http.StatusOK || !strings.Contains(body, `"type":"error"`) || !strings.Contains(body, `"failure_code":"queue_timeout"`) {
+		t.Fatalf("stream error response = %d %s", recorder.Code, body)
+	}
+	if strings.Contains(body, "private") {
+		t.Fatalf("stream error leaked private detail: %s", body)
 	}
 }
 
