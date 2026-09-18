@@ -129,6 +129,8 @@ type AgentConfig struct {
 	MaxIterations            int           `mapstructure:"max_iterations"`
 	MaxToolCalls             int           `mapstructure:"max_tool_calls"`
 	WorkerConcurrency        int           `mapstructure:"worker_concurrency"`
+	QueueWaitTimeout         time.Duration `mapstructure:"queue_wait_timeout"`
+	ExecutionTimeout         time.Duration `mapstructure:"execution_timeout"`
 	CostEstimationEnabled    bool          `mapstructure:"cost_estimation_enabled"`
 	InputUSDPerMillion       float64       `mapstructure:"input_usd_per_million"`
 	CachedInputUSDPerMillion float64       `mapstructure:"cached_input_usd_per_million"`
@@ -147,6 +149,20 @@ func (a *AgentConfig) Validate() error {
 	}
 	if a.WorkerConcurrency < 1 || a.WorkerConcurrency > 16 {
 		return fmt.Errorf("agent.worker_concurrency must be between 1 and 16")
+	}
+	if a.QueueWaitTimeout < 0 {
+		return fmt.Errorf("agent.queue_wait_timeout must not be negative")
+	}
+	if a.ExecutionTimeout < 0 {
+		return fmt.Errorf("agent.execution_timeout must not be negative")
+	}
+	if a.Enabled {
+		if a.EffectiveQueueWaitTimeout() >= a.EffectiveExecutionTimeout() {
+			return fmt.Errorf("agent.queue_wait_timeout must be less than execution_timeout")
+		}
+		if a.LLMTimeout > 0 && a.EffectiveExecutionTimeout() <= a.LLMTimeout {
+			return fmt.Errorf("agent.execution_timeout must be greater than llm_timeout")
+		}
 	}
 	if a.WriteEnabled && !a.Enabled {
 		return fmt.Errorf("agent.write_enabled requires agent.enabled=true")
@@ -186,6 +202,20 @@ func (a *AgentConfig) Validate() error {
 		}
 	}
 	return nil
+}
+
+func (a AgentConfig) EffectiveQueueWaitTimeout() time.Duration {
+	if a.QueueWaitTimeout == 0 {
+		return 5 * time.Second
+	}
+	return a.QueueWaitTimeout
+}
+
+func (a AgentConfig) EffectiveExecutionTimeout() time.Duration {
+	if a.ExecutionTimeout == 0 {
+		return 180 * time.Second
+	}
+	return a.ExecutionTimeout
 }
 
 // ValidateForServer checks the values that are required by the HTTP service.
@@ -351,7 +381,9 @@ func Load() (*Config, error) {
 	viper.SetDefault("agent.llm_timeout", 60*time.Second)
 	viper.SetDefault("agent.max_iterations", 4)
 	viper.SetDefault("agent.max_tool_calls", 8)
-	viper.SetDefault("agent.worker_concurrency", 1)
+	viper.SetDefault("agent.worker_concurrency", 4)
+	viper.SetDefault("agent.queue_wait_timeout", 5*time.Second)
+	viper.SetDefault("agent.execution_timeout", 180*time.Second)
 	viper.SetDefault("agent.cost_estimation_enabled", false)
 	viper.SetDefault("agent.input_usd_per_million", 0.0)
 	viper.SetDefault("agent.cached_input_usd_per_million", 0.0)
@@ -416,6 +448,8 @@ func Load() (*Config, error) {
 	applyIntEnv("CSA_AGENT_MAX_ITERATIONS", &cfg.Agent.MaxIterations)
 	applyIntEnv("CSA_AGENT_MAX_TOOL_CALLS", &cfg.Agent.MaxToolCalls)
 	applyIntEnv("CSA_AGENT_WORKER_CONCURRENCY", &cfg.Agent.WorkerConcurrency)
+	applyDurationEnv("CSA_AGENT_QUEUE_WAIT_TIMEOUT", &cfg.Agent.QueueWaitTimeout)
+	applyDurationEnv("CSA_AGENT_EXECUTION_TIMEOUT", &cfg.Agent.ExecutionTimeout)
 	applyBoolEnv("CSA_AGENT_COST_ESTIMATION_ENABLED", &cfg.Agent.CostEstimationEnabled)
 	applyFloat64Env("CSA_AGENT_INPUT_USD_PER_MILLION", &cfg.Agent.InputUSDPerMillion)
 	applyFloat64Env("CSA_AGENT_CACHED_INPUT_USD_PER_MILLION", &cfg.Agent.CachedInputUSDPerMillion)

@@ -43,7 +43,9 @@ agent:
   llm_timeout: 60s
   max_iterations: 4
   max_tool_calls: 8
-  worker_concurrency: 1
+  worker_concurrency: 4
+  queue_wait_timeout: 5s
+  execution_timeout: 180s
   cost_estimation_enabled: false
   input_usd_per_million: 0
   cached_input_usd_per_million: 0

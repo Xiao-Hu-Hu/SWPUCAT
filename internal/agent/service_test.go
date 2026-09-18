@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"SWPUCAT/internal/agent/business"
@@ -35,6 +36,48 @@ func TestDisabledEngineDoesNotRequireLLMSecrets(t *testing.T) {
 	}
 	if response.Telemetry.StartedAt.IsZero() || response.Telemetry.FinishedAt.IsZero() || response.Telemetry.ModelCallCount != 0 || response.Telemetry.ToolCallCount != 0 {
 		t.Fatalf("disabled response telemetry = %#v", response.Telemetry)
+	}
+}
+
+func TestAcquireWorkerSupportsConfiguredConcurrencyAndQueueTimeout(t *testing.T) {
+	engine := &Engine{concurrency: make(chan struct{}, 4), queueTimeout: 20 * time.Millisecond}
+	releases := make([]func(), 0, 4)
+	for i := 0; i < 4; i++ {
+		release, err := engine.acquireWorker(context.Background())
+		if err != nil {
+			t.Fatalf("slot %d: %v", i, err)
+		}
+		releases = append(releases, release)
+	}
+	if len(engine.concurrency) != 4 {
+		t.Fatalf("occupied slots = %d, want 4", len(engine.concurrency))
+	}
+	started := time.Now()
+	if release, err := engine.acquireWorker(context.Background()); !errors.Is(err, ErrQueueTimeout) || release != nil {
+		t.Fatalf("fifth slot = release:%v error:%v", release != nil, err)
+	} else if time.Since(started) < 15*time.Millisecond {
+		t.Fatalf("queue returned too early: %s", time.Since(started))
+	}
+	for _, release := range releases {
+		release()
+		release() // Release is deliberately idempotent.
+	}
+	if len(engine.concurrency) != 0 {
+		t.Fatalf("occupied slots after release = %d", len(engine.concurrency))
+	}
+}
+
+func TestAcquireWorkerHonorsCallerCancellation(t *testing.T) {
+	engine := &Engine{concurrency: make(chan struct{}, 1), queueTimeout: time.Second}
+	release, err := engine.acquireWorker(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := engine.acquireWorker(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled acquire error = %v", err)
 	}
 }
 

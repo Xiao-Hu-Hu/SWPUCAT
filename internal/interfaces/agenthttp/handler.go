@@ -42,6 +42,7 @@ const (
 	failureInvalidSession        failureCode = "invalid_session"
 	failureInvalidHistory        failureCode = "invalid_history"
 	failureAgentBusy             failureCode = "agent_busy"
+	failureQueueTimeout          failureCode = "queue_timeout"
 	failureRequestCanceled       failureCode = "request_canceled"
 	failureExecutionTimeout      failureCode = "execution_timeout"
 	failureExecutionFailed       failureCode = "execution_failed"
@@ -100,6 +101,8 @@ func (h *Handler) Chat(c *gin.Context) {
 			writeResponse(c, http.StatusBadRequest, 400, err.Error(), failureInvalidHistory, nil, audit)
 		case errors.Is(err, agent.ErrBusy):
 			writeResponse(c, http.StatusServiceUnavailable, 503, "agent is busy; please retry shortly", failureAgentBusy, nil, audit)
+		case errors.Is(err, agent.ErrQueueTimeout):
+			writeResponse(c, http.StatusServiceUnavailable, 503, "agent queue wait timed out; please retry shortly", failureQueueTimeout, nil, audit)
 		case errors.Is(err, context.Canceled):
 			writeResponse(c, http.StatusBadGateway, 502, "agent execution failed", failureRequestCanceled, nil, audit)
 		case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr) && netErr.Timeout():

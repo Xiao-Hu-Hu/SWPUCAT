@@ -190,6 +190,7 @@ func TestChatExecutionErrorsIncludeAudit(t *testing.T) {
 		wantFailure failureCode
 	}{
 		{name: "busy", err: agent.ErrBusy, wantStatus: http.StatusServiceUnavailable, wantCode: 503, wantMessage: "agent is busy; please retry shortly", wantFailure: failureAgentBusy},
+		{name: "queue timeout", err: agent.ErrQueueTimeout, wantStatus: http.StatusServiceUnavailable, wantCode: 503, wantMessage: "agent queue wait timed out; please retry shortly", wantFailure: failureQueueTimeout},
 		{name: "disabled", err: agent.ErrDisabled, wantStatus: http.StatusServiceUnavailable, wantCode: 503, wantMessage: "agent is disabled", wantFailure: failureAgentDisabled},
 		{name: "invalid message", err: agent.ErrInvalidMessage, wantStatus: http.StatusBadRequest, wantCode: 400, wantMessage: agent.ErrInvalidMessage.Error(), wantFailure: failureInvalidMessage},
 		{name: "invalid session", err: agent.ErrInvalidSession, wantStatus: http.StatusBadRequest, wantCode: 400, wantMessage: agent.ErrInvalidSession.Error(), wantFailure: failureInvalidSession},

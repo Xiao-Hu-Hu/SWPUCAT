@@ -69,6 +69,6 @@ export const agentApi = {
     return api.post<AgentChatResponse>('/agent/chat', {
       message,
       session_id: sessionId || undefined
-    }, { timeout: 90000 })
+    }, { timeout: 195000 })
   }
 }

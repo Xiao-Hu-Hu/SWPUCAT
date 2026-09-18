@@ -31,6 +31,7 @@ var (
 	ErrInvalidSession = errors.New("session_id is invalid")
 	ErrInvalidHistory = errors.New("conversation history is invalid")
 	ErrBusy           = errors.New("agent is busy")
+	ErrQueueTimeout   = errors.New("agent queue wait timed out")
 	ErrExecution      = errors.New("agent execution failed")
 )
 
@@ -66,13 +67,15 @@ type ChatResponse struct {
 // Business data stays behind the HTTP client and Eino tools so the Agent
 // process does not access the main service's repositories directly.
 type Engine struct {
-	enabled       bool
-	runner        *adk.Runner
-	sessions      *sessionStore
-	maxIterations int
-	maxToolCalls  int
-	concurrency   chan struct{}
-	tools         *agenttools.Registry
+	enabled          bool
+	runner           *adk.Runner
+	sessions         *sessionStore
+	maxIterations    int
+	maxToolCalls     int
+	concurrency      chan struct{}
+	queueTimeout     time.Duration
+	executionTimeout time.Duration
+	tools            *agenttools.Registry
 }
 
 func NewEngine(ctx context.Context, cfg config.AgentConfig) (*Engine, error) {
@@ -80,11 +83,13 @@ func NewEngine(ctx context.Context, cfg config.AgentConfig) (*Engine, error) {
 		return nil, err
 	}
 	engine := &Engine{
-		enabled:       cfg.Enabled,
-		sessions:      newSessionStore(20),
-		maxIterations: cfg.MaxIterations,
-		maxToolCalls:  cfg.MaxToolCalls,
-		concurrency:   make(chan struct{}, cfg.WorkerConcurrency),
+		enabled:          cfg.Enabled,
+		sessions:         newSessionStore(20),
+		maxIterations:    cfg.MaxIterations,
+		maxToolCalls:     cfg.MaxToolCalls,
+		concurrency:      make(chan struct{}, cfg.WorkerConcurrency),
+		queueTimeout:     cfg.EffectiveQueueWaitTimeout(),
+		executionTimeout: cfg.EffectiveExecutionTimeout(),
 	}
 	if !cfg.Enabled {
 		return engine, nil
@@ -177,24 +182,24 @@ func (e *Engine) Chat(ctx context.Context, req ChatRequest) (response ChatRespon
 			return ChatResponse{}, err
 		}
 	}
-	ctx = business.WithRequestContext(ctx, business.RequestContext{
+	executionTimeout := e.executionTimeout
+	if executionTimeout <= 0 {
+		executionTimeout = 180 * time.Second
+	}
+	executionCtx, cancelExecution := context.WithTimeout(ctx, executionTimeout)
+	defer cancelExecution()
+	ctx = business.WithRequestContext(executionCtx, business.RequestContext{
 		Authorization: req.Authorization,
 		UserID:        req.UserID,
 		Role:          req.Role,
 		RequestID:     requestID,
 	})
 	ctx = business.WithToolCallBudget(ctx, e.maxToolCalls)
-	acquireCtx, cancelAcquire := context.WithTimeout(ctx, 2*time.Second)
-	defer cancelAcquire()
-	select {
-	case e.concurrency <- struct{}{}:
-		defer func() { <-e.concurrency }()
-	case <-acquireCtx.Done():
-		if ctx.Err() != nil {
-			return ChatResponse{}, ctx.Err()
-		}
-		return ChatResponse{}, ErrBusy
+	releaseWorker, err := e.acquireWorker(ctx)
+	if err != nil {
+		return ChatResponse{}, err
 	}
+	defer releaseWorker()
 	sourceCollector := business.NewKnowledgeSourceCollector()
 	ctx = business.WithKnowledgeSourceCollector(ctx, sourceCollector)
 	unlock := e.sessions.lock(storeKey)
@@ -271,6 +276,27 @@ func (e *Engine) Chat(ctx context.Context, req ChatRequest) (response ChatRespon
 		e.sessions.append(storeKey, schema.UserMessage(message), schema.AssistantMessage(answer, nil))
 	}
 	return ChatResponse{Answer: answer, SessionID: sessionID, Sources: citedKnowledgeSources(answer, sourceCollector.List())}, nil
+}
+
+func (e *Engine) acquireWorker(ctx context.Context) (func(), error) {
+	if e == nil || e.concurrency == nil {
+		return nil, ErrExecution
+	}
+	wait := e.queueTimeout
+	if wait <= 0 {
+		wait = 5 * time.Second
+	}
+	acquireCtx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	select {
+	case e.concurrency <- struct{}{}:
+		var once sync.Once
+		return func() { once.Do(func() { <-e.concurrency }) }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-acquireCtx.Done():
+		return nil, ErrQueueTimeout
+	}
 }
 
 func newSessionID() (string, error) {

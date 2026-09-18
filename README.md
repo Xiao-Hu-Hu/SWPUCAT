@@ -266,6 +266,9 @@ docker compose --env-file .env -f deployments/docker-compose.yml up -d --build
 | `CSA_AGENT_ENABLED` | 是否启用 Eino Agent | `false` |
 | `CSA_AGENT_WRITE_ENABLED` | 是否注册打卡和公告草稿等写工具 | `false` |
 | `CSA_AGENT_INTERNAL_SECRET` | 主站和 Agent 的内部共享密钥，启用时至少 32 位 | - |
+| `CSA_AGENT_WORKER_CONCURRENCY` | Agent 同时执行的请求数 | `4` |
+| `CSA_AGENT_QUEUE_WAIT_TIMEOUT` | 达到并发上限后的最长排队时间 | `5s` |
+| `CSA_AGENT_EXECUTION_TIMEOUT` | 单次 Agent 请求的总执行预算 | `180s` |
 | `CSA_LLM_PROVIDER` | 模型适配器，目前支持 OpenAI-compatible | `openai_compatible` |
 | `CSA_LLM_MODEL` | 服务商提供的模型 ID | - |
 | `CSA_LLM_API_KEY` | 模型 API Key，仅注入 Agent 容器 | - |

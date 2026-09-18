@@ -480,7 +480,7 @@ func (o *agentChatAuditOutcome) applyAgentClientClassification(kind agentclient.
 		agentclient.FailureCodeInvalidSession,
 		agentclient.FailureCodeInvalidHistory:
 		o.fail(agentaudit.RunStatusRejected, "agent", "validation", string(code), false)
-	case agentclient.FailureCodeAgentBusy:
+	case agentclient.FailureCodeAgentBusy, agentclient.FailureCodeQueueTimeout:
 		o.fail(agentaudit.RunStatusBusy, "agent", "capacity", string(code), true)
 	case agentclient.FailureCodeRequestCanceled:
 		o.fail(agentaudit.RunStatusCanceled, "agent", "canceled", string(code), false)

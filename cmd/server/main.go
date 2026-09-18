@@ -158,7 +158,7 @@ func main() {
 	knowledgeHandler := httpInterface.NewKnowledgeHandler(knowledgeSvc, localStorage, knowledgeIndexSvc)
 	approvalHandler := httpInterface.NewApprovalHandler(approvalSvc)
 	invitationHandler := httpInterface.NewInvitationHandler(invitationSvc)
-	agentClient, err := agentclient.NewClient(cfg.Agent.BaseURL, cfg.Agent.InternalSecret, cfg.Agent.LLMTimeout+15*time.Second)
+	agentClient, err := agentclient.NewClient(cfg.Agent.BaseURL, cfg.Agent.InternalSecret, cfg.Agent.EffectiveExecutionTimeout()+5*time.Second)
 	if err != nil {
 		log.Fatalf("Failed to initialize agent client: %v", err)
 	}

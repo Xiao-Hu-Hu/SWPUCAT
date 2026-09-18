@@ -32,6 +32,25 @@ func TestAgentConfigRejectsInvalidCostPrices(t *testing.T) {
 	}
 }
 
+func TestAgentConfigTimeoutBudgetDefaultsAndValidation(t *testing.T) {
+	base := AgentConfig{
+		Enabled: true, Port: 8090, LLMProvider: "openai_compatible", LLMModel: "chat-model",
+		LLMAPIKey: "secret", LLMBaseURL: "https://example.test/v1", LLMTimeout: time.Minute,
+		MaxIterations: 4, MaxToolCalls: 8, WorkerConcurrency: 4, InternalSecret: strings.Repeat("s", 32),
+	}
+	if base.EffectiveQueueWaitTimeout() != 5*time.Second || base.EffectiveExecutionTimeout() != 180*time.Second {
+		t.Fatalf("effective defaults = queue %s execution %s", base.EffectiveQueueWaitTimeout(), base.EffectiveExecutionTimeout())
+	}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("valid default budget rejected: %v", err)
+	}
+	base.QueueWaitTimeout = 2 * time.Minute
+	base.ExecutionTimeout = 90 * time.Second
+	if err := base.Validate(); err == nil || !strings.Contains(err.Error(), "queue_wait_timeout") {
+		t.Fatalf("inverted budget should fail, got %v", err)
+	}
+}
+
 func TestEmbeddingConfigValidate(t *testing.T) {
 	cfg := EmbeddingConfig{
 		Enabled: true, Provider: "openai_compatible", Model: "embedding-model",

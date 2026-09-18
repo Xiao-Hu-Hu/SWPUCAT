@@ -102,6 +102,7 @@ func TestChatUsesStableDownstreamFailureCodesWithoutParsingMessages(t *testing.T
 	}{
 		{name: "disabled", failureCode: FailureCodeAgentDisabled, message: "arbitrary disabled wording"},
 		{name: "busy", failureCode: FailureCodeAgentBusy, message: "arbitrary busy wording"},
+		{name: "queue timeout", failureCode: FailureCodeQueueTimeout, message: "arbitrary queue wording"},
 	}
 
 	for _, tt := range tests {

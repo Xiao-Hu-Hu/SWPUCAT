@@ -38,7 +38,7 @@ func main() {
 		Addr:         fmt.Sprintf(":%d", cfg.Agent.Port),
 		Handler:      router,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: cfg.Agent.LLMTimeout + 15*time.Second,
+		WriteTimeout: cfg.Agent.EffectiveExecutionTimeout() + 10*time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 	log.Printf("Agent service listening on %s (enabled=%t)", server.Addr, engine.Enabled())

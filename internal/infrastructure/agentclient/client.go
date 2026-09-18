@@ -128,6 +128,7 @@ const (
 	FailureCodeInvalidSession        FailureCode = "invalid_session"
 	FailureCodeInvalidHistory        FailureCode = "invalid_history"
 	FailureCodeAgentBusy             FailureCode = "agent_busy"
+	FailureCodeQueueTimeout          FailureCode = "queue_timeout"
 	FailureCodeRequestCanceled       FailureCode = "request_canceled"
 	FailureCodeExecutionTimeout      FailureCode = "execution_timeout"
 	FailureCodeExecutionFailed       FailureCode = "execution_failed"
@@ -236,7 +237,7 @@ func newDownstreamError(statusCode int, message, requestID string, audit *teleme
 
 func matchesDownstreamFailure(statusCode, envelopeCode int, code FailureCode) bool {
 	switch code {
-	case FailureCodeAgentDisabled, FailureCodeAgentBusy:
+	case FailureCodeAgentDisabled, FailureCodeAgentBusy, FailureCodeQueueTimeout:
 		return statusCode == http.StatusServiceUnavailable && envelopeCode == http.StatusServiceUnavailable
 	case FailureCodeInvalidInternalSecret:
 		return statusCode == http.StatusUnauthorized && envelopeCode == http.StatusUnauthorized
