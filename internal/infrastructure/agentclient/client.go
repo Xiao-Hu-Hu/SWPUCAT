@@ -10,7 +10,11 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"SWPUCAT/internal/agent/telemetry"
 )
+
+const maxAgentResponseBytes = 2 << 20
 
 // Client is the main server's narrow HTTP boundary to the Agent service.
 // Authentication is resolved by the main server; the client only forwards the
@@ -64,9 +68,11 @@ type HistoryMessage struct {
 }
 
 type ChatResponse struct {
-	Answer    string            `json:"answer"`
-	SessionID string            `json:"session_id"`
-	Sources   []KnowledgeSource `json:"sources,omitempty"`
+	Answer    string                  `json:"answer"`
+	SessionID string                  `json:"session_id"`
+	Sources   []KnowledgeSource       `json:"sources,omitempty"`
+	RequestID string                  `json:"-"`
+	Audit     *telemetry.AuditSummary `json:"-"`
 }
 
 type KnowledgeSource struct {
@@ -85,9 +91,10 @@ type KnowledgeSource struct {
 }
 
 type apiResponse struct {
-	Code    int             `json:"code"`
-	Message string          `json:"message"`
-	Data    json.RawMessage `json:"data"`
+	Code    int                     `json:"code"`
+	Message string                  `json:"message"`
+	Data    json.RawMessage         `json:"data"`
+	Audit   *telemetry.AuditSummary `json:"audit,omitempty"`
 }
 
 // HTTPError preserves the Agent HTTP status so the API handler can distinguish
@@ -95,6 +102,8 @@ type apiResponse struct {
 type HTTPError struct {
 	StatusCode int
 	Message    string
+	RequestID  string
+	Audit      *telemetry.AuditSummary
 }
 
 func (e *HTTPError) Error() string {
@@ -130,20 +139,28 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest, authorization, reque
 		return ChatResponse{}, fmt.Errorf("agent service request: %w", err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxAgentResponseBytes+1))
 	if err != nil {
 		return ChatResponse{}, fmt.Errorf("read agent response: %w", err)
+	}
+	if len(body) > maxAgentResponseBytes {
+		return ChatResponse{}, &HTTPError{StatusCode: http.StatusBadGateway, Message: "agent response is too large", RequestID: requestID}
 	}
 
 	var envelope apiResponse
 	if err := json.Unmarshal(body, &envelope); err != nil {
-		return ChatResponse{}, &HTTPError{StatusCode: resp.StatusCode, Message: "invalid agent response"}
+		return ChatResponse{}, &HTTPError{StatusCode: resp.StatusCode, Message: "invalid agent response", RequestID: requestID}
+	}
+	if envelope.Audit != nil && strings.TrimSpace(requestID) != "" && envelope.Audit.RequestID != requestID {
+		// Treat a correlation mismatch as an upstream protocol failure. Never
+		// attach the mismatched audit record to the trusted request.
+		return ChatResponse{}, &HTTPError{StatusCode: http.StatusBadGateway, Message: "invalid agent response", RequestID: requestID}
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return ChatResponse{}, &HTTPError{StatusCode: resp.StatusCode, Message: envelope.Message}
+		return ChatResponse{}, &HTTPError{StatusCode: resp.StatusCode, Message: envelope.Message, RequestID: requestID, Audit: envelope.Audit}
 	}
 	if envelope.Code != 0 {
-		return ChatResponse{}, &HTTPError{StatusCode: resp.StatusCode, Message: envelope.Message}
+		return ChatResponse{}, &HTTPError{StatusCode: resp.StatusCode, Message: envelope.Message, RequestID: requestID, Audit: envelope.Audit}
 	}
 	var result ChatResponse
 	if len(envelope.Data) == 0 || string(envelope.Data) == "null" {
@@ -155,5 +172,7 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest, authorization, reque
 	if strings.TrimSpace(result.Answer) == "" || strings.TrimSpace(result.SessionID) == "" {
 		return ChatResponse{}, fmt.Errorf("agent response is incomplete")
 	}
+	result.RequestID = requestID
+	result.Audit = envelope.Audit
 	return result, nil
 }

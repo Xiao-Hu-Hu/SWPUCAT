@@ -8,6 +8,7 @@ import (
 	"errors"
 	"hash/fnv"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -25,7 +26,7 @@ import (
 )
 
 type AgentHandler struct {
-	client        *agentclient.Client
+	client        agentChatClient
 	conversations *conversationapp.Service
 	retrieval     *knowledgeindex.Service
 	// Keep the synchronous prefetch path bounded on the 2-core/2G deployment.
@@ -36,7 +37,19 @@ type AgentHandler struct {
 	locks          [64]sync.Mutex
 }
 
+type agentChatClient interface {
+	Chat(context.Context, agentclient.ChatRequest, string, string) (agentclient.ChatResponse, error)
+}
+
 func NewAgentHandler(client *agentclient.Client, conversations *conversationapp.Service, retrieval *knowledgeindex.Service) *AgentHandler {
+	var boundary agentChatClient
+	if client != nil {
+		boundary = client
+	}
+	return newAgentHandler(boundary, conversations, retrieval)
+}
+
+func newAgentHandler(client agentChatClient, conversations *conversationapp.Service, retrieval *knowledgeindex.Service) *AgentHandler {
 	return &AgentHandler{client: client, conversations: conversations, retrieval: retrieval, retrievalSlots: make(chan struct{}, 1)}
 }
 
@@ -231,7 +244,7 @@ func (h *AgentHandler) Chat(c *gin.Context) {
 		RollingSummary:   conversationContext.Conversation.RollingSummary,
 		KnowledgeContext: knowledgeContext,
 		PreviousSources:  previousSources,
-	}, c.GetHeader("Authorization"), c.GetHeader("X-Request-ID"))
+	}, c.GetHeader("Authorization"), GetRequestID(c))
 	if err != nil {
 		var httpErr *agentclient.HTTPError
 		if errors.As(err, &httpErr) {
@@ -244,9 +257,16 @@ func (h *AgentHandler) Chat(c *gin.Context) {
 				Forbidden(c, "agent access denied")
 			case http.StatusServiceUnavailable:
 				Error(c, http.StatusServiceUnavailable, 503, "agent service is unavailable")
+			case http.StatusGatewayTimeout:
+				Error(c, http.StatusGatewayTimeout, 504, "agent service timed out")
 			default:
 				Error(c, http.StatusBadGateway, 502, "agent service request failed")
 			}
+			return
+		}
+		var netErr net.Error
+		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
+			Error(c, http.StatusGatewayTimeout, 504, "agent service timed out")
 			return
 		}
 		InternalError(c, "agent service request failed")

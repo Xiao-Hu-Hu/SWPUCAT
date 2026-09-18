@@ -1,55 +1,117 @@
 package agenthttp
 
 import (
+	"context"
 	"errors"
+	"net"
 	"net/http"
 
 	"SWPUCAT/internal/agent"
+	"SWPUCAT/internal/agent/telemetry"
 
 	"github.com/gin-gonic/gin"
 )
 
 type Handler struct {
-	engine         *agent.Engine
+	engine         chatEngine
 	internalSecret string
 }
 
+type chatEngine interface {
+	Enabled() bool
+	Chat(context.Context, agent.ChatRequest) (agent.ChatResponse, error)
+}
+
+type responseEnvelope struct {
+	Code    int                     `json:"code"`
+	Message string                  `json:"message"`
+	Data    any                     `json:"data,omitempty"`
+	Audit   *telemetry.AuditSummary `json:"audit,omitempty"`
+}
+
 func NewHandler(engine *agent.Engine, internalSecret string) *Handler {
+	var boundary chatEngine
+	if engine != nil {
+		boundary = engine
+	}
+	return newHandler(boundary, internalSecret)
+}
+
+func newHandler(engine chatEngine, internalSecret string) *Handler {
 	return &Handler{engine: engine, internalSecret: internalSecret}
 }
 
 func (h *Handler) Health(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"status": "ok", "enabled": h.engine.Enabled()})
+	enabled := h != nil && h.engine != nil && h.engine.Enabled()
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "enabled": enabled})
 }
 
 func (h *Handler) Chat(c *gin.Context) {
+	requestID := normalizeRequestID(c.GetHeader("X-Request-ID"))
+	if requestID != "" {
+		c.Header("X-Request-ID", requestID)
+	}
+	if h == nil || h.engine == nil {
+		writeResponse(c, http.StatusServiceUnavailable, 503, "agent is disabled", nil, requestAudit(requestID, nil))
+		return
+	}
 	if h.engine.Enabled() && (h.internalSecret == "" || c.GetHeader("X-Agent-Internal-Secret") != h.internalSecret) {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "invalid internal secret"})
+		writeResponse(c, http.StatusUnauthorized, 401, "invalid internal secret", nil, nil)
 		return
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
 	var req agent.ChatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "invalid request body"})
+		writeResponse(c, http.StatusBadRequest, 400, "invalid request body", nil, requestAudit(requestID, nil))
 		return
 	}
 	req.Authorization = c.GetHeader("Authorization")
-	req.RequestID = c.GetHeader("X-Request-ID")
+	req.RequestID = requestID
 	result, err := h.engine.Chat(c.Request.Context(), req)
+	audit := requestAudit(requestID, &result.Telemetry)
 	if err != nil {
+		var netErr net.Error
 		switch {
 		case errors.Is(err, agent.ErrDisabled):
-			c.JSON(http.StatusServiceUnavailable, gin.H{"code": 503, "message": "agent is disabled"})
+			writeResponse(c, http.StatusServiceUnavailable, 503, "agent is disabled", nil, audit)
 		case errors.Is(err, agent.ErrInvalidMessage):
-			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
+			writeResponse(c, http.StatusBadRequest, 400, err.Error(), nil, audit)
 		case errors.Is(err, agent.ErrInvalidSession), errors.Is(err, agent.ErrInvalidHistory):
-			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
+			writeResponse(c, http.StatusBadRequest, 400, err.Error(), nil, audit)
 		case errors.Is(err, agent.ErrBusy):
-			c.JSON(http.StatusServiceUnavailable, gin.H{"code": 503, "message": "agent is busy; please retry shortly"})
+			writeResponse(c, http.StatusServiceUnavailable, 503, "agent is busy; please retry shortly", nil, audit)
+		case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr) && netErr.Timeout():
+			writeResponse(c, http.StatusGatewayTimeout, 504, "agent execution timed out", nil, audit)
 		default:
-			c.JSON(http.StatusBadGateway, gin.H{"code": 502, "message": "agent execution failed"})
+			writeResponse(c, http.StatusBadGateway, 502, "agent execution failed", nil, audit)
 		}
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": result})
+	writeResponse(c, http.StatusOK, 0, "success", result, audit)
+}
+
+func writeResponse(c *gin.Context, status, code int, message string, data any, audit *telemetry.AuditSummary) {
+	c.JSON(status, responseEnvelope{Code: code, Message: message, Data: data, Audit: audit})
+}
+
+func requestAudit(requestID string, snapshot *telemetry.Snapshot) *telemetry.AuditSummary {
+	if requestID == "" && snapshot == nil {
+		return nil
+	}
+	return &telemetry.AuditSummary{RequestID: requestID, Telemetry: snapshot}
+}
+
+// normalizeRequestID accepts only identifiers created by the main server. An
+// invalid or legacy identifier is not echoed or used for write idempotency;
+// Engine.Chat will create an internal fallback identifier when this is empty.
+func normalizeRequestID(value string) string {
+	if len(value) != 32 {
+		return ""
+	}
+	for _, char := range value {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return ""
+		}
+	}
+	return value
 }

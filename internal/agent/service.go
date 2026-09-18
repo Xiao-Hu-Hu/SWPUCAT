@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +31,7 @@ var (
 	ErrInvalidSession = errors.New("session_id is invalid")
 	ErrInvalidHistory = errors.New("conversation history is invalid")
 	ErrBusy           = errors.New("agent is busy")
+	ErrExecution      = errors.New("agent execution failed")
 )
 
 type HistoryMessage struct {
@@ -134,6 +137,14 @@ func (e *Engine) Chat(ctx context.Context, req ChatRequest) (response ChatRespon
 	collector := telemetry.NewCollector()
 	ctx = telemetry.WithCollector(ctx, collector)
 	defer func() {
+		if recovered := recover(); recovered != nil {
+			// Do not return a partially produced answer or the raw panic value.
+			// Log only its type and stack so operators can diagnose the fault
+			// without copying a potentially sensitive panic message.
+			log.Printf("agent execution panic recovered (type %T)\n%s", recovered, debug.Stack())
+			response = ChatResponse{}
+			err = ErrExecution
+		}
 		response.Telemetry = collector.Snapshot()
 	}()
 

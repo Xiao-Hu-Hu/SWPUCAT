@@ -47,12 +47,13 @@ func NewRouter(
 	announcementDraftHandler *AnnouncementDraftHandler,
 ) *Router {
 	engine := gin.Default()
+	engine.Use(RequestIDMiddleware())
 
 	engine.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "Idempotency-Key"},
-		ExposeHeaders:    []string{"Content-Length"},
+		ExposeHeaders:    []string{"Content-Length", "X-Request-ID"},
 		AllowCredentials: true,
 	}))
 

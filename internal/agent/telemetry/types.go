@@ -101,6 +101,15 @@ type Snapshot struct {
 	ToolCalls         []ToolCall   `json:"tool_calls"`
 }
 
+// AuditSummary is the private, request-correlated transport envelope for an
+// already bounded and privacy-filtered telemetry snapshot. It is intentionally
+// kept outside the public ChatResponse JSON so prompts, answers and internal
+// execution details cannot leak through the user-facing API.
+type AuditSummary struct {
+	RequestID string    `json:"request_id,omitempty"`
+	Telemetry *Snapshot `json:"telemetry,omitempty"`
+}
+
 type Collector struct {
 	mu sync.Mutex
 

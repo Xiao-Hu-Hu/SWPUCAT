@@ -11,6 +11,7 @@ import (
 	"SWPUCAT/internal/agent/business"
 	"SWPUCAT/internal/infrastructure/config"
 
+	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -59,6 +60,34 @@ func TestChatResponseDoesNotSerializeTelemetry(t *testing.T) {
 		if strings.Contains(string(data), forbidden) {
 			t.Fatalf("serialized ChatResponse exposed %q: %s", forbidden, data)
 		}
+	}
+}
+
+func TestChatRecoversExecutionPanicAndReturnsTelemetry(t *testing.T) {
+	engine := &Engine{
+		enabled:      true,
+		runner:       new(adk.Runner),
+		sessions:     nil, // Forces an internal panic before the runner is used.
+		maxToolCalls: 1,
+		concurrency:  make(chan struct{}, 1),
+	}
+
+	response, err := engine.Chat(context.Background(), ChatRequest{
+		Message:   "hello",
+		SessionID: "session-1",
+		UserID:    7,
+	})
+	if !errors.Is(err, ErrExecution) {
+		t.Fatalf("Chat() error = %v, want ErrExecution", err)
+	}
+	if response.Answer != "" || response.SessionID != "" || len(response.Sources) != 0 {
+		t.Fatalf("partial response escaped panic recovery: %#v", response)
+	}
+	if response.Telemetry.StartedAt.IsZero() || response.Telemetry.FinishedAt.IsZero() {
+		t.Fatalf("panic response telemetry = %#v", response.Telemetry)
+	}
+	if len(engine.concurrency) != 0 {
+		t.Fatalf("worker slot was not released after panic: len = %d", len(engine.concurrency))
 	}
 }
 
