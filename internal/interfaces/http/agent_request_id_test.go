@@ -127,7 +127,7 @@ func TestRequestIDHeaderSurvivesGinRecovery(t *testing.T) {
 
 func TestRouterExposesRequestIDToBrowserClients(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	engine := NewRouter(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil).Setup()
+	engine := NewRouter(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil).Setup()
 	request := httptest.NewRequest(http.MethodGet, "/missing", nil)
 	request.Header.Set("Origin", "https://example.test")
 	response := httptest.NewRecorder()

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"strconv"
@@ -114,20 +115,24 @@ func (r RetrievalConfig) Validate(embeddingEnabled bool) error {
 }
 
 type AgentConfig struct {
-	Enabled           bool          `mapstructure:"enabled"`
-	WriteEnabled      bool          `mapstructure:"write_enabled"`
-	Port              int           `mapstructure:"port"`
-	BaseURL           string        `mapstructure:"base_url"`
-	ServerURL         string        `mapstructure:"server_url"`
-	InternalSecret    string        `mapstructure:"internal_secret"`
-	LLMProvider       string        `mapstructure:"llm_provider"`
-	LLMModel          string        `mapstructure:"llm_model"`
-	LLMAPIKey         string        `mapstructure:"llm_api_key"`
-	LLMBaseURL        string        `mapstructure:"llm_base_url"`
-	LLMTimeout        time.Duration `mapstructure:"llm_timeout"`
-	MaxIterations     int           `mapstructure:"max_iterations"`
-	MaxToolCalls      int           `mapstructure:"max_tool_calls"`
-	WorkerConcurrency int           `mapstructure:"worker_concurrency"`
+	Enabled                  bool          `mapstructure:"enabled"`
+	WriteEnabled             bool          `mapstructure:"write_enabled"`
+	Port                     int           `mapstructure:"port"`
+	BaseURL                  string        `mapstructure:"base_url"`
+	ServerURL                string        `mapstructure:"server_url"`
+	InternalSecret           string        `mapstructure:"internal_secret"`
+	LLMProvider              string        `mapstructure:"llm_provider"`
+	LLMModel                 string        `mapstructure:"llm_model"`
+	LLMAPIKey                string        `mapstructure:"llm_api_key"`
+	LLMBaseURL               string        `mapstructure:"llm_base_url"`
+	LLMTimeout               time.Duration `mapstructure:"llm_timeout"`
+	MaxIterations            int           `mapstructure:"max_iterations"`
+	MaxToolCalls             int           `mapstructure:"max_tool_calls"`
+	WorkerConcurrency        int           `mapstructure:"worker_concurrency"`
+	CostEstimationEnabled    bool          `mapstructure:"cost_estimation_enabled"`
+	InputUSDPerMillion       float64       `mapstructure:"input_usd_per_million"`
+	CachedInputUSDPerMillion float64       `mapstructure:"cached_input_usd_per_million"`
+	OutputUSDPerMillion      float64       `mapstructure:"output_usd_per_million"`
 }
 
 func (a *AgentConfig) Validate() error {
@@ -145,6 +150,15 @@ func (a *AgentConfig) Validate() error {
 	}
 	if a.WriteEnabled && !a.Enabled {
 		return fmt.Errorf("agent.write_enabled requires agent.enabled=true")
+	}
+	for name, value := range map[string]float64{
+		"input_usd_per_million":        a.InputUSDPerMillion,
+		"cached_input_usd_per_million": a.CachedInputUSDPerMillion,
+		"output_usd_per_million":       a.OutputUSDPerMillion,
+	} {
+		if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > 1_000_000 {
+			return fmt.Errorf("agent.%s must be between 0 and 1000000", name)
+		}
 	}
 	if a.Enabled {
 		if strings.TrimSpace(a.LLMProvider) == "" {
@@ -338,6 +352,10 @@ func Load() (*Config, error) {
 	viper.SetDefault("agent.max_iterations", 4)
 	viper.SetDefault("agent.max_tool_calls", 8)
 	viper.SetDefault("agent.worker_concurrency", 1)
+	viper.SetDefault("agent.cost_estimation_enabled", false)
+	viper.SetDefault("agent.input_usd_per_million", 0.0)
+	viper.SetDefault("agent.cached_input_usd_per_million", 0.0)
+	viper.SetDefault("agent.output_usd_per_million", 0.0)
 	viper.SetDefault("embedding.enabled", false)
 	viper.SetDefault("embedding.provider", "openai_compatible")
 	viper.SetDefault("embedding.model", "")
@@ -398,6 +416,10 @@ func Load() (*Config, error) {
 	applyIntEnv("CSA_AGENT_MAX_ITERATIONS", &cfg.Agent.MaxIterations)
 	applyIntEnv("CSA_AGENT_MAX_TOOL_CALLS", &cfg.Agent.MaxToolCalls)
 	applyIntEnv("CSA_AGENT_WORKER_CONCURRENCY", &cfg.Agent.WorkerConcurrency)
+	applyBoolEnv("CSA_AGENT_COST_ESTIMATION_ENABLED", &cfg.Agent.CostEstimationEnabled)
+	applyFloat64Env("CSA_AGENT_INPUT_USD_PER_MILLION", &cfg.Agent.InputUSDPerMillion)
+	applyFloat64Env("CSA_AGENT_CACHED_INPUT_USD_PER_MILLION", &cfg.Agent.CachedInputUSDPerMillion)
+	applyFloat64Env("CSA_AGENT_OUTPUT_USD_PER_MILLION", &cfg.Agent.OutputUSDPerMillion)
 	applyBoolEnv("CSA_EMBEDDING_ENABLED", &cfg.Embedding.Enabled)
 	applyStringEnv("CSA_EMBEDDING_PROVIDER", &cfg.Embedding.Provider)
 	applyStringEnv("CSA_EMBEDDING_MODEL", &cfg.Embedding.Model)

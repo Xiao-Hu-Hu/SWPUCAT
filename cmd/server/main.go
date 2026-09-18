@@ -144,6 +144,10 @@ func main() {
 	authzSvc := authorization.NewService(userRepo)
 	conversationSvc := conversationapp.NewService(conversationRepo)
 	agentAuditSvc := agentauditapp.NewService(agentAuditRepo)
+	agentAuditAnalyticsSvc := agentauditapp.NewAnalyticsService(agentAuditRepo, agentauditapp.Pricing{
+		Enabled: cfg.Agent.CostEstimationEnabled, InputUSDPerMillion: cfg.Agent.InputUSDPerMillion,
+		CachedInputUSDPerMillion: cfg.Agent.CachedInputUSDPerMillion, OutputUSDPerMillion: cfg.Agent.OutputUSDPerMillion,
+	})
 
 	// Initialize handlers
 	authHandler := httpInterface.NewAuthHandler(userSvc)
@@ -159,6 +163,7 @@ func main() {
 		log.Fatalf("Failed to initialize agent client: %v", err)
 	}
 	agentHandler := httpInterface.NewAgentHandler(agentClient, conversationSvc, knowledgeIndexSvc, agentAuditSvc)
+	agentAuditAnalyticsHandler := httpInterface.NewAgentAuditAnalyticsHandler(agentAuditAnalyticsSvc)
 	reportHandler := httpInterface.NewReportHandler(reportSvc)
 	evaluationHandler := httpInterface.NewEvaluationHandler(evaluationSvc)
 	notificationHandler := httpInterface.NewNotificationHandler(notificationSvc)
@@ -178,6 +183,7 @@ func main() {
 		approvalHandler,
 		invitationHandler,
 		agentHandler,
+		agentAuditAnalyticsHandler,
 		reportHandler,
 		evaluationHandler,
 		notificationHandler,

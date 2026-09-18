@@ -121,6 +121,107 @@ func (r *AgentAuditRepo) CreateRun(ctx context.Context, run *agentaudit.Run) err
 	return nil
 }
 
+func (r *AgentAuditRepo) ListRuns(ctx context.Context, filter agentaudit.ReadFilter) ([]agentaudit.Run, int64, error) {
+	if r == nil || r.db == nil || filter.Page < 1 || filter.PageSize < 1 {
+		return nil, 0, agentaudit.ErrInvalidRun
+	}
+	query := applyAgentAuditReadFilter(r.db.WithContext(ctx).Model(&database.AgentRunModel{}), filter)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var models []database.AgentRunModel
+	if err := query.Select(
+		"id", "request_id", "user_id", "conversation_id", "session_id", "actor_role", "status", "telemetry_status",
+		"http_status", "failure_source", "failure_category", "failure_code", "failure_retryable", "started_at", "finished_at", "duration_ms",
+		"agent_started_at", "agent_finished_at", "agent_duration_ms", "conversation_persisted", "model_call_count", "tool_call_count",
+		"dropped_model_calls", "dropped_tool_calls", "usage_reported_model_calls", "usage_missing_model_calls", "prompt_tokens",
+		"completion_tokens", "total_tokens", "cached_tokens", "reasoning_tokens", "created_at",
+	).Order("created_at DESC, id DESC").
+		Offset((filter.Page - 1) * filter.PageSize).Limit(filter.PageSize).Find(&models).Error; err != nil {
+		return nil, 0, err
+	}
+	result := make([]agentaudit.Run, 0, len(models))
+	for i := range models {
+		result = append(result, *agentAuditRunFromModels(&models[i], nil))
+	}
+	return result, total, nil
+}
+
+func (r *AgentAuditRepo) FindRun(ctx context.Context, id int64) (*agentaudit.Run, error) {
+	if r == nil || r.db == nil || id <= 0 {
+		return nil, agentaudit.ErrInvalidRun
+	}
+	var run database.AgentRunModel
+	if err := r.db.WithContext(ctx).Where("id = ?", id).Take(&run).Error; err != nil {
+		return nil, err
+	}
+	var tools []database.AgentToolCallModel
+	if err := r.db.WithContext(ctx).Where("run_id = ?", id).Order("sequence ASC").Find(&tools).Error; err != nil {
+		return nil, err
+	}
+	result := agentAuditRunFromModels(&run, tools)
+	if err := agentauditapp.ValidatePersistenceContract(result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (r *AgentAuditRepo) SummarizeRuns(ctx context.Context, filter agentaudit.ReadFilter) (agentaudit.ReadSummary, error) {
+	result := agentaudit.ReadSummary{StatusCounts: map[string]int64{}, ToolCounts: map[string]int64{}}
+	if r == nil || r.db == nil {
+		return result, agentaudit.ErrInvalidRun
+	}
+	var runs []database.AgentRunModel
+	query := applyAgentAuditReadFilter(r.db.WithContext(ctx).Model(&database.AgentRunModel{}), filter)
+	if err := query.Select("id", "status", "duration_ms", "prompt_tokens", "completion_tokens", "total_tokens", "cached_tokens").Find(&runs).Error; err != nil {
+		return result, err
+	}
+	runIDs := make([]int64, 0, len(runs))
+	for i := range runs {
+		run := &runs[i]
+		runIDs = append(runIDs, run.ID)
+		result.TotalRuns++
+		result.StatusCounts[run.Status]++
+		result.TotalDurationMS += run.DurationMS
+		result.RunsWithDuration++
+		if run.PromptTokens != nil && run.CompletionTokens != nil && run.TotalTokens != nil {
+			result.PromptTokens += *run.PromptTokens
+			result.CompletionTokens += *run.CompletionTokens
+			result.TotalTokens += *run.TotalTokens
+			if run.CachedTokens != nil {
+				result.CachedTokens += *run.CachedTokens
+			}
+			result.RunsWithTokenUsage++
+		}
+	}
+	if len(runIDs) == 0 {
+		return result, nil
+	}
+	type toolCount struct {
+		Name  string `gorm:"column:tool_name"`
+		Count int64  `gorm:"column:count"`
+	}
+	var counts []toolCount
+	if err := r.db.WithContext(ctx).Model(&database.AgentToolCallModel{}).
+		Select("tool_name, COUNT(*) AS count").Where("run_id IN ?", runIDs).
+		Group("tool_name").Order("tool_name ASC").Scan(&counts).Error; err != nil {
+		return result, err
+	}
+	for _, item := range counts {
+		result.ToolCounts[item.Name] = item.Count
+	}
+	return result, nil
+}
+
+func applyAgentAuditReadFilter(query *gorm.DB, filter agentaudit.ReadFilter) *gorm.DB {
+	query = query.Where("created_at >= ? AND created_at < ?", filter.From, filter.To)
+	if filter.Status != "" {
+		query = query.Where("status = ?", string(filter.Status))
+	}
+	return query
+}
+
 // loadAgentAuditWinner reads the complete immutable aggregate. Tool calls are
 // always returned in canonical sequence order so every idempotent caller sees
 // the same database fact regardless of its attempted input ordering.

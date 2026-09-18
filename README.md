@@ -270,8 +270,22 @@ docker compose --env-file .env -f deployments/docker-compose.yml up -d --build
 | `CSA_LLM_MODEL` | 服务商提供的模型 ID | - |
 | `CSA_LLM_API_KEY` | 模型 API Key，仅注入 Agent 容器 | - |
 | `CSA_LLM_BASE_URL` | OpenAI-compatible API 根地址 | - |
+| `CSA_AGENT_COST_ESTIMATION_ENABLED` | 是否按配置价格估算 Agent 调用费用 | `false` |
+| `CSA_AGENT_INPUT_USD_PER_MILLION` | 每百万非缓存输入 Token 的美元价格 | `0` |
+| `CSA_AGENT_CACHED_INPUT_USD_PER_MILLION` | 每百万缓存输入 Token 的美元价格 | `0` |
+| `CSA_AGENT_OUTPUT_USD_PER_MILLION` | 每百万输出 Token 的美元价格 | `0` |
 
 ## API 接口
+
+### Agent 审计（仅超级管理员）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/agent/audits` | 分页查询隐私安全的运行明细 |
+| GET | `/api/agent/audits/summary` | 查询调用量、成功率、延迟、Token、费用和工具聚合 |
+| GET | `/api/agent/audits/:id` | 查询单次运行及工具调用投影 |
+
+费用为基于当前配置价格的估算值；价格未启用或 Token 上报不完整时返回“未知”，不会按零费用处理。审计记录不包含提示词、回答正文、授权头或原始敏感工具参数。
 
 ### 认证
 

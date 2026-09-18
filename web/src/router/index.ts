@@ -25,6 +25,11 @@ const router = createRouter({
           component: () => import('@/views/AgentView.vue')
         },
         {
+          path: 'agent-audits',
+          name: 'agent-audits',
+          component: () => import('@/views/AgentAuditView.vue')
+        },
+        {
           path: 'announcements',
           name: 'announcements',
           component: () => import('@/views/AnnouncementsView.vue')

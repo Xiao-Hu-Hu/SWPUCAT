@@ -1,6 +1,7 @@
 package config
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,17 @@ func validRetrievalConfig() RetrievalConfig {
 		MaxChunks:         10000,
 		MaxExtractedRunes: 500000,
 		WorkerInterval:    5 * time.Second,
+	}
+}
+
+func TestAgentConfigRejectsInvalidCostPrices(t *testing.T) {
+	base := AgentConfig{Port: 8090, MaxIterations: 4, MaxToolCalls: 8, WorkerConcurrency: 1}
+	for _, value := range []float64{-1, math.NaN(), math.Inf(1), 1_000_001} {
+		cfg := base
+		cfg.InputUSDPerMillion = value
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "input_usd_per_million") {
+			t.Fatalf("price %v should fail, got %v", value, err)
+		}
 	}
 }
 

@@ -44,6 +44,10 @@ agent:
   max_iterations: 4
   max_tool_calls: 8
   worker_concurrency: 1
+  cost_estimation_enabled: false
+  input_usd_per_million: 0
+  cached_input_usd_per_million: 0
+  output_usd_per_million: 0
 
 embedding:
   enabled: false

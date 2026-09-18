@@ -21,6 +21,7 @@ type Router struct {
 	approvalHandler          *ApprovalHandler
 	invitationHandler        *InvitationHandler
 	agentHandler             *AgentHandler
+	agentAuditHandler        *AgentAuditAnalyticsHandler
 	reportHandler            *ReportHandler
 	evaluationHandler        *EvaluationHandler
 	notificationHandler      *NotificationHandler
@@ -40,6 +41,7 @@ func NewRouter(
 	approvalHandler *ApprovalHandler,
 	invitationHandler *InvitationHandler,
 	agentHandler *AgentHandler,
+	agentAuditHandler *AgentAuditAnalyticsHandler,
 	reportHandler *ReportHandler,
 	evaluationHandler *EvaluationHandler,
 	notificationHandler *NotificationHandler,
@@ -70,6 +72,7 @@ func NewRouter(
 		approvalHandler:          approvalHandler,
 		invitationHandler:        invitationHandler,
 		agentHandler:             agentHandler,
+		agentAuditHandler:        agentAuditHandler,
 		reportHandler:            reportHandler,
 		evaluationHandler:        evaluationHandler,
 		notificationHandler:      notificationHandler,
@@ -187,6 +190,9 @@ func (r *Router) Setup() *gin.Engine {
 			protected.PATCH("/agent/conversations/:session_id", r.agentHandler.UpdateConversationTitle)
 			protected.PUT("/agent/conversations/:session_id", r.agentHandler.UpdateConversationTitle)
 			protected.POST("/agent/chat", r.agentHandler.Chat)
+			protected.GET("/agent/audits", RBACMiddleware("super_admin"), r.agentAuditHandler.List)
+			protected.GET("/agent/audits/summary", RBACMiddleware("super_admin"), r.agentAuditHandler.Summary)
+			protected.GET("/agent/audits/:id", RBACMiddleware("super_admin"), r.agentAuditHandler.Detail)
 
 			// Monthly reports. Drafts and versions remain private to their author
 			// unless a captain/super admin is reviewing them.

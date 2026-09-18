@@ -11,6 +11,7 @@ const isCollapse = ref(false)
 const menuItems = [
   { path: '/app', icon: 'Clock', title: '签到打卡' },
   { path: '/app/agent', icon: 'ChatDotRound', title: '智能助手' },
+  { path: '/app/agent-audits', icon: 'DataAnalysis', title: 'Agent 审计', show: authStore.isSuperAdmin },
   { path: '/app/announcements', icon: 'Bell', title: '公告管理' },
   { path: '/app/knowledge', icon: 'Folder', title: '知识库' },
   { path: '/app/members', icon: 'User', title: '成员管理' },
