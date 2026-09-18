@@ -3,6 +3,8 @@ import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   agentApi,
+  type AgentActionProposal,
+  type AgentActionResult,
   type AgentConversation,
   type AgentConversationMessage,
   type AgentKnowledgeSource
@@ -25,9 +27,11 @@ interface ChatMessage {
   sourceMessage?: string
   regenerate?: boolean
   feedback?: boolean
+  proposals?: AgentActionProposal[]
+  actionResults?: Record<string, AgentActionResult>
 }
 
-const greetingMessage = '你好，我可以协助查询知识库、查看打卡状态，也可以按你的请求执行打卡操作。'
+const greetingMessage = '你好，我可以协助查询知识库、查看打卡状态；涉及打卡或创建草稿时，我会先给出待确认操作。'
 
 function newGreetingMessage(): ChatMessage {
   return { role: 'assistant', content: greetingMessage, createdAt: new Date().toISOString(), localId: `greeting-${Date.now()}`, status: 'completed' }
@@ -51,6 +55,7 @@ const renamingSessionId = ref('')
 const deletingSessionId = ref('')
 const activeAbortController = ref<AbortController | null>(null)
 const feedbackSaving = ref<Record<string, boolean>>({})
+const actionConfirming = ref<Record<string, boolean>>({})
 
 const sessionStorageKey = () => `swpucat-agent-session:${authStore.user?.id || 'anonymous'}`
 
@@ -221,7 +226,19 @@ function messageFromHistory(message: AgentConversationMessage): ChatMessage {
     clientTurnId: message.client_turn_id,
     generationId: message.generation_id,
     requestId: message.request_id,
+    proposals: message.role === 'assistant' ? parseProposals(message.actions_json) : undefined,
+    actionResults: {},
     sourceMessage: message.role === 'assistant' ? undefined : message.content
+  }
+}
+
+function parseProposals(value?: string): AgentActionProposal[] {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed as AgentActionProposal[] : []
+  } catch {
+    return []
   }
 }
 
@@ -308,6 +325,8 @@ async function runGeneration(assistantIndex: number) {
     }
     target.content = data.answer
     target.sources = data.sources || []
+    target.proposals = data.proposals || []
+    target.actionResults = {}
     target.createdAt = new Date().toISOString()
     target.id = data.message_id
     target.clientTurnId = data.client_turn_id || target.clientTurnId
@@ -339,6 +358,46 @@ async function runGeneration(assistantIndex: number) {
     if (activeAbortController.value === controller) activeAbortController.value = null
     loading.value = false
     await scrollToBottom()
+  }
+}
+
+function actionKey(item: ChatMessage, proposal: AgentActionProposal): string {
+  return `${item.localId}:${proposal.token || `${proposal.tool}:${proposal.expires_at}`}`
+}
+
+function actionExpired(proposal: AgentActionProposal): boolean {
+  const expiresAt = new Date(proposal.expires_at).getTime()
+  return !Number.isFinite(expiresAt) || expiresAt <= Date.now()
+}
+
+function actionToolLabel(tool: string): string {
+  if (tool === 'clock_in') return '上班打卡'
+  if (tool === 'clock_out') return '下班打卡'
+  if (tool === 'draft_announcement') return '创建公告草稿'
+  return '待确认操作'
+}
+
+function actionExpiryLabel(proposal: AgentActionProposal): string {
+  const value = formatMessageTime(proposal.expires_at)
+  return value ? `确认有效期至 ${value}` : '确认有效期未知'
+}
+
+async function confirmAction(item: ChatMessage, proposal: AgentActionProposal) {
+  const key = actionKey(item, proposal)
+  if (!proposal.token || loading.value || actionConfirming.value[key] || actionExpired(proposal)) return
+  actionConfirming.value[key] = true
+  try {
+    const response = await agentApi.confirmAction(sessionId.value, proposal)
+    const result = response.data
+    item.actionResults ||= {}
+    item.actionResults[proposal.token] = result
+    if (result.status === 'success') ElMessage.success(result.message)
+    else if (result.status === 'pending') ElMessage.info(result.message)
+    else ElMessage.error(result.message)
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.message || '操作确认失败，请稍后重试')
+  } finally {
+    delete actionConfirming.value[key]
   }
 }
 
@@ -664,6 +723,34 @@ async function downloadSource(source: AgentKnowledgeSource) {
                       >打开链接</a>
                     </div>
                   </div>
+                </div>
+                <div v-if="item.role === 'assistant' && item.proposals?.length" class="action-proposal-list">
+                  <article v-for="proposal in item.proposals" :key="actionKey(item, proposal)" class="action-card">
+                    <div class="action-card-heading">
+                      <span class="action-card-kind">{{ actionToolLabel(proposal.tool) }}</span>
+                      <strong>{{ proposal.title }}</strong>
+                    </div>
+                    <p>{{ proposal.summary }}</p>
+                    <dl v-if="proposal.tool === 'draft_announcement'" class="action-parameters">
+                      <div><dt>标题</dt><dd>{{ proposal.parameters.title }}</dd></div>
+                      <div><dt>正文</dt><dd class="action-content-preview">{{ proposal.parameters.content }}</dd></div>
+                      <div><dt>置顶</dt><dd>{{ proposal.parameters.pinned ? '是' : '否' }}</dd></div>
+                    </dl>
+                    <div class="action-card-expiry" :class="{ expired: actionExpired(proposal) }">{{ actionExpiryLabel(proposal) }}</div>
+                    <div v-if="proposal.token && item.actionResults?.[proposal.token]" class="action-result" :class="item.actionResults[proposal.token].status">
+                      <strong>{{ item.actionResults[proposal.token].title }}</strong>
+                      <span>{{ item.actionResults[proposal.token].message }}</span>
+                      <small v-if="item.actionResults[proposal.token].replayed">已返回此前执行结果</small>
+                    </div>
+                    <el-button
+                      v-else
+                      type="primary"
+                      size="small"
+                      :loading="actionConfirming[actionKey(item, proposal)]"
+                      :disabled="loading || !proposal.token || actionExpired(proposal)"
+                      @click="confirmAction(item, proposal)"
+                    >{{ !proposal.token ? '请重新生成提议' : actionExpired(proposal) ? '确认已过期' : '确认执行' }}</el-button>
+                  </article>
                 </div>
                 <div v-if="item.role === 'assistant' && item.clientTurnId" class="message-actions">
                   <span v-if="item.status === 'streaming'" class="message-state">正在生成</span>
@@ -1178,6 +1265,101 @@ async function downloadSource(source: AgentKnowledgeSource) {
 
 .source-link:hover {
   text-decoration: underline;
+}
+
+.action-proposal-list {
+  margin-top: 0.65rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.action-card {
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 10px;
+  background: var(--accent-bg);
+  padding: 0.75rem;
+}
+
+.action-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--text);
+  font-size: 0.84rem;
+}
+
+.action-card-kind {
+  border-radius: 999px;
+  background: var(--bg-card);
+  padding: 0.15rem 0.45rem;
+  color: var(--accent);
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.action-card p {
+  margin: 0.5rem 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.action-parameters {
+  margin: 0.5rem 0;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.action-parameters > div {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  gap: 0.45rem;
+  font-size: 0.75rem;
+}
+
+.action-parameters dt {
+  color: var(--text-muted);
+}
+
+.action-parameters dd {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.action-content-preview {
+  max-height: 7.5rem;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.action-card-expiry {
+  margin-bottom: 0.45rem;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
+.action-card-expiry.expired {
+  color: var(--danger);
+}
+
+.action-result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  border-radius: 8px;
+  background: var(--bg-card);
+  padding: 0.55rem 0.65rem;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+.action-result.success strong {
+  color: var(--success);
+}
+
+.action-result.failed strong {
+  color: var(--danger);
 }
 
 .composer {

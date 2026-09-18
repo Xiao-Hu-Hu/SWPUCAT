@@ -262,6 +262,7 @@ func (r *ConversationRepo) RecordTurn(ctx context.Context, userID int64, session
 				ToolName:       message.ToolName,
 				ToolResult:     message.ToolResult,
 				CitationsJSON:  message.CitationsJSON,
+				ActionsJSON:    message.ActionsJSON,
 				TokenCount:     message.TokenCount,
 				CreatedAt:      message.CreatedAt,
 			}
@@ -402,6 +403,7 @@ func (r *ConversationRepo) CommitTurn(ctx context.Context, userID int64, session
 				"tool_name":      assistantMessage.ToolName,
 				"tool_result":    assistantMessage.ToolResult,
 				"citations_json": assistantMessage.CitationsJSON,
+				"actions_json":   assistantMessage.ActionsJSON,
 				"token_count":    assistantMessage.TokenCount,
 				"generation_id":  assistantMessage.GenerationID,
 				"request_id":     assistantMessage.RequestID,
@@ -466,7 +468,7 @@ func (r *ConversationRepo) SaveResponseFeedback(ctx context.Context, feedback *c
 func agentMessageModel(message *conversation.Message) *database.AgentMessageModel {
 	return &database.AgentMessageModel{
 		ConversationID: message.ConversationID, Role: string(message.Role), Content: message.Content,
-		ToolName: message.ToolName, ToolResult: message.ToolResult, CitationsJSON: message.CitationsJSON,
+		ToolName: message.ToolName, ToolResult: message.ToolResult, CitationsJSON: message.CitationsJSON, ActionsJSON: message.ActionsJSON,
 		TokenCount: message.TokenCount, ClientTurnID: stringPointer(message.ClientTurnID),
 		GenerationID: stringPointer(message.GenerationID), RequestID: stringPointer(message.RequestID), CreatedAt: message.CreatedAt,
 	}
@@ -511,6 +513,7 @@ func toDomainMessage(model *database.AgentMessageModel) *conversation.Message {
 		ToolName:       model.ToolName,
 		ToolResult:     model.ToolResult,
 		CitationsJSON:  model.CitationsJSON,
+		ActionsJSON:    model.ActionsJSON,
 		TokenCount:     model.TokenCount,
 		ClientTurnID:   stringValue(model.ClientTurnID),
 		GenerationID:   stringValue(model.GenerationID),

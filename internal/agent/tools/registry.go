@@ -3,12 +3,14 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
 
 	"SWPUCAT/internal/agent/business"
+	"SWPUCAT/internal/agent/confirmation"
 
 	"github.com/cloudwego/eino/components/tool"
 	toolutils "github.com/cloudwego/eino/components/tool/utils"
@@ -106,9 +108,18 @@ type checkinHistoryResult struct {
 	Records []business.CheckinRecord `json:"records"`
 }
 
+type actionProposalToolResult struct {
+	Status    string `json:"status"`
+	Tool      string `json:"tool"`
+	Title     string `json:"title"`
+	Summary   string `json:"summary"`
+	ExpiresAt string `json:"expires_at"`
+}
+
 type Registry struct {
-	client       *business.Client
-	writeEnabled bool
+	client        *business.Client
+	writeEnabled  bool
+	confirmations *confirmation.Signer
 }
 
 var reportPeriodKeyPattern = regexp.MustCompile(`^\d{4}-(0[1-9]|1[0-2])$`)
@@ -138,8 +149,12 @@ func WithToolBudget(items []tool.BaseTool) []tool.BaseTool {
 	return result
 }
 
-func NewRegistry(client *business.Client, writeEnabled bool) *Registry {
-	return &Registry{client: client, writeEnabled: writeEnabled}
+func NewRegistry(client *business.Client, writeEnabled bool, signers ...*confirmation.Signer) *Registry {
+	var signer *confirmation.Signer
+	if len(signers) > 0 {
+		signer = signers[0]
+	}
+	return &Registry{client: client, writeEnabled: writeEnabled, confirmations: signer}
 }
 
 func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
@@ -438,7 +453,7 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	}
 	announcementDraftTool, err := toolutils.InferTool[announcementDraftInput, string](
 		"draft_announcement",
-		"根据队长要求生成公告草稿并保存供人工审核。只能创建草稿，不能确认、发布、置顶或发送邮件。",
+		"根据队长要求提出公告草稿创建方案。只生成待确认提议，不会立即保存；用户必须在界面确认后才创建草稿。",
 		func(ctx context.Context, input announcementDraftInput) (string, error) {
 			identity := business.RequestContextFrom(ctx)
 			if identity.Role != "captain" && identity.Role != "super_admin" {
@@ -448,15 +463,9 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 			if title == "" || content == "" {
 				return "", fmt.Errorf("title and content are required")
 			}
-			draft, err := r.client.CreateAnnouncementDraft(ctx, business.AnnouncementDraftRequest{
-				Title: title, Content: content, Pinned: input.Pinned,
-				Source:       map[string]any{"generated_by": "agent", "note": strings.TrimSpace(input.SourceNote)},
-				RecipientIDs: input.RecipientIDs, EmailRequested: false,
+			return r.propose(ctx, confirmation.ToolDraftAnnouncement, "创建公告草稿", "确认后将保存公告草稿，仍需人工审核后才能发布。", confirmation.DraftAnnouncementParameters{
+				Title: title, Content: content, Pinned: input.Pinned, SourceNote: strings.TrimSpace(input.SourceNote), RecipientIDs: input.RecipientIDs,
 			})
-			if err != nil {
-				return "", err
-			}
-			return marshal(draft)
 		},
 	)
 	if err != nil {
@@ -467,15 +476,9 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 		result = append(result, announcementDraftTool)
 		clockInTool, err := toolutils.InferTool[emptyInput, string](
 			"clock_in",
-			"为当前登录成员打卡上班；只有工具返回成功后才能向用户确认。",
+			"提出为当前登录成员上班打卡的待确认操作；不会立即打卡，用户必须在界面确认。",
 			func(ctx context.Context, _ emptyInput) (string, error) {
-				identity := business.RequestContextFrom(ctx)
-				key := operationKey(identity.RequestID, "clock-in")
-				result, err := r.client.ClockIn(ctx, key)
-				if err != nil {
-					return "", err
-				}
-				return marshal(result)
+				return r.propose(ctx, confirmation.ToolClockIn, "上班打卡", "确认后将为当前账号记录上班打卡。", emptyInput{})
 			},
 		)
 		if err != nil {
@@ -483,15 +486,9 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 		}
 		clockOutTool, err := toolutils.InferTool[emptyInput, string](
 			"clock_out",
-			"为当前登录成员打卡下班；只有工具返回成功后才能向用户确认。",
+			"提出为当前登录成员下班打卡的待确认操作；不会立即打卡，用户必须在界面确认。",
 			func(ctx context.Context, _ emptyInput) (string, error) {
-				identity := business.RequestContextFrom(ctx)
-				key := operationKey(identity.RequestID, "clock-out")
-				result, err := r.client.ClockOut(ctx, key)
-				if err != nil {
-					return "", err
-				}
-				return marshal(result)
+				return r.propose(ctx, confirmation.ToolClockOut, "下班打卡", "确认后将为当前账号记录下班打卡。", emptyInput{})
 			},
 		)
 		if err != nil {
@@ -500,6 +497,25 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 		result = append(result, clockInTool, clockOutTool)
 	}
 	return result, nil
+}
+
+func (r *Registry) propose(ctx context.Context, toolName, title, summary string, parameters any) (string, error) {
+	if r == nil || r.confirmations == nil {
+		return "", errors.New("action confirmation is not configured")
+	}
+	identity := business.RequestContextFrom(ctx)
+	proposal, err := r.confirmations.Propose(identity.UserID, identity.SessionID, toolName, title, summary, parameters)
+	if err != nil {
+		return "", err
+	}
+	business.ActionProposalCollectorFrom(ctx).Add(proposal)
+	// The raw signed token is a browser-to-server confirmation credential. It
+	// is returned only through the structured proposal collector and must not
+	// be copied into the model context, free-form answer, or tool audit result.
+	return marshal(actionProposalToolResult{
+		Status: "confirmation_required", Tool: proposal.Tool, Title: proposal.Title,
+		Summary: proposal.Summary, ExpiresAt: proposal.ExpiresAt,
+	})
 }
 
 const (

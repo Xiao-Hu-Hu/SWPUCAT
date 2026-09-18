@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"SWPUCAT/internal/agent/confirmation"
 )
 
 type requestContextKey struct{}
@@ -20,6 +22,7 @@ type RequestContext struct {
 	UserID        int64
 	Role          string
 	RequestID     string
+	SessionID     string
 }
 
 func WithRequestContext(ctx context.Context, value RequestContext) context.Context {
@@ -29,6 +32,49 @@ func WithRequestContext(ctx context.Context, value RequestContext) context.Conte
 func RequestContextFrom(ctx context.Context) RequestContext {
 	value, _ := ctx.Value(requestContextKey{}).(RequestContext)
 	return value
+}
+
+type actionProposalCollectorContextKey struct{}
+
+type ActionProposalCollector struct {
+	mu        sync.Mutex
+	proposals []confirmation.Proposal
+}
+
+func NewActionProposalCollector() *ActionProposalCollector {
+	return &ActionProposalCollector{}
+}
+
+func WithActionProposalCollector(ctx context.Context, collector *ActionProposalCollector) context.Context {
+	return context.WithValue(ctx, actionProposalCollectorContextKey{}, collector)
+}
+
+func ActionProposalCollectorFrom(ctx context.Context) *ActionProposalCollector {
+	collector, _ := ctx.Value(actionProposalCollectorContextKey{}).(*ActionProposalCollector)
+	return collector
+}
+
+func (c *ActionProposalCollector) Add(proposal *confirmation.Proposal) {
+	if c == nil || proposal == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, existing := range c.proposals {
+		if existing.Token == proposal.Token {
+			return
+		}
+	}
+	c.proposals = append(c.proposals, *proposal)
+}
+
+func (c *ActionProposalCollector) List() []confirmation.Proposal {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]confirmation.Proposal(nil), c.proposals...)
 }
 
 type Client struct {

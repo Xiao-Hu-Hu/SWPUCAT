@@ -287,6 +287,9 @@ func projectResult(toolName string, decoded any) any {
 	case "get_checkin_status":
 		return map[string]any{"status": enumOrOther(object["status"], "idle", "clocked_in", "clocked_out")}
 	case "clock_in", "clock_out":
+		if object["status"] == "confirmation_required" {
+			return projectActionProposal(object)
+		}
 		return map[string]any{
 			"type": enumOrOther(object["type"], "in", "out"),
 			"date": dateOrOther(object["date"]),
@@ -351,6 +354,9 @@ func projectResult(toolName string, decoded any) any {
 			"materials":       projectReportMaterials(object["materials"]),
 		}
 	case "draft_announcement":
+		if object["status"] == "confirmation_required" {
+			return projectActionProposal(object)
+		}
 		return map[string]any{
 			"id":              numberOrNil(object["id"]),
 			"status":          enumOrOther(object["status"], "draft", "confirmed", "published", "discarded"),
@@ -361,6 +367,13 @@ func projectResult(toolName string, decoded any) any {
 		}
 	default:
 		return payloadShape(decoded, 0)
+	}
+}
+
+func projectActionProposal(object map[string]any) map[string]any {
+	return map[string]any{
+		"status": enumOrOther(object["status"], "confirmation_required"),
+		"tool":   enumOrOther(object["tool"], "clock_in", "clock_out", "draft_announcement"),
 	}
 }
 

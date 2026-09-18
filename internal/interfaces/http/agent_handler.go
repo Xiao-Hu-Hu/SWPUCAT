@@ -16,7 +16,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"SWPUCAT/internal/agent/confirmation"
 	"SWPUCAT/internal/agent/telemetry"
+	"SWPUCAT/internal/application/agentaction"
 	agentauditapp "SWPUCAT/internal/application/agentaudit"
 	conversationapp "SWPUCAT/internal/application/conversation"
 	"SWPUCAT/internal/application/knowledgeindex"
@@ -33,6 +35,7 @@ type AgentHandler struct {
 	conversations *conversationapp.Service
 	retrieval     *knowledgeindex.Service
 	audits        *agentauditapp.Service
+	actions       *agentaction.Service
 	// Keep the synchronous prefetch path bounded on the 2-core/2G deployment.
 	// Agent tool calls are already serialized separately, but multiple users can
 	// otherwise trigger concurrent embedding/database searches before reaching
@@ -49,16 +52,20 @@ type agentStreamingChatClient interface {
 	ChatStream(context.Context, agentclient.ChatRequest, string, string, agentclient.ChatStreamCallback) (agentclient.ChatResponse, error)
 }
 
-func NewAgentHandler(client *agentclient.Client, conversations *conversationapp.Service, retrieval *knowledgeindex.Service, audits *agentauditapp.Service) *AgentHandler {
+func NewAgentHandler(client *agentclient.Client, conversations *conversationapp.Service, retrieval *knowledgeindex.Service, audits *agentauditapp.Service, actions ...*agentaction.Service) *AgentHandler {
 	var boundary agentChatClient
 	if client != nil {
 		boundary = client
 	}
-	return newAgentHandler(boundary, conversations, retrieval, audits)
+	return newAgentHandler(boundary, conversations, retrieval, audits, actions...)
 }
 
-func newAgentHandler(client agentChatClient, conversations *conversationapp.Service, retrieval *knowledgeindex.Service, audits *agentauditapp.Service) *AgentHandler {
-	return &AgentHandler{client: client, conversations: conversations, retrieval: retrieval, audits: audits, retrievalSlots: make(chan struct{}, 1)}
+func newAgentHandler(client agentChatClient, conversations *conversationapp.Service, retrieval *knowledgeindex.Service, audits *agentauditapp.Service, actions ...*agentaction.Service) *AgentHandler {
+	var actionService *agentaction.Service
+	if len(actions) > 0 {
+		actionService = actions[0]
+	}
+	return &AgentHandler{client: client, conversations: conversations, retrieval: retrieval, audits: audits, actions: actionService, retrievalSlots: make(chan struct{}, 1)}
 }
 
 type agentChatRequest struct {
@@ -73,6 +80,7 @@ type agentPublicChatResponse struct {
 	Answer                string                        `json:"answer"`
 	SessionID             string                        `json:"session_id"`
 	Sources               []agentclient.KnowledgeSource `json:"sources,omitempty"`
+	Proposals             []confirmation.Proposal       `json:"proposals,omitempty"`
 	UserMessageID         int64                         `json:"user_message_id,omitempty"`
 	MessageID             int64                         `json:"message_id,omitempty"`
 	ClientTurnID          string                        `json:"client_turn_id"`
@@ -96,6 +104,13 @@ type agentFeedbackRequest struct {
 	Helpful   *bool  `json:"helpful"`
 	Note      string `json:"note,omitempty"`
 	RequestID string `json:"request_id"`
+}
+
+type agentActionConfirmRequest struct {
+	SessionID  string          `json:"session_id"`
+	Tool       string          `json:"tool"`
+	Token      string          `json:"token"`
+	Parameters json.RawMessage `json:"parameters"`
 }
 
 type agentCreateConversationRequest struct {
@@ -360,10 +375,11 @@ func (h *AgentHandler) Chat(c *gin.Context) {
 	if marshalErr != nil {
 		sourcesJSON = []byte("[]")
 	}
+	actionsJSON := marshalPersistedAgentActions(result.Proposals)
 	rollingSummary, changed := compactEvictedHistory(conversationContext.Conversation.RollingSummary, conversationContext.Messages)
 	record := conversationapp.RecordTurnRequest{
 		UserContent: req.Message, AssistantContent: result.Answer,
-		CitationsJSON: string(sourcesJSON), LastSourcesJSON: agentStringPointer(string(sourcesJSON)),
+		CitationsJSON: string(sourcesJSON), ActionsJSON: string(actionsJSON), LastSourcesJSON: agentStringPointer(string(sourcesJSON)),
 	}
 	if changed {
 		record.RollingSummary = agentStringPointer(rollingSummary)
@@ -559,9 +575,10 @@ func (h *AgentHandler) ChatStream(c *gin.Context) {
 	if marshalErr != nil {
 		sourcesJSON = []byte("[]")
 	}
+	actionsJSON := marshalPersistedAgentActions(result.Proposals)
 	rollingSummary, changed := compactEvictedHistory(conversationContext.Conversation.RollingSummary, contextMessages)
 	record := conversationapp.RecordTurnRequest{
-		UserContent: req.Message, AssistantContent: result.Answer, CitationsJSON: string(sourcesJSON),
+		UserContent: req.Message, AssistantContent: result.Answer, CitationsJSON: string(sourcesJSON), ActionsJSON: string(actionsJSON),
 		LastSourcesJSON: agentStringPointer(string(sourcesJSON)), ClientTurnID: req.ClientTurnID,
 		GenerationID: req.GenerationID, RequestID: GetRequestID(c), Regenerate: req.Regenerate,
 	}
@@ -582,7 +599,7 @@ func (h *AgentHandler) ChatStream(c *gin.Context) {
 		return
 	}
 	publicResult := agentPublicChatResponse{
-		Answer: result.Answer, SessionID: sessionID, Sources: result.Sources,
+		Answer: result.Answer, SessionID: sessionID, Sources: result.Sources, Proposals: result.Proposals,
 		ClientTurnID: req.ClientTurnID, GenerationID: req.GenerationID, RequestID: GetRequestID(c),
 	}
 	if persistErr != nil {
@@ -630,6 +647,44 @@ func (h *AgentHandler) SaveResponseFeedback(c *gin.Context) {
 	Success(c, nil)
 }
 
+func (h *AgentHandler) ConfirmAction(c *gin.Context) {
+	if h == nil || h.actions == nil {
+		Error(c, http.StatusServiceUnavailable, 503, "agent actions are not configured")
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 300<<10)
+	var req agentActionConfirmRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid action confirmation request")
+		return
+	}
+	sessionID, err := normalizeAgentSessionID(req.SessionID)
+	if err != nil || strings.TrimSpace(req.SessionID) == "" || strings.TrimSpace(req.Tool) == "" || strings.TrimSpace(req.Token) == "" || len(req.Parameters) == 0 {
+		BadRequest(c, "session_id, tool, token and parameters are required")
+		return
+	}
+	result, err := h.actions.Execute(c.Request.Context(), agentaction.ExecuteRequest{
+		UserID: GetUserID(c), Role: GetRole(c), SessionID: sessionID,
+		Tool: strings.TrimSpace(req.Tool), Token: strings.TrimSpace(req.Token), Parameters: req.Parameters,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, agentaction.ErrInvalidConfirmation):
+			BadRequest(c, "action confirmation is invalid or was modified")
+		case errors.Is(err, agentaction.ErrExpiredConfirmation):
+			Error(c, http.StatusGone, http.StatusGone, "action confirmation has expired")
+		case errors.Is(err, agentaction.ErrActionDisabled):
+			Error(c, http.StatusServiceUnavailable, 503, "agent actions are disabled")
+		case errors.Is(err, shared.ErrForbidden):
+			Forbidden(c, "this account cannot execute the proposed action")
+		default:
+			InternalError(c, "action confirmation failed")
+		}
+		return
+	}
+	Success(c, result)
+}
+
 func newAgentStreamWriter(c *gin.Context) func(agentPublicStreamEnvelope) error {
 	c.Header("Content-Type", "application/x-ndjson")
 	c.Header("Cache-Control", "no-cache, no-store")
@@ -658,7 +713,24 @@ func publicAgentResponseFromTurn(turn *conversationapp.TurnDTO, cached bool) age
 	result.GenerationID = turn.AssistantMessage.GenerationID
 	result.RequestID = turn.AssistantMessage.RequestID
 	_ = json.Unmarshal([]byte(turn.AssistantMessage.CitationsJSON), &result.Sources)
+	_ = json.Unmarshal([]byte(turn.AssistantMessage.ActionsJSON), &result.Proposals)
 	return result
+}
+
+func marshalPersistedAgentActions(items []confirmation.Proposal) []byte {
+	persisted := make([]confirmation.Proposal, len(items))
+	copy(persisted, items)
+	for index := range persisted {
+		// Confirmation tokens are short-lived browser credentials. Keep the
+		// descriptive card for conversation history, but never write the raw
+		// token to agent_messages.actions_json.
+		persisted[index].Token = ""
+	}
+	data, err := json.Marshal(persisted)
+	if err != nil {
+		return []byte("[]")
+	}
+	return data
 }
 
 func publicAgentStreamFailure(outcome *agentChatAuditOutcome) (int, string, string, bool) {

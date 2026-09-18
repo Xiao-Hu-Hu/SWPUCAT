@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"SWPUCAT/internal/agent/confirmation"
 	"SWPUCAT/internal/agent/telemetry"
 )
 
@@ -74,6 +75,7 @@ type ChatResponse struct {
 	Answer    string                  `json:"answer"`
 	SessionID string                  `json:"session_id"`
 	Sources   []KnowledgeSource       `json:"sources,omitempty"`
+	Proposals []confirmation.Proposal `json:"proposals,omitempty"`
 	RequestID string                  `json:"-"`
 	Audit     *telemetry.AuditSummary `json:"-"`
 }

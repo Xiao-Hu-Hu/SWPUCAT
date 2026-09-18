@@ -26,6 +26,7 @@ export interface AgentChatResponse {
   answer: string
   session_id: string
   sources?: AgentKnowledgeSource[]
+  proposals?: AgentActionProposal[]
   user_message_id?: number
   message_id?: number
   client_turn_id: string
@@ -33,6 +34,24 @@ export interface AgentChatResponse {
   request_id?: string
   cached?: boolean
   conversation_persisted: boolean
+}
+
+export interface AgentActionProposal {
+  tool: string
+  title: string
+  summary: string
+  parameters: Record<string, unknown>
+  token?: string
+  expires_at: string
+}
+
+export interface AgentActionResult {
+  tool: string
+  status: 'success' | 'failed' | 'pending'
+  title: string
+  message: string
+  data?: Record<string, unknown>
+  replayed?: boolean
 }
 
 export interface AgentConversation {
@@ -50,6 +69,7 @@ export interface AgentConversationMessage {
   tool_name?: string
   tool_result?: string
   citations_json?: string
+  actions_json?: string
   token_count?: number
   client_turn_id?: string
   generation_id?: string
@@ -191,5 +211,13 @@ export const agentApi = {
       helpful,
       note: note || undefined
     })
+  },
+  confirmAction(sessionId: string, proposal: AgentActionProposal) {
+    return api.post<AgentActionResult>('/agent/actions/confirm', {
+      session_id: sessionId,
+      tool: proposal.tool,
+      token: proposal.token || '',
+      parameters: proposal.parameters
+    }, { timeout: 30000 })
   }
 }

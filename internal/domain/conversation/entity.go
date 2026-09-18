@@ -71,6 +71,7 @@ type Message struct {
 	ToolName       string
 	ToolResult     string
 	CitationsJSON  string
+	ActionsJSON    string
 	TokenCount     int
 	ClientTurnID   string
 	GenerationID   string
@@ -142,6 +143,7 @@ func NewMessage(conversationID int64, role MessageRole, content, toolName, toolR
 		ToolName:       toolName,
 		ToolResult:     toolResult,
 		CitationsJSON:  citationsJSON,
+		ActionsJSON:    "[]",
 		TokenCount:     tokenCount,
 		CreatedAt:      time.Now(),
 	}, nil

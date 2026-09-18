@@ -1,6 +1,8 @@
 package main
 
 import (
+	"SWPUCAT/internal/agent/confirmation"
+	agentactionapp "SWPUCAT/internal/application/agentaction"
 	agentauditapp "SWPUCAT/internal/application/agentaudit"
 	"SWPUCAT/internal/application/announcement"
 	announcementdraftapp "SWPUCAT/internal/application/announcementdraft"
@@ -74,6 +76,7 @@ func main() {
 	settingsRepo := repository.NewSettingsRepo(db)
 	conversationRepo := repository.NewConversationRepo(db)
 	agentAuditRepo := repository.NewAgentAuditRepo(db)
+	agentActionRepo := repository.NewAgentActionRepo(db)
 
 	// Initialize infrastructure services
 	jwtSvc := auth.NewJWTService(&cfg.JWT)
@@ -144,6 +147,14 @@ func main() {
 	authzSvc := authorization.NewService(userRepo)
 	conversationSvc := conversationapp.NewService(conversationRepo)
 	agentAuditSvc := agentauditapp.NewService(agentAuditRepo)
+	var actionSigner *confirmation.Signer
+	if cfg.Agent.WriteEnabled {
+		actionSigner, err = confirmation.NewSigner(cfg.Agent.InternalSecret, 5*time.Minute)
+		if err != nil {
+			log.Fatalf("Failed to initialize Agent confirmations: %v", err)
+		}
+	}
+	agentActionSvc := agentactionapp.NewService(cfg.Agent.WriteEnabled, agentActionRepo, actionSigner, checkinSvc, announcementDraftSvc)
 	agentAuditAnalyticsSvc := agentauditapp.NewAnalyticsService(agentAuditRepo, agentauditapp.Pricing{
 		Enabled: cfg.Agent.CostEstimationEnabled, InputUSDPerMillion: cfg.Agent.InputUSDPerMillion,
 		CachedInputUSDPerMillion: cfg.Agent.CachedInputUSDPerMillion, OutputUSDPerMillion: cfg.Agent.OutputUSDPerMillion,
@@ -162,7 +173,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize agent client: %v", err)
 	}
-	agentHandler := httpInterface.NewAgentHandler(agentClient, conversationSvc, knowledgeIndexSvc, agentAuditSvc)
+	agentHandler := httpInterface.NewAgentHandler(agentClient, conversationSvc, knowledgeIndexSvc, agentAuditSvc, agentActionSvc)
 	agentAuditAnalyticsHandler := httpInterface.NewAgentAuditAnalyticsHandler(agentAuditAnalyticsSvc)
 	reportHandler := httpInterface.NewReportHandler(reportSvc)
 	evaluationHandler := httpInterface.NewEvaluationHandler(evaluationSvc)

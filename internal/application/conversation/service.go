@@ -49,6 +49,7 @@ type MessageDTO struct {
 	ToolName      string `json:"tool_name,omitempty"`
 	ToolResult    string `json:"tool_result,omitempty"`
 	CitationsJSON string `json:"citations_json"`
+	ActionsJSON   string `json:"actions_json"`
 	TokenCount    int    `json:"token_count"`
 	ClientTurnID  string `json:"client_turn_id,omitempty"`
 	GenerationID  string `json:"generation_id,omitempty"`
@@ -73,6 +74,7 @@ type RecordTurnRequest struct {
 	AssistantToolName   string
 	AssistantToolResult string
 	CitationsJSON       string
+	ActionsJSON         string
 	UserTokenCount      int
 	AssistantTokenCount int
 	ClientTurnID        string
@@ -309,6 +311,11 @@ func (s *Service) RecordTurn(ctx context.Context, userID int64, sessionID string
 	if err != nil {
 		return nil, shared.ErrValidation
 	}
+	actions, err := normalizeJSONArray(req.ActionsJSON)
+	if err != nil {
+		return nil, shared.ErrValidation
+	}
+	assistantMessage.ActionsJSON = actions
 	if req.ClientTurnID != "" || req.GenerationID != "" || req.RequestID != "" || req.Regenerate {
 		if !validTurnIdentifier(req.ClientTurnID) || !validTurnIdentifier(req.GenerationID) || !validTurnIdentifier(req.RequestID) {
 			return nil, shared.ErrValidation
@@ -479,7 +486,7 @@ func toConversationDTO(item *conversation.Conversation) *ConversationDTO {
 func toMessageDTO(message *conversation.Message) *MessageDTO {
 	return &MessageDTO{
 		ID: message.ID, Role: string(message.Role), Content: message.Content, ToolName: message.ToolName,
-		ToolResult: message.ToolResult, CitationsJSON: message.CitationsJSON, TokenCount: message.TokenCount,
+		ToolResult: message.ToolResult, CitationsJSON: message.CitationsJSON, ActionsJSON: message.ActionsJSON, TokenCount: message.TokenCount,
 		ClientTurnID: message.ClientTurnID, GenerationID: message.GenerationID, RequestID: message.RequestID,
 		CreatedAt: message.CreatedAt.Format(time.RFC3339),
 	}

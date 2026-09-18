@@ -28,6 +28,7 @@ type AgentMessageModel struct {
 	ToolName       string    `gorm:"size:128;not null;default:''"`
 	ToolResult     string    `gorm:"type:text;not null;default:''"`
 	CitationsJSON  string    `gorm:"column:citations_json;type:jsonb;not null;default:'[]'"`
+	ActionsJSON    string    `gorm:"column:actions_json;type:jsonb;not null;default:'[]'"`
 	TokenCount     int       `gorm:"not null;default:0"`
 	ClientTurnID   *string   `gorm:"column:client_turn_id;size:32"`
 	GenerationID   *string   `gorm:"column:generation_id;size:32"`

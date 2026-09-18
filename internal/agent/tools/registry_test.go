@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"SWPUCAT/internal/agent/business"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -11,8 +10,79 @@ import (
 	"testing"
 	"time"
 
+	"SWPUCAT/internal/agent/business"
+	"SWPUCAT/internal/agent/confirmation"
+
 	einotool "github.com/cloudwego/eino/components/tool"
 )
+
+func TestWriteToolsOnlyCollectSignedConfirmationProposals(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Error(w, "write endpoint must not be called while proposing", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	client, err := business.NewClient(server.URL, strings.Repeat("i", 32), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := confirmation.NewSigner(strings.Repeat("s", 32), 5*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered, err := NewRegistry(client, true, signer).Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	collector := business.NewActionProposalCollector()
+	ctx := business.WithActionProposalCollector(
+		business.WithRequestContext(context.Background(), business.RequestContext{
+			Authorization: "Bearer captain-token", UserID: 7, Role: "captain", SessionID: "session-7",
+		}),
+		collector,
+	)
+	tests := []struct {
+		name      string
+		arguments string
+	}{
+		{name: confirmation.ToolClockIn, arguments: `{}`},
+		{name: confirmation.ToolClockOut, arguments: `{}`},
+		{name: confirmation.ToolDraftAnnouncement, arguments: `{"title":"值班安排","content":"请按新表值班","pinned":true}`},
+	}
+	for _, test := range tests {
+		invokable, ok := findRegisteredTool(t, registered, test.name).(einotool.InvokableTool)
+		if !ok {
+			t.Fatalf("%s is not invokable", test.name)
+		}
+		output, runErr := invokable.InvokableRun(ctx, test.arguments)
+		if runErr != nil {
+			t.Fatalf("%s invocation error = %v", test.name, runErr)
+		}
+		var safeResult actionProposalToolResult
+		if err := json.Unmarshal([]byte(output), &safeResult); err != nil {
+			t.Fatalf("decode %s output: %v", test.name, err)
+		}
+		if safeResult.Status != "confirmation_required" || safeResult.Tool != test.name || strings.Contains(output, ".") {
+			t.Fatalf("unsafe or invalid %s output = %s", test.name, output)
+		}
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("proposal tools issued %d business HTTP requests", requests.Load())
+	}
+	proposals := collector.List()
+	if len(proposals) != len(tests) {
+		t.Fatalf("proposal count = %d, want %d", len(proposals), len(tests))
+	}
+	for index, proposal := range proposals {
+		if proposal.Tool != tests[index].name || proposal.Token == "" {
+			t.Fatalf("proposal %d = %+v", index, proposal)
+		}
+		if _, _, err := signer.Verify(proposal.Token, 7, "session-7", proposal.Tool, proposal.Parameters); err != nil {
+			t.Fatalf("verify proposal %d: %v", index, err)
+		}
+	}
+}
 
 func TestPersonalWorkHoursToolIsReadOnlyAndUserScoped(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
