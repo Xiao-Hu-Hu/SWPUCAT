@@ -269,6 +269,7 @@ docker compose --env-file .env -f deployments/docker-compose.yml up -d --build
 | `CSA_AGENT_WORKER_CONCURRENCY` | Agent 同时执行的请求数 | `4` |
 | `CSA_AGENT_QUEUE_WAIT_TIMEOUT` | 达到并发上限后的最长排队时间 | `5s` |
 | `CSA_AGENT_EXECUTION_TIMEOUT` | 单次 Agent 请求的总执行预算 | `180s` |
+| `CSA_AGENT_CONVERSATION_RETENTION_DAYS` | 会话保留天数；`0` 禁用清理 | `0` |
 | `CSA_LLM_PROVIDER` | 模型适配器，目前支持 OpenAI-compatible | `openai_compatible` |
 | `CSA_LLM_MODEL` | 服务商提供的模型 ID | - |
 | `CSA_LLM_API_KEY` | 模型 API Key，仅注入 Agent 容器 | - |
@@ -289,6 +290,18 @@ docker compose --env-file .env -f deployments/docker-compose.yml up -d --build
 | GET | `/api/agent/audits/:id` | 查询单次运行及工具调用投影 |
 
 费用为基于当前配置价格的估算值；价格未启用或 Token 上报不完整时返回“未知”，不会按零费用处理。审计记录不包含提示词、回答正文、授权头或原始敏感工具参数。
+
+### Agent 会话
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/agent/conversations` | 查询当前用户的会话列表 |
+| POST | `/api/agent/conversations` | 创建当前用户的新会话 |
+| GET | `/api/agent/conversations/:session_id` | 读取当前用户的会话和消息 |
+| PATCH | `/api/agent/conversations/:session_id` | 修改当前用户的会话标题 |
+| DELETE | `/api/agent/conversations/:session_id` | 永久删除当前用户的会话；重复调用幂等 |
+
+会话自动清理默认关闭，清理命令默认只执行 dry-run；数据范围、删除后的审计处理和显式执行方式见 [`docs/agent-conversation-retention.md`](docs/agent-conversation-retention.md)。
 
 ### 认证
 

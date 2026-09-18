@@ -115,26 +115,27 @@ func (r RetrievalConfig) Validate(embeddingEnabled bool) error {
 }
 
 type AgentConfig struct {
-	Enabled                  bool          `mapstructure:"enabled"`
-	WriteEnabled             bool          `mapstructure:"write_enabled"`
-	Port                     int           `mapstructure:"port"`
-	BaseURL                  string        `mapstructure:"base_url"`
-	ServerURL                string        `mapstructure:"server_url"`
-	InternalSecret           string        `mapstructure:"internal_secret"`
-	LLMProvider              string        `mapstructure:"llm_provider"`
-	LLMModel                 string        `mapstructure:"llm_model"`
-	LLMAPIKey                string        `mapstructure:"llm_api_key"`
-	LLMBaseURL               string        `mapstructure:"llm_base_url"`
-	LLMTimeout               time.Duration `mapstructure:"llm_timeout"`
-	MaxIterations            int           `mapstructure:"max_iterations"`
-	MaxToolCalls             int           `mapstructure:"max_tool_calls"`
-	WorkerConcurrency        int           `mapstructure:"worker_concurrency"`
-	QueueWaitTimeout         time.Duration `mapstructure:"queue_wait_timeout"`
-	ExecutionTimeout         time.Duration `mapstructure:"execution_timeout"`
-	CostEstimationEnabled    bool          `mapstructure:"cost_estimation_enabled"`
-	InputUSDPerMillion       float64       `mapstructure:"input_usd_per_million"`
-	CachedInputUSDPerMillion float64       `mapstructure:"cached_input_usd_per_million"`
-	OutputUSDPerMillion      float64       `mapstructure:"output_usd_per_million"`
+	Enabled                   bool          `mapstructure:"enabled"`
+	WriteEnabled              bool          `mapstructure:"write_enabled"`
+	Port                      int           `mapstructure:"port"`
+	BaseURL                   string        `mapstructure:"base_url"`
+	ServerURL                 string        `mapstructure:"server_url"`
+	InternalSecret            string        `mapstructure:"internal_secret"`
+	LLMProvider               string        `mapstructure:"llm_provider"`
+	LLMModel                  string        `mapstructure:"llm_model"`
+	LLMAPIKey                 string        `mapstructure:"llm_api_key"`
+	LLMBaseURL                string        `mapstructure:"llm_base_url"`
+	LLMTimeout                time.Duration `mapstructure:"llm_timeout"`
+	MaxIterations             int           `mapstructure:"max_iterations"`
+	MaxToolCalls              int           `mapstructure:"max_tool_calls"`
+	WorkerConcurrency         int           `mapstructure:"worker_concurrency"`
+	QueueWaitTimeout          time.Duration `mapstructure:"queue_wait_timeout"`
+	ExecutionTimeout          time.Duration `mapstructure:"execution_timeout"`
+	ConversationRetentionDays int           `mapstructure:"conversation_retention_days"`
+	CostEstimationEnabled     bool          `mapstructure:"cost_estimation_enabled"`
+	InputUSDPerMillion        float64       `mapstructure:"input_usd_per_million"`
+	CachedInputUSDPerMillion  float64       `mapstructure:"cached_input_usd_per_million"`
+	OutputUSDPerMillion       float64       `mapstructure:"output_usd_per_million"`
 }
 
 func (a *AgentConfig) Validate() error {
@@ -155,6 +156,9 @@ func (a *AgentConfig) Validate() error {
 	}
 	if a.ExecutionTimeout < 0 {
 		return fmt.Errorf("agent.execution_timeout must not be negative")
+	}
+	if a.ConversationRetentionDays < 0 || a.ConversationRetentionDays > 3650 {
+		return fmt.Errorf("agent.conversation_retention_days must be between 0 and 3650")
 	}
 	if a.Enabled {
 		if a.EffectiveQueueWaitTimeout() >= a.EffectiveExecutionTimeout() {
@@ -236,6 +240,9 @@ func (c *Config) ValidateForServer() error {
 	}
 	if c.Database.MaxOpenConns < 1 || c.Database.MaxIdleConns < 0 || c.Database.MaxIdleConns > c.Database.MaxOpenConns {
 		return fmt.Errorf("database connection pool limits are invalid")
+	}
+	if c.Agent.ConversationRetentionDays < 0 || c.Agent.ConversationRetentionDays > 3650 {
+		return fmt.Errorf("agent.conversation_retention_days must be between 0 and 3650")
 	}
 	if err := c.Embedding.Validate(); err != nil {
 		return err
@@ -384,6 +391,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("agent.worker_concurrency", 4)
 	viper.SetDefault("agent.queue_wait_timeout", 5*time.Second)
 	viper.SetDefault("agent.execution_timeout", 180*time.Second)
+	viper.SetDefault("agent.conversation_retention_days", 0)
 	viper.SetDefault("agent.cost_estimation_enabled", false)
 	viper.SetDefault("agent.input_usd_per_million", 0.0)
 	viper.SetDefault("agent.cached_input_usd_per_million", 0.0)
@@ -450,6 +458,7 @@ func Load() (*Config, error) {
 	applyIntEnv("CSA_AGENT_WORKER_CONCURRENCY", &cfg.Agent.WorkerConcurrency)
 	applyDurationEnv("CSA_AGENT_QUEUE_WAIT_TIMEOUT", &cfg.Agent.QueueWaitTimeout)
 	applyDurationEnv("CSA_AGENT_EXECUTION_TIMEOUT", &cfg.Agent.ExecutionTimeout)
+	applyIntEnv("CSA_AGENT_CONVERSATION_RETENTION_DAYS", &cfg.Agent.ConversationRetentionDays)
 	applyBoolEnv("CSA_AGENT_COST_ESTIMATION_ENABLED", &cfg.Agent.CostEstimationEnabled)
 	applyFloat64Env("CSA_AGENT_INPUT_USD_PER_MILLION", &cfg.Agent.InputUSDPerMillion)
 	applyFloat64Env("CSA_AGENT_CACHED_INPUT_USD_PER_MILLION", &cfg.Agent.CachedInputUSDPerMillion)

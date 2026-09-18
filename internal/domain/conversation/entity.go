@@ -21,6 +21,7 @@ const (
 var (
 	ErrInvalidConversation = errors.New("invalid conversation")
 	ErrInvalidMessage      = errors.New("invalid conversation message")
+	ErrDeletedConversation = errors.New("conversation was permanently deleted")
 )
 
 type MessageRole string

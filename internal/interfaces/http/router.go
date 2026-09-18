@@ -189,6 +189,7 @@ func (r *Router) Setup() *gin.Engine {
 			protected.GET("/agent/conversations/:session_id", r.agentHandler.GetConversation)
 			protected.PATCH("/agent/conversations/:session_id", r.agentHandler.UpdateConversationTitle)
 			protected.PUT("/agent/conversations/:session_id", r.agentHandler.UpdateConversationTitle)
+			protected.DELETE("/agent/conversations/:session_id", r.agentHandler.DeleteConversation)
 			protected.POST("/agent/chat", r.agentHandler.Chat)
 			protected.GET("/agent/audits", RBACMiddleware("super_admin"), r.agentAuditHandler.List)
 			protected.GET("/agent/audits/summary", RBACMiddleware("super_admin"), r.agentAuditHandler.Summary)

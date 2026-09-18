@@ -16,3 +16,14 @@ type Repository interface {
 	ListRecentMessages(ctx context.Context, userID int64, sessionID string, limit int) ([]*Message, error)
 	RecordTurn(ctx context.Context, userID int64, sessionID, title string, titleCustomized bool, userMessage, assistantMessage *Message, summary, lastSourcesJSON string, activeAt time.Time) error
 }
+
+// LifecycleRepository extends the normal conversation store with destructive
+// lifecycle operations. Implementations must remove message content, detach
+// audit conversation identifiers, and prevent a deleted session handle from
+// being recreated for the same owner.
+type LifecycleRepository interface {
+	Repository
+	DeleteOwned(ctx context.Context, userID int64, sessionID string, deletedAt time.Time) error
+	CountExpired(ctx context.Context, before time.Time) (int64, error)
+	DeleteExpired(ctx context.Context, before time.Time, limit int, deletedAt time.Time) (int64, error)
+}

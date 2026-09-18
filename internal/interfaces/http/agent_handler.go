@@ -201,6 +201,36 @@ func (h *AgentHandler) UpdateConversationTitle(c *gin.Context) {
 	Success(c, item)
 }
 
+func (h *AgentHandler) DeleteConversation(c *gin.Context) {
+	if h == nil || h.conversations == nil {
+		Error(c, http.StatusServiceUnavailable, 503, "agent service is not configured")
+		return
+	}
+	sessionID := strings.TrimSpace(c.Param("session_id"))
+	if sessionID == "" {
+		BadRequest(c, "session_id is required")
+		return
+	}
+	if _, err := normalizeAgentSessionID(sessionID); err != nil {
+		BadRequest(c, "session_id is invalid")
+		return
+	}
+	userID := GetUserID(c)
+	unlock := h.lockConversation(userID, sessionID)
+	defer unlock()
+	if err := h.conversations.Delete(c.Request.Context(), userID, sessionID); err != nil {
+		if errors.Is(err, shared.ErrValidation) {
+			BadRequest(c, "session_id is invalid")
+			return
+		}
+		InternalError(c, "failed to delete agent conversation")
+		return
+	}
+	// Missing and cross-owner handles deliberately return the same idempotent
+	// response so this endpoint does not reveal another user's session ids.
+	Success(c, nil)
+}
+
 func (h *AgentHandler) Chat(c *gin.Context) {
 	outcome := newAgentChatAuditOutcome(c)
 	requestContext := c.Request.Context()
@@ -518,6 +548,9 @@ func (o *agentChatAuditOutcome) applyLegacyAgentFailure(statusCode int) {
 func writeAgentConversationFailure(c *gin.Context, outcome *agentChatAuditOutcome, err error, operation, message string) {
 	var netErr net.Error
 	switch {
+	case errors.Is(err, conversation.ErrDeletedConversation):
+		outcome.fail(agentaudit.RunStatusRejected, "main", "persistence", operation+"_deleted", false)
+		Error(c, http.StatusGone, http.StatusGone, "agent conversation was permanently deleted")
 	case errors.Is(err, context.Canceled):
 		outcome.fail(agentaudit.RunStatusCanceled, "main", "persistence", operation+"_canceled", false)
 		Error(c, clientClosedRequestStatus, clientClosedRequestStatus, "request was canceled")

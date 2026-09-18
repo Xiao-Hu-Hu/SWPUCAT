@@ -65,6 +65,9 @@ export const agentApi = {
   updateConversationTitle(sessionId: string, title: string) {
     return api.patch<AgentConversation>(`/agent/conversations/${encodeURIComponent(sessionId)}`, { title })
   },
+  deleteConversation(sessionId: string) {
+    return api.delete(`/agent/conversations/${encodeURIComponent(sessionId)}`)
+  },
   chat(message: string, sessionId = '') {
     return api.post<AgentChatResponse>('/agent/chat', {
       message,

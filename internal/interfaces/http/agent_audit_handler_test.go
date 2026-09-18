@@ -266,6 +266,20 @@ func TestAgentChatAuditRecordsEveryLocalReturn(t *testing.T) {
 			wantSession:   true,
 		},
 		{
+			name:             "conversation was deleted",
+			body:             `{"message":"hello","session_id":"session-7"}`,
+			clientConfigured: true,
+			configureRepo: func(repo *agentAuditTestConversationRepo) {
+				repo.createErr = conversation.ErrDeletedConversation
+			},
+			wantHTTP:     http.StatusGone,
+			wantStatus:   agentaudit.RunStatusRejected,
+			wantSource:   "main",
+			wantCategory: "persistence",
+			wantCode:     "conversation_initialize_deleted",
+			wantSession:  true,
+		},
+		{
 			name:             "conversation init canceled",
 			body:             `{"message":"hello","session_id":"session-7"}`,
 			clientConfigured: true,

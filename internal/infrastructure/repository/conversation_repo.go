@@ -2,6 +2,9 @@ package repository
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"time"
 
 	"SWPUCAT/internal/domain/conversation"
@@ -37,7 +40,18 @@ func (r *ConversationRepo) Create(ctx context.Context, item *conversation.Conver
 		CreatedAt:       item.CreatedAt,
 		UpdatedAt:       item.UpdatedAt,
 	}
-	if err := r.db.WithContext(ctx).Create(model).Error; err != nil {
+	if err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var tombstones int64
+		if err := tx.Table("agent_conversation_tombstones").
+			Where("user_id = ? AND session_hash = ?", item.UserID, conversationSessionHash(item.SessionID)).
+			Count(&tombstones).Error; err != nil {
+			return err
+		}
+		if tombstones > 0 {
+			return conversation.ErrDeletedConversation
+		}
+		return tx.Create(model).Error
+	}); err != nil {
 		return err
 	}
 	item.ID = model.ID
@@ -45,6 +59,107 @@ func (r *ConversationRepo) Create(ctx context.Context, item *conversation.Conver
 	item.UpdatedAt = model.UpdatedAt
 	item.LastActiveAt = model.LastActiveAt
 	return nil
+}
+
+func (r *ConversationRepo) DeleteOwned(ctx context.Context, userID int64, sessionID string, deletedAt time.Time) error {
+	if r == nil || r.db == nil || userID <= 0 || sessionID == "" || deletedAt.IsZero() {
+		return conversation.ErrInvalidConversation
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var record database.AgentConversationModel
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id", "user_id", "session_id").
+			Where("user_id = ? AND session_id = ?", userID, sessionID).
+			First(&record).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := insertConversationTombstone(tx, record.UserID, record.SessionID, "user", deletedAt); err != nil {
+			return err
+		}
+		if err := detachConversationAudits(tx, []int64{record.ID}); err != nil {
+			return err
+		}
+		result := tx.Where("id = ? AND user_id = ?", record.ID, userID).Delete(&database.AgentConversationModel{})
+		if result.Error != nil {
+			return result.Error
+		}
+		return nil
+	})
+}
+
+func (r *ConversationRepo) CountExpired(ctx context.Context, before time.Time) (int64, error) {
+	if r == nil || r.db == nil || before.IsZero() {
+		return 0, conversation.ErrInvalidConversation
+	}
+	var count int64
+	err := r.db.WithContext(ctx).Model(&database.AgentConversationModel{}).
+		Where("last_active_at < ?", before).Count(&count).Error
+	return count, err
+}
+
+func (r *ConversationRepo) DeleteExpired(ctx context.Context, before time.Time, limit int, deletedAt time.Time) (int64, error) {
+	if r == nil || r.db == nil || before.IsZero() || deletedAt.IsZero() || limit < 1 {
+		return 0, conversation.ErrInvalidConversation
+	}
+	var deleted int64
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var records []database.AgentConversationModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Select("id", "user_id", "session_id").
+			Where("last_active_at < ?", before).
+			Order("last_active_at ASC, id ASC").
+			Limit(limit).
+			Find(&records).Error; err != nil {
+			return err
+		}
+		if len(records) == 0 {
+			return nil
+		}
+		ids := make([]int64, 0, len(records))
+		for _, record := range records {
+			if err := insertConversationTombstone(tx, record.UserID, record.SessionID, "retention", deletedAt); err != nil {
+				return err
+			}
+			ids = append(ids, record.ID)
+		}
+		if err := detachConversationAudits(tx, ids); err != nil {
+			return err
+		}
+		result := tx.Where("id IN ? AND last_active_at < ?", ids, before).Delete(&database.AgentConversationModel{})
+		if result.Error != nil {
+			return result.Error
+		}
+		deleted = result.RowsAffected
+		return nil
+	})
+	return deleted, err
+}
+
+func insertConversationTombstone(tx *gorm.DB, userID int64, sessionID, reason string, deletedAt time.Time) error {
+	return tx.Exec(`
+		INSERT INTO agent_conversation_tombstones (user_id, session_hash, reason, deleted_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT (user_id, session_hash) DO UPDATE SET
+			reason = EXCLUDED.reason,
+			deleted_at = EXCLUDED.deleted_at`,
+		userID, conversationSessionHash(sessionID), reason, deletedAt).Error
+}
+
+func detachConversationAudits(tx *gorm.DB, conversationIDs []int64) error {
+	if len(conversationIDs) == 0 {
+		return nil
+	}
+	return tx.Table("agent_runs").Where("conversation_id IN ?", conversationIDs).
+		Updates(map[string]interface{}{"conversation_id": nil, "session_id": nil}).Error
+}
+
+func conversationSessionHash(sessionID string) string {
+	digest := sha256.Sum256([]byte(sessionID))
+	return hex.EncodeToString(digest[:])
 }
 
 func (r *ConversationRepo) FindBySession(ctx context.Context, userID int64, sessionID string) (*conversation.Conversation, error) {
@@ -203,3 +318,4 @@ func toDomainMessage(model *database.AgentMessageModel) *conversation.Message {
 }
 
 var _ conversation.Repository = (*ConversationRepo)(nil)
+var _ conversation.LifecycleRepository = (*ConversationRepo)(nil)

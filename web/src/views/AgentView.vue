@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   agentApi,
   type AgentConversation,
@@ -39,6 +39,7 @@ const historyRequestId = ref(0)
 const editingSessionId = ref('')
 const editingTitle = ref('')
 const renamingSessionId = ref('')
+const deletingSessionId = ref('')
 
 const sessionStorageKey = () => `swpucat-agent-session:${authStore.user?.id || 'anonymous'}`
 
@@ -119,6 +120,37 @@ async function selectConversation(item: AgentConversation) {
   if (item.session_id === sessionId.value && !historyLoading.value) return
   if (loading.value || historyLoading.value || creatingConversation.value || editingSessionId.value || renamingSessionId.value) return
   await loadConversation(item.session_id)
+}
+
+async function deleteConversation(item: AgentConversation) {
+  if (loading.value || historyLoading.value || creatingConversation.value || editingSessionId.value || renamingSessionId.value || deletingSessionId.value) return
+  try {
+    await ElMessageBox.confirm(
+      '删除后，会话消息、摘要和引用将永久清除且无法恢复；运行审计仅保留脱离会话标识的安全统计。',
+      `删除“${conversationTitle(item)}”？`,
+      { type: 'warning', confirmButtonText: '永久删除', cancelButtonText: '取消', confirmButtonClass: 'el-button--danger' }
+    )
+  } catch {
+    return
+  }
+
+  deletingSessionId.value = item.session_id
+  try {
+    await agentApi.deleteConversation(item.session_id)
+    const wasCurrent = sessionId.value === item.session_id
+    conversations.value = conversations.value.filter((conversation) => conversation.session_id !== item.session_id)
+    if (wasCurrent) {
+      resetDraft()
+      const next = conversations.value[0]
+      if (next) await loadConversation(next.session_id)
+    }
+    ElMessage.success('会话已永久删除')
+  } catch (error: any) {
+    const detail = error?.response?.data?.message
+    ElMessage.error(detail || '会话删除失败，请稍后重试')
+  } finally {
+    deletingSessionId.value = ''
+  }
 }
 
 async function loadConversation(targetSessionId: string) {
@@ -425,6 +457,19 @@ async function downloadSource(source: AgentKnowledgeSource) {
             >
               <el-icon><Edit /></el-icon>
             </el-button>
+            <el-button
+              v-if="item.session_id !== editingSessionId"
+              class="conversation-delete-button"
+              text
+              circle
+              size="small"
+              :loading="deletingSessionId === item.session_id"
+              :disabled="loading || historyLoading || creatingConversation || Boolean(renamingSessionId) || Boolean(deletingSessionId)"
+              aria-label="永久删除会话"
+              @click.stop="deleteConversation(item)"
+            >
+              <el-icon><Delete /></el-icon>
+            </el-button>
           </div>
         </div>
       </aside>
@@ -637,13 +682,26 @@ async function downloadSource(source: AgentKnowledgeSource) {
   transition: opacity 0.2s, color 0.2s;
 }
 
+.conversation-delete-button {
+  flex: none;
+  opacity: 0;
+  color: var(--text-muted);
+  transition: opacity 0.2s, color 0.2s;
+}
+
 .conversation-item:hover .conversation-edit-button,
-.conversation-edit-button:focus-visible {
+.conversation-edit-button:focus-visible,
+.conversation-item:hover .conversation-delete-button,
+.conversation-delete-button:focus-visible {
   opacity: 1;
 }
 
 .conversation-edit-button:hover:not(:disabled) {
   color: var(--accent);
+}
+
+.conversation-delete-button:hover:not(:disabled) {
+  color: var(--danger);
 }
 
 .conversation-item-date {

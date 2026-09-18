@@ -2,7 +2,9 @@ package conversationapp
 
 import (
 	"context"
+	"errors"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,17 +13,28 @@ import (
 )
 
 type fakeConversationRepo struct {
+	mu            sync.Mutex
 	conversations map[string]*conversation.Conversation
 	messages      map[string][]*conversation.Message
+	tombstones    map[string]time.Time
+	auditDetached map[int64]bool
 	nextID        int64
 }
 
 func newFakeConversationRepo() *fakeConversationRepo {
-	return &fakeConversationRepo{conversations: map[string]*conversation.Conversation{}, messages: map[string][]*conversation.Message{}, nextID: 1}
+	return &fakeConversationRepo{
+		conversations: map[string]*conversation.Conversation{}, messages: map[string][]*conversation.Message{},
+		tombstones: map[string]time.Time{}, auditDetached: map[int64]bool{}, nextID: 1,
+	}
 }
 
 func (r *fakeConversationRepo) Create(_ context.Context, item *conversation.Conversation) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	key := fakeConversationKey(item.UserID, item.SessionID)
+	if _, deleted := r.tombstones[key]; deleted {
+		return conversation.ErrDeletedConversation
+	}
 	if _, exists := r.conversations[key]; exists {
 		return shared.ErrConflict
 	}
@@ -30,6 +43,50 @@ func (r *fakeConversationRepo) Create(_ context.Context, item *conversation.Conv
 	copy := *item
 	r.conversations[key] = &copy
 	return nil
+}
+
+func (r *fakeConversationRepo) DeleteOwned(_ context.Context, userID int64, sessionID string, deletedAt time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := fakeConversationKey(userID, sessionID)
+	item := r.conversations[key]
+	if item == nil {
+		return nil
+	}
+	r.tombstones[key] = deletedAt
+	r.auditDetached[item.ID] = true
+	delete(r.messages, key)
+	delete(r.conversations, key)
+	return nil
+}
+
+func (r *fakeConversationRepo) CountExpired(_ context.Context, before time.Time) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var count int64
+	for _, item := range r.conversations {
+		if item.LastActiveAt.Before(before) {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (r *fakeConversationRepo) DeleteExpired(_ context.Context, before time.Time, limit int, deletedAt time.Time) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var deleted int64
+	for key, item := range r.conversations {
+		if deleted >= int64(limit) || !item.LastActiveAt.Before(before) {
+			continue
+		}
+		r.tombstones[key] = deletedAt
+		r.auditDetached[item.ID] = true
+		delete(r.messages, key)
+		delete(r.conversations, key)
+		deleted++
+	}
+	return deleted, nil
 }
 
 func (r *fakeConversationRepo) FindBySession(_ context.Context, userID int64, sessionID string) (*conversation.Conversation, error) {
@@ -294,5 +351,96 @@ func TestLoadContextLimitsRecentMessages(t *testing.T) {
 func TestNormalizeJSONArrayRejectsObject(t *testing.T) {
 	if _, err := normalizeJSONArray(`{"source_id":12}`); err == nil {
 		t.Fatal("accepted a non-array JSON payload")
+	}
+}
+
+func TestDeleteIsOwnerScopedIdempotentAndPreventsRecreation(t *testing.T) {
+	repo := newFakeConversationRepo()
+	service := NewService(repo)
+	ctx := context.Background()
+	owned, err := service.GetOrCreate(ctx, 7, "same-session", "自己的会话")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := service.GetOrCreate(ctx, 8, "same-session", "别人的会话")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RecordTurn(ctx, 7, owned.SessionID, RecordTurnRequest{UserContent: "敏感问题", AssistantContent: "敏感回答"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Delete(ctx, 7, owned.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Delete(ctx, 7, owned.SessionID); err != nil {
+		t.Fatalf("repeated deletion failed: %v", err)
+	}
+	if _, err := service.LoadContext(ctx, 7, owned.SessionID, 20); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("deleted context error = %v", err)
+	}
+	if _, err := service.GetOrCreate(ctx, 7, owned.SessionID, "试图复活"); !errors.Is(err, conversation.ErrDeletedConversation) {
+		t.Fatalf("deleted session was recreated: %v", err)
+	}
+	if _, err := service.LoadContext(ctx, 8, other.SessionID, 20); err != nil {
+		t.Fatalf("other owner's same session handle was deleted: %v", err)
+	}
+	if !repo.auditDetached[owned.ID] || repo.auditDetached[other.ID] {
+		t.Fatalf("audit detach state = %+v", repo.auditDetached)
+	}
+}
+
+func TestConcurrentDeleteIsIdempotent(t *testing.T) {
+	repo := newFakeConversationRepo()
+	service := NewService(repo)
+	created, err := service.GetOrCreate(context.Background(), 7, "delete-race", "并发删除")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 12)
+	for i := 0; i < cap(errs); i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- service.Delete(context.Background(), 7, created.SessionID)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent deletion failed: %v", err)
+		}
+	}
+	if len(repo.tombstones) != 1 || !repo.auditDetached[created.ID] {
+		t.Fatalf("concurrent deletion state = tombstones:%+v audits:%+v", repo.tombstones, repo.auditDetached)
+	}
+}
+
+func TestCleanupExpiredRequiresExplicitExecution(t *testing.T) {
+	repo := newFakeConversationRepo()
+	service := NewService(repo)
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	old, _ := service.GetOrCreate(context.Background(), 7, "old-session", "旧会话")
+	recent, _ := service.GetOrCreate(context.Background(), 7, "recent-session", "新会话")
+	repo.conversations[fakeConversationKey(7, old.SessionID)].LastActiveAt = now.AddDate(0, 0, -31)
+	repo.conversations[fakeConversationKey(7, recent.SessionID)].LastActiveAt = now.AddDate(0, 0, -29)
+
+	preview, err := service.CleanupExpired(context.Background(), now, 30, 10, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !preview.DryRun || preview.Eligible != 1 || preview.Deleted != 0 || len(repo.conversations) != 2 {
+		t.Fatalf("dry-run mutated data: result=%+v conversations=%d", preview, len(repo.conversations))
+	}
+	executed, err := service.CleanupExpired(context.Background(), now, 30, 10, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executed.DryRun || executed.Eligible != 1 || executed.Deleted != 1 || len(repo.conversations) != 1 {
+		t.Fatalf("cleanup result=%+v conversations=%d", executed, len(repo.conversations))
+	}
+	if repo.conversations[fakeConversationKey(7, recent.SessionID)] == nil || !repo.auditDetached[old.ID] {
+		t.Fatalf("cleanup removed wrong conversation or kept audit link: %+v", repo.conversations)
 	}
 }

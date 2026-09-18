@@ -51,6 +51,25 @@ func TestAgentConfigTimeoutBudgetDefaultsAndValidation(t *testing.T) {
 	}
 }
 
+func TestAgentConversationRetentionIsDisabledByDefaultAndBounded(t *testing.T) {
+	base := AgentConfig{Port: 8090, MaxIterations: 4, MaxToolCalls: 8, WorkerConcurrency: 1}
+	if base.ConversationRetentionDays != 0 {
+		t.Fatalf("retention default = %d, want disabled", base.ConversationRetentionDays)
+	}
+	base.ConversationRetentionDays = -1
+	if err := base.Validate(); err == nil {
+		t.Fatal("negative retention was accepted")
+	}
+	base.ConversationRetentionDays = 3651
+	if err := base.Validate(); err == nil {
+		t.Fatal("unbounded retention was accepted")
+	}
+	base.ConversationRetentionDays = 90
+	if err := base.Validate(); err != nil {
+		t.Fatalf("valid retention rejected: %v", err)
+	}
+}
+
 func TestEmbeddingConfigValidate(t *testing.T) {
 	cfg := EmbeddingConfig{
 		Enabled: true, Provider: "openai_compatible", Model: "embedding-model",

@@ -46,6 +46,8 @@ agent:
   worker_concurrency: 4
   queue_wait_timeout: 5s
   execution_timeout: 180s
+  # 0 disables destructive cleanup. Use cmd/conversation_cleanup to preview or execute.
+  conversation_retention_days: 0
   cost_estimation_enabled: false
   input_usd_per_million: 0
   cached_input_usd_per_million: 0

@@ -19,6 +19,9 @@ const (
 	defaultConversationListLimit = 100
 	maxConversationListLimit     = 200
 	maxConversationHistoryLimit  = 500
+	defaultCleanupBatchSize      = 100
+	maxCleanupBatchSize          = 1000
+	maxRetentionDays             = 3650
 )
 
 type Service struct {
@@ -69,6 +72,14 @@ type RecordTurnRequest struct {
 	LastSourcesJSON *string
 }
 
+type CleanupResult struct {
+	Before        string `json:"before"`
+	RetentionDays int    `json:"retention_days"`
+	DryRun        bool   `json:"dry_run"`
+	Eligible      int64  `json:"eligible"`
+	Deleted       int64  `json:"deleted"`
+}
+
 // GetOrCreate makes the session handle durable. Because lookup is already
 // filtered by userID, another account using the same opaque session string
 // receives a distinct, empty conversation rather than another user's context.
@@ -94,6 +105,9 @@ func (s *Service) GetOrCreate(ctx context.Context, userID int64, sessionID, titl
 		return nil, shared.ErrValidation
 	}
 	if err := s.repo.Create(ctx, item); err != nil {
+		if errors.Is(err, conversation.ErrDeletedConversation) {
+			return nil, conversation.ErrDeletedConversation
+		}
 		// A browser can submit two first messages concurrently. If another
 		// request won the unique (user_id, session_id) insert race, return the
 		// durable row it created instead of failing a valid chat request.
@@ -103,6 +117,64 @@ func (s *Service) GetOrCreate(ctx context.Context, userID int64, sessionID, titl
 		return nil, err
 	}
 	return toConversationDTO(item), nil
+}
+
+// Delete permanently removes one owned conversation. The repository keeps a
+// one-way session hash tombstone so the same handle cannot silently create a
+// new conversation after the user has explicitly deleted it. Missing rows are
+// treated as success, making retries idempotent without revealing whether a
+// session belongs to another account.
+func (s *Service) Delete(ctx context.Context, userID int64, sessionID string) error {
+	if s == nil || s.repo == nil || userID <= 0 || strings.TrimSpace(sessionID) == "" {
+		return shared.ErrValidation
+	}
+	lifecycle, ok := s.repo.(conversation.LifecycleRepository)
+	if !ok {
+		return shared.ErrInternal
+	}
+	return lifecycle.DeleteOwned(ctx, userID, strings.TrimSpace(sessionID), time.Now())
+}
+
+// CleanupExpired previews or executes retention cleanup. Destructive cleanup
+// is impossible unless execute is explicitly true; retention=0 is handled by
+// configuration as disabled and is rejected here to avoid accidental defaults.
+func (s *Service) CleanupExpired(ctx context.Context, now time.Time, retentionDays, batchSize int, execute bool) (*CleanupResult, error) {
+	if s == nil || s.repo == nil || now.IsZero() || retentionDays < 1 || retentionDays > maxRetentionDays {
+		return nil, shared.ErrValidation
+	}
+	if batchSize <= 0 {
+		batchSize = defaultCleanupBatchSize
+	}
+	if batchSize > maxCleanupBatchSize {
+		return nil, shared.ErrValidation
+	}
+	lifecycle, ok := s.repo.(conversation.LifecycleRepository)
+	if !ok {
+		return nil, shared.ErrInternal
+	}
+	before := now.AddDate(0, 0, -retentionDays)
+	eligible, err := lifecycle.CountExpired(ctx, before)
+	if err != nil {
+		return nil, err
+	}
+	result := &CleanupResult{
+		Before: before.Format(time.RFC3339), RetentionDays: retentionDays,
+		DryRun: !execute, Eligible: eligible,
+	}
+	if !execute || eligible == 0 {
+		return result, nil
+	}
+	for {
+		deleted, deleteErr := lifecycle.DeleteExpired(ctx, before, batchSize, now)
+		if deleteErr != nil {
+			return nil, deleteErr
+		}
+		result.Deleted += deleted
+		if deleted == 0 || deleted < int64(batchSize) {
+			break
+		}
+	}
+	return result, nil
 }
 
 // ListRecent returns only conversations owned by userID, ordered by the most

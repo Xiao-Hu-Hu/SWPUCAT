@@ -1,4 +1,4 @@
-.PHONY: dev test lint build migrate generate agent-eval clean help
+.PHONY: dev test lint build migrate generate agent-eval conversation-cleanup-dry-run clean help
 
 dev:
 	@bash scripts/dev.sh
@@ -23,6 +23,9 @@ generate:
 
 agent-eval:
 	go run -buildvcs=false ./cmd/agent_eval -mode=validate -suite=v1
+
+conversation-cleanup-dry-run:
+	go run -buildvcs=false ./cmd/conversation_cleanup
 
 swagger:
 	swag init -g cmd/server/main.go -o api/swagger
@@ -56,6 +59,7 @@ help:
 	@echo "  migrate-down  - Rollback last migration"
 	@echo "  generate      - Generate Ent code"
 	@echo "  agent-eval    - Validate the offline role-based Agent evaluation suite"
+	@echo "  conversation-cleanup-dry-run - Preview expired Agent conversation cleanup"
 	@echo "  swagger       - Generate Swagger docs"
 	@echo "  clean         - Clean build artifacts"
 	@echo "  web-dev       - Start frontend dev server"
