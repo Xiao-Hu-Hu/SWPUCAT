@@ -135,7 +135,7 @@ func main() {
 	invitationSvc := invitation.NewInvitationService(invitationRepo, userRepo)
 	notificationSvc := notificationapp.NewService(notificationRepo, userRepo, reportRepo)
 	checkinSvc := checkin.NewCheckinService(checkinRepo, userRepo, publisher, settingsRepo, notificationSvc)
-	knowledgeSvc := knowledge.NewKnowledgeService(knowledgeRepo, publisher)
+	knowledgeSvc := knowledge.NewKnowledgeService(knowledgeRepo, publisher, knowledgeIndexSvc)
 	reportSvc := reportapp.NewService(reportRepo)
 	evaluationSvc := evaluationapp.NewService(evaluationRepo, notificationSvc)
 	teamQuerySvc := teamqueryapp.NewService(checkinSvc, reportSvc)

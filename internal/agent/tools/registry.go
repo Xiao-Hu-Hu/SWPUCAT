@@ -260,7 +260,12 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 			}
 			for _, item := range items {
 				if collector := business.KnowledgeSourceCollectorFrom(ctx); collector != nil {
-					collector.Add([]business.KnowledgeItem{{ID: item.ItemID, Name: item.Name, Description: item.Description, URL: item.URL, CategoryName: item.CategoryName}})
+					collector.Add([]business.KnowledgeItem{{
+						ID: item.ItemID, Type: item.Type, Name: item.Name,
+						Description: item.Description, URL: item.URL, DownloadURL: item.DownloadURL,
+						CategoryName: item.CategoryName, SourceKind: item.SourceKind,
+						Excerpt: item.Excerpt, Score: item.Score, MatchMode: item.MatchMode,
+					}})
 				}
 			}
 			return marshal(items)

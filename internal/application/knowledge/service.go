@@ -1,14 +1,17 @@
 package knowledge
 
 import (
+	"SWPUCAT/internal/application/knowledgeindex"
 	"SWPUCAT/internal/domain/knowledge"
 	"SWPUCAT/internal/domain/shared"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -58,10 +61,16 @@ type InsightDTO struct {
 
 type RecommendationDTO struct {
 	ItemID          int64    `json:"item_id"`
+	Type            string   `json:"type"`
 	Name            string   `json:"name"`
 	Description     string   `json:"description,omitempty"`
 	URL             string   `json:"url,omitempty"`
+	DownloadURL     string   `json:"download_url,omitempty"`
 	CategoryName    string   `json:"category_name"`
+	SourceKind      string   `json:"source_kind,omitempty"`
+	Excerpt         string   `json:"excerpt,omitempty"`
+	Score           float64  `json:"score"`
+	MatchMode       string   `json:"match_mode"`
 	SummaryMarkdown string   `json:"summary_markdown,omitempty"`
 	Tags            []string `json:"tags,omitempty"`
 	Reason          string   `json:"reason"`
@@ -107,13 +116,22 @@ type CategoryDTO struct {
 	Count    int64  `json:"count"`
 }
 
-type KnowledgeService struct {
-	repo      knowledge.Repository
-	publisher shared.EventPublisher
+type RecommendationSearcher interface {
+	Search(ctx context.Context, query string) ([]knowledgeindex.SearchResult, error)
 }
 
-func NewKnowledgeService(repo knowledge.Repository, publisher shared.EventPublisher) *KnowledgeService {
-	return &KnowledgeService{repo: repo, publisher: publisher}
+type KnowledgeService struct {
+	repo                   knowledge.Repository
+	publisher              shared.EventPublisher
+	recommendationSearcher RecommendationSearcher
+}
+
+func NewKnowledgeService(repo knowledge.Repository, publisher shared.EventPublisher, searchers ...RecommendationSearcher) *KnowledgeService {
+	service := &KnowledgeService{repo: repo, publisher: publisher}
+	if len(searchers) > 0 {
+		service.recommendationSearcher = searchers[0]
+	}
+	return service
 }
 
 func (s *KnowledgeService) CreateLink(ctx context.Context, uploaderID int64, uploaderName string, isCaptain bool, req CreateLinkRequest) (*KnowledgeItemDTO, error) {
@@ -356,6 +374,56 @@ func (s *KnowledgeService) Recommend(ctx context.Context, userID int64, query st
 	if userID <= 0 || query == "" || len([]rune(query)) > 128 {
 		return nil, shared.ErrValidation
 	}
+	if s.recommendationSearcher != nil {
+		items, err := s.recommendationSearcher.Search(ctx, query)
+		if err == nil {
+			return s.recommendFromSearch(ctx, items)
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+	}
+	return s.recommendFromMetadata(ctx, query)
+}
+
+func (s *KnowledgeService) recommendFromSearch(ctx context.Context, items []knowledgeindex.SearchResult) ([]RecommendationDTO, error) {
+	result := make([]RecommendationDTO, 0, len(items))
+	seen := make(map[int64]struct{}, len(items))
+	for _, match := range items {
+		if match.ItemID <= 0 {
+			continue
+		}
+		if _, exists := seen[match.ItemID]; exists {
+			continue
+		}
+		seen[match.ItemID] = struct{}{}
+		item, err := s.repo.FindItemByID(ctx, match.ItemID)
+		if errors.Is(err, knowledge.ErrItemNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if item.EffectiveStatus() != knowledge.ItemStatusApproved {
+			continue
+		}
+		mode := normalizeRecommendationMatchMode(match.MatchMode)
+		recommendation := RecommendationDTO{
+			ItemID: item.ID, Type: string(item.Type), Name: item.Name,
+			Description: item.Description, URL: item.URL, CategoryName: item.CategoryName,
+			SourceKind: match.SourceKind, Excerpt: match.Excerpt, Score: match.Score,
+			MatchMode: mode, Reason: recommendationReason(mode),
+		}
+		if item.Type == knowledge.ItemTypeFile {
+			recommendation.DownloadURL = "/api/knowledge/download/" + strconv.FormatInt(item.ID, 10)
+		}
+		s.attachPublishedInsight(ctx, item, &recommendation)
+		result = append(result, recommendation)
+	}
+	return result, nil
+}
+
+func (s *KnowledgeService) recommendFromMetadata(ctx context.Context, query string) ([]RecommendationDTO, error) {
 	approved := knowledge.ItemStatusApproved
 	items, err := s.repo.FindItems(ctx, knowledge.ItemFilter{Search: query, Status: &approved, Page: 1, PageSize: 20})
 	if err != nil {
@@ -363,14 +431,54 @@ func (s *KnowledgeService) Recommend(ctx context.Context, userID int64, query st
 	}
 	result := make([]RecommendationDTO, 0, len(items))
 	for _, item := range items {
-		recommendation := RecommendationDTO{ItemID: item.ID, Name: item.Name, Description: item.Description, URL: item.URL, CategoryName: item.CategoryName, Reason: "名称、说明或分类与需求匹配"}
-		if insight, insightErr := s.repo.FindInsightByItemID(ctx, item.ID); insightErr == nil && insight.Status == knowledge.InsightPublished && insight.SourceFingerprint == knowledgeSourceFingerprint(item) {
-			recommendation.SummaryMarkdown = insight.SummaryMarkdown
-			recommendation.Tags, _ = parseTags(insight.TagsJSON)
+		if item.EffectiveStatus() != knowledge.ItemStatusApproved {
+			continue
 		}
+		recommendation := RecommendationDTO{
+			ItemID: item.ID, Type: string(item.Type), Name: item.Name,
+			Description: item.Description, URL: item.URL, CategoryName: item.CategoryName,
+			MatchMode: "metadata_keyword", Reason: recommendationReason("metadata_keyword"),
+		}
+		if item.Type == knowledge.ItemTypeFile {
+			recommendation.DownloadURL = "/api/knowledge/download/" + strconv.FormatInt(item.ID, 10)
+		}
+		s.attachPublishedInsight(ctx, item, &recommendation)
 		result = append(result, recommendation)
 	}
 	return result, nil
+}
+
+func (s *KnowledgeService) attachPublishedInsight(ctx context.Context, item *knowledge.KnowledgeItem, recommendation *RecommendationDTO) {
+	insight, err := s.repo.FindInsightByItemID(ctx, item.ID)
+	if err != nil || insight == nil || insight.Status != knowledge.InsightPublished || insight.SourceFingerprint != knowledgeSourceFingerprint(item) {
+		return
+	}
+	recommendation.SummaryMarkdown = insight.SummaryMarkdown
+	recommendation.Tags, _ = parseTags(insight.TagsJSON)
+}
+
+func normalizeRecommendationMatchMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "keyword", "vector", "hybrid":
+		return strings.ToLower(strings.TrimSpace(mode))
+	default:
+		return "unknown"
+	}
+}
+
+func recommendationReason(mode string) string {
+	switch mode {
+	case "hybrid":
+		return "关键词与语义综合匹配"
+	case "vector":
+		return "正文语义与需求相关"
+	case "keyword":
+		return "名称、说明或正文关键词匹配"
+	case "metadata_keyword":
+		return "名称、说明或分类与需求匹配（检索服务降级）"
+	default:
+		return "知识库内容与需求相关"
+	}
 }
 
 func (s *KnowledgeService) SaveRecommendationFeedback(ctx context.Context, userID, itemID int64, req RecommendationFeedbackRequest) error {

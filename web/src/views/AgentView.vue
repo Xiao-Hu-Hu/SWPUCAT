@@ -303,6 +303,7 @@ function sourceMatchLabel(source: AgentKnowledgeSource): string {
   if (source.match_mode === 'vector') return '语义匹配'
   if (source.match_mode === 'keyword') return '关键词匹配'
   if (source.match_mode === 'hybrid') return '混合匹配'
+  if (source.match_mode === 'metadata_keyword') return '元数据匹配（降级）'
   return ''
 }
 

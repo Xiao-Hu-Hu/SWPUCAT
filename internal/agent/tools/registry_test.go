@@ -163,6 +163,44 @@ func TestCheckinRequirementsToolIsAvailableToMembers(t *testing.T) {
 	}
 }
 
+func TestRecommendKnowledgeCollectsHybridSourceMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/knowledge/recommendations" || r.URL.Query().Get("q") != "请求为什么卡住" {
+			t.Fatalf("unexpected request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":[{"item_id":42,"type":"file","name":"稳定性手册.pdf","description":"后端工程手册","download_url":"/api/knowledge/download/42","category_name":"工程实践","source_kind":"content","excerpt":"使用 context 取消超时请求。","score":0.82,"match_mode":"hybrid","reason":"关键词与语义综合匹配"}]}`))
+	}))
+	defer server.Close()
+	client, err := business.NewClient(server.URL, "", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered, err := NewRegistry(client, false).Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	invokable, ok := findRegisteredTool(t, registered, "recommend_knowledge").(einotool.InvokableTool)
+	if !ok {
+		t.Fatal("recommend_knowledge is not invokable")
+	}
+	collector := business.NewKnowledgeSourceCollector()
+	ctx := business.WithKnowledgeSourceCollector(
+		business.WithRequestContext(context.Background(), business.RequestContext{Authorization: "Bearer member-token", UserID: 7, Role: "member"}),
+		collector,
+	)
+	if _, err := invokable.InvokableRun(ctx, `{"need":"请求为什么卡住"}`); err != nil {
+		t.Fatalf("InvokableRun() error = %v", err)
+	}
+	sources := collector.List()
+	if len(sources) != 1 || sources[0].ID != 42 || sources[0].MatchMode != "hybrid" || sources[0].Excerpt == "" {
+		t.Fatalf("recommendation source metadata was not collected: %+v", sources)
+	}
+	if sources[0].DownloadURL != "/api/knowledge/download/42" || sources[0].Score != 0.82 {
+		t.Fatalf("recommendation source link or score was lost: %+v", sources[0])
+	}
+}
+
 func TestReportPeriodsToolValidatesFiltersSortsAndLimits(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

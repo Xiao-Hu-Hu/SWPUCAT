@@ -1,8 +1,10 @@
 package knowledge
 
 import (
+	"SWPUCAT/internal/application/knowledgeindex"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,6 +28,17 @@ type insightRepository struct {
 	items    []*domain.KnowledgeItem
 	insight  *domain.Insight
 	feedback *domain.RecommendationFeedback
+}
+
+type recommendationSearcher struct {
+	items []knowledgeindex.SearchResult
+	err   error
+	calls int
+}
+
+func (s *recommendationSearcher) Search(context.Context, string) ([]knowledgeindex.SearchResult, error) {
+	s.calls++
+	return s.items, s.err
 }
 
 func (r *insightRepository) FindItemByID(context.Context, int64) (*domain.KnowledgeItem, error) {
@@ -273,7 +286,85 @@ func TestRecommendOnlyReturnsApprovedVisibleItemsAndStoresFeedback(t *testing.T)
 	if items[0].SummaryMarkdown != "从基础开始" || items[0].Tags[0] != "Go" {
 		t.Fatalf("published insight was not attached: %+v", items[0])
 	}
+	if items[0].MatchMode != "metadata_keyword" {
+		t.Fatalf("metadata fallback was not identified: %+v", items[0])
+	}
 	if err := svc.SaveRecommendationFeedback(context.Background(), 3, 7, RecommendationFeedbackRequest{Helpful: true, Note: "有帮助"}); err != nil || repo.feedback == nil || !repo.feedback.Helpful {
 		t.Fatalf("recommendation feedback was not stored: %+v err=%v", repo.feedback, err)
+	}
+}
+
+func TestRecommendUsesSemanticSearchAndAttachesPublishedInsight(t *testing.T) {
+	item := &domain.KnowledgeItem{
+		ID: 17, Type: domain.ItemTypeFile, Name: "服务稳定性手册.pdf",
+		Description: "后端工程手册", CategoryName: "工程实践",
+		Status: domain.ItemStatusApproved, Approved: true,
+	}
+	repo := &insightRepository{item: item}
+	insight, _ := domain.NewInsight(item.ID, 9, knowledgeSourceFingerprint(item), "适合处理请求超时问题", `["Go","稳定性"]`, "model", "prompt", nil)
+	insight.Status = domain.InsightPublished
+	repo.insight = insight
+	searcher := &recommendationSearcher{items: []knowledgeindex.SearchResult{{
+		ItemID: item.ID, Name: item.Name, SourceKind: "content",
+		Excerpt: "通过 context 取消阻止请求永久阻塞。", Score: 0.82, MatchMode: "vector",
+	}}}
+
+	items, err := NewKnowledgeService(repo, event.NewNoOpPublisher(), searcher).
+		Recommend(context.Background(), 3, "怎样避免请求一直卡住")
+	if err != nil || len(items) != 1 {
+		t.Fatalf("semantic recommendation failed: items=%+v err=%v", items, err)
+	}
+	got := items[0]
+	if got.ItemID != item.ID || got.MatchMode != "vector" || got.SourceKind != "content" || got.Score != 0.82 {
+		t.Fatalf("semantic metadata was not preserved: %+v", got)
+	}
+	if got.Excerpt == "" || got.DownloadURL != "/api/knowledge/download/17" || got.SummaryMarkdown == "" || len(got.Tags) != 2 {
+		t.Fatalf("source projection or insight is incomplete: %+v", got)
+	}
+	if got.Reason != "正文语义与需求相关" || searcher.calls != 1 {
+		t.Fatalf("unexpected reason/search count: %+v calls=%d", got, searcher.calls)
+	}
+}
+
+func TestRecommendRechecksCurrentVisibilityForIndexMatches(t *testing.T) {
+	for _, status := range []domain.ItemStatus{
+		domain.ItemStatusPending,
+		domain.ItemStatusQuarantined,
+		domain.ItemStatusRejected,
+	} {
+		t.Run(string(status), func(t *testing.T) {
+			item := &domain.KnowledgeItem{ID: 8, Name: "不可见资料", Status: status}
+			searcher := &recommendationSearcher{items: []knowledgeindex.SearchResult{{
+				ItemID: item.ID, Name: item.Name, Excerpt: "旧索引片段", MatchMode: "hybrid",
+			}}}
+			items, err := NewKnowledgeService(&insightRepository{item: item}, event.NewNoOpPublisher(), searcher).
+				Recommend(context.Background(), 3, "资料")
+			if err != nil || len(items) != 0 {
+				t.Fatalf("status %s leaked from index: items=%+v err=%v", status, items, err)
+			}
+		})
+	}
+}
+
+func TestRecommendReturnsEmptyWhenHybridSearchHasNoMatches(t *testing.T) {
+	searcher := &recommendationSearcher{items: []knowledgeindex.SearchResult{}}
+	items, err := NewKnowledgeService(&insightRepository{
+		items: []*domain.KnowledgeItem{{ID: 1, Name: "元数据本可匹配", Status: domain.ItemStatusApproved}},
+	}, event.NewNoOpPublisher(), searcher).Recommend(context.Background(), 3, "匹配")
+	if err != nil || items == nil || len(items) != 0 {
+		t.Fatalf("empty hybrid result must stay empty: items=%#v err=%v", items, err)
+	}
+}
+
+func TestRecommendFallsBackWhenRetrievalFails(t *testing.T) {
+	item := &domain.KnowledgeItem{ID: 7, Type: domain.ItemTypeLink, Name: "Go 入门", Description: "Go 教程", Status: domain.ItemStatusApproved}
+	searcher := &recommendationSearcher{err: errors.New("retrieval unavailable")}
+	items, err := NewKnowledgeService(&insightRepository{item: item, items: []*domain.KnowledgeItem{item}}, event.NewNoOpPublisher(), searcher).
+		Recommend(context.Background(), 3, "Go")
+	if err != nil || len(items) != 1 {
+		t.Fatalf("metadata fallback failed: items=%+v err=%v", items, err)
+	}
+	if items[0].MatchMode != "metadata_keyword" || !strings.Contains(items[0].Reason, "降级") {
+		t.Fatalf("fallback was not disclosed: %+v", items[0])
 	}
 }

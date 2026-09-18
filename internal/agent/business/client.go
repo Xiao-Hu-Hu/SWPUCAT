@@ -122,10 +122,16 @@ type KnowledgeItem struct {
 
 type KnowledgeRecommendation struct {
 	ItemID          int64    `json:"item_id"`
+	Type            string   `json:"type"`
 	Name            string   `json:"name"`
 	Description     string   `json:"description,omitempty"`
 	URL             string   `json:"url,omitempty"`
+	DownloadURL     string   `json:"download_url,omitempty"`
 	CategoryName    string   `json:"category_name"`
+	SourceKind      string   `json:"source_kind,omitempty"`
+	Excerpt         string   `json:"excerpt,omitempty"`
+	Score           float64  `json:"score"`
+	MatchMode       string   `json:"match_mode"`
 	SummaryMarkdown string   `json:"summary_markdown,omitempty"`
 	Tags            []string `json:"tags,omitempty"`
 	Reason          string   `json:"reason"`
