@@ -126,6 +126,7 @@ type reportMaterialsResult struct {
 	NextOffset     *int             `json:"next_offset,omitempty"`
 	Materials      []reportMaterial `json:"materials"`
 	SkippedReports int              `json:"skipped_reports,omitempty"`
+	EmptyMessage   string           `json:"empty_message,omitempty"`
 }
 
 type reportPeriodsResult struct {
@@ -141,11 +142,18 @@ type knowledgeSearchResult struct {
 	Sources        []business.KnowledgeSource `json:"sources"`
 	Truncated      bool                       `json:"truncated,omitempty"`
 	OmittedSources int                        `json:"omitted_sources,omitempty"`
+	EmptyMessage   string                     `json:"empty_message,omitempty"`
+}
+
+type knowledgeRecommendationResult struct {
+	Items        []business.KnowledgeRecommendation `json:"items"`
+	EmptyMessage string                             `json:"empty_message,omitempty"`
 }
 
 type checkinHistoryResult struct {
-	Limit   int                      `json:"limit"`
-	Records []business.CheckinRecord `json:"records"`
+	Limit        int                      `json:"limit"`
+	Records      []business.CheckinRecord `json:"records"`
+	EmptyMessage string                   `json:"empty_message,omitempty"`
 }
 
 type actionProposalToolResult struct {
@@ -200,7 +208,7 @@ func NewRegistry(client *business.Client, writeEnabled bool, signers ...*confirm
 func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	statusTool, err := toolutils.InferTool[emptyInput, string](
 		"get_checkin_status",
-		"查询当前登录成员今天的上班和下班打卡状态。",
+		"查询当前登录成员今天的上班和下班打卡状态。询问今天是否打卡时只调用本工具一次，不要附加查询历史。",
 		func(ctx context.Context, _ emptyInput) (string, error) {
 			status, err := r.client.CheckinStatus(ctx)
 			if err != nil {
@@ -244,7 +252,11 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 			if records == nil {
 				records = make([]business.CheckinRecord, 0)
 			}
-			return marshal(checkinHistoryResult{Limit: limit, Records: records})
+			result := checkinHistoryResult{Limit: limit, Records: records}
+			if len(records) == 0 {
+				result.EmptyMessage = "没有打卡记录"
+			}
+			return marshal(result)
 		},
 	)
 	if err != nil {
@@ -269,7 +281,7 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	}
 	teamQueryTool, err := toolutils.InferTool[teamQueryInput, string](
 		"query_team_members",
-		"将队长的自然语言组合查询转换为受限条件，后端确定性计算打卡和月报状态；不能生成或执行 SQL，也不会自动发送通知。",
+		"将队长的自然语言组合查询转换为受限条件，后端确定性计算打卡和月报状态；不能生成或执行 SQL，也不会自动发送通知。提供 period_id 或 report_status 时 period 必须使用 month。",
 		func(ctx context.Context, input teamQueryInput) (string, error) {
 			identity := business.RequestContextFrom(ctx)
 			if identity.Role != "captain" && identity.Role != "super_admin" {
@@ -278,6 +290,9 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 			period := strings.TrimSpace(input.Period)
 			if period == "" {
 				period = "week"
+				if input.PeriodID > 0 || input.ReportStatus != "" {
+					period = "month"
+				}
 			}
 			if period != "today" && period != "week" && period != "month" {
 				return "", fmt.Errorf("period must be today, week, or month")
@@ -303,7 +318,7 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	}
 	recommendTool, err := toolutils.InferTool[recommendInput, string](
 		"recommend_knowledge",
-		"根据成员主动描述的学习或工作需求推荐已审核的知识库资料；推荐结果只来自当前可见资源，并附带推荐依据。",
+		"根据成员主动描述的学习或工作需求直接推荐已审核的知识库资料；推荐前不要调用 search_knowledge。结果只来自当前可见资源，并附带推荐依据；空结果即没有可推荐资料，不要重试。",
 		func(ctx context.Context, input recommendInput) (string, error) {
 			need := strings.TrimSpace(input.Need)
 			if need == "" {
@@ -312,6 +327,13 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 			items, err := r.client.RecommendKnowledge(ctx, need)
 			if err != nil {
 				return "", err
+			}
+			for index := range items {
+				items[index].Name = business.RedactUntrustedSecrets(items[index].Name)
+				items[index].Description = business.RedactUntrustedSecrets(items[index].Description)
+				items[index].Excerpt = business.RedactUntrustedSecrets(items[index].Excerpt)
+				items[index].SummaryMarkdown = business.RedactUntrustedSecrets(items[index].SummaryMarkdown)
+				items[index].Reason = business.RedactUntrustedSecrets(items[index].Reason)
 			}
 			for _, item := range items {
 				if collector := business.KnowledgeSourceCollectorFrom(ctx); collector != nil {
@@ -323,7 +345,11 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 					}})
 				}
 			}
-			return marshal(items)
+			result := knowledgeRecommendationResult{Items: items}
+			if len(items) == 0 {
+				result.EmptyMessage = "没有可推荐的匹配资料"
+			}
+			return marshal(result)
 		},
 	)
 	if err != nil {
@@ -331,7 +357,7 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	}
 	knowledgeTool, err := toolutils.InferTool[searchInput, string](
 		"search_knowledge",
-		"使用关键词与语义混合检索已审核知识库的 Markdown 说明以及 PDF、DOCX、XLSX、Markdown、TXT 正文；回答流程、制度、资料内容或链接位置时优先调用。",
+		"使用关键词与语义混合检索已审核知识库的 Markdown 说明以及 PDF、DOCX、XLSX、Markdown、TXT 正文；回答流程、制度、资料内容或链接位置时调用一次。成功后直接使用结果，空 sources 即未找到，不要改写关键词重复搜索。",
 		func(ctx context.Context, input searchInput) (string, error) {
 			query := strings.TrimSpace(input.Query)
 			if query == "" {
@@ -340,6 +366,12 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 			items, err := r.client.SearchKnowledge(ctx, query)
 			if err != nil {
 				return "", err
+			}
+			for index := range items {
+				items[index].Name = business.RedactUntrustedSecrets(items[index].Name)
+				items[index].Description = business.RedactUntrustedSecrets(items[index].Description)
+				items[index].Excerpt = business.RedactUntrustedSecrets(items[index].Excerpt)
+				items[index].CategoryName = business.RedactUntrustedSecrets(items[index].CategoryName)
 			}
 			sources := business.BuildKnowledgeSources(items)
 			if collector := business.KnowledgeSourceCollectorFrom(ctx); collector != nil {
@@ -378,7 +410,7 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	}
 	reportPeriodsTool, err := toolutils.InferTool[reportPeriodsInput, string](
 		"list_report_periods",
-		"查询可用月报周期及其 period_id，可按 YYYY-MM 和 open、closed、archived 状态筛选；读取月报材料前用它确定周期，不能猜测 ID。",
+		"查询可用月报周期及其 period_id，可按 YYYY-MM 和 open、closed、archived 状态筛选；用户说仍开放、开放中或进行中时必须传 status=open，说已关闭时传 status=closed，说已归档时传 status=archived。读取月报材料前用它确定周期，不能猜测 ID。若未指定月份且返回多个候选，只列出候选并询问用户，不得继续查询成员或材料。",
 		func(ctx context.Context, input reportPeriodsInput) (string, error) {
 			input.PeriodKey = strings.TrimSpace(input.PeriodKey)
 			input.Status = strings.TrimSpace(input.Status)
@@ -424,7 +456,7 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	}
 	reportTool, err := toolutils.InferTool[reportMaterialsInput, string](
 		"get_report_materials",
-		"读取指定报告周期内可用于总结的已提交月报正文。period_id 必须来自 list_report_periods 或用户明确提供；scope=mine 读取当前用户，scope=team 仅队长读取团队材料；按 offset/limit 分页直到 next_offset 为空；不会读取草稿，也不会发布总结。",
+		"读取指定报告周期内可用于总结的已提交月报正文。period_id 必须来自 list_report_periods 或用户明确提供；scope=mine 读取当前用户，scope=team 仅队长读取团队材料；按 offset/limit 分页直到 next_offset 为空；不会读取草稿，也不会发布总结。materials 为空时直接说明没有已提交月报，不要重复调用。",
 		func(ctx context.Context, input reportMaterialsInput) (string, error) {
 			if input.PeriodID <= 0 {
 				return "", fmt.Errorf("period_id is required")
@@ -513,7 +545,7 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	}
 	pendingKnowledgeTool, err := toolutils.InferTool[pendingKnowledgeInput, string](
 		"list_pending_knowledge",
-		"仅供队长或超级管理员查看待审核知识条目的受限摘要；不返回文件存储键或完整正文。",
+		"仅供队长或超级管理员查看待审核知识条目的受限摘要；不返回文件存储键或完整正文。用户已明确给出条目 ID 和审核决定时不要调用本工具，直接调用 review_knowledge_item。",
 		func(ctx context.Context, input pendingKnowledgeInput) (string, error) {
 			identity := business.RequestContextFrom(ctx)
 			if identity.Role != "captain" && identity.Role != "super_admin" {
@@ -541,9 +573,9 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 					break
 				}
 				result.Items = append(result.Items, pendingKnowledgeItem{
-					ID: item.ID, Type: truncateToolRunes(item.Type, 32), Name: truncateToolRunes(item.Name, 256),
-					Description: truncateToolRunes(item.Description, 600), CategoryName: truncateToolRunes(item.CategoryName, 128),
-					UploaderName: truncateToolRunes(item.UploaderName, 128), CreatedAt: truncateToolRunes(item.CreatedAt, 64),
+					ID: item.ID, Type: truncateToolRunes(business.RedactUntrustedSecrets(item.Type), 32), Name: truncateToolRunes(business.RedactUntrustedSecrets(item.Name), 256),
+					Description: truncateToolRunes(business.RedactUntrustedSecrets(item.Description), 600), CategoryName: truncateToolRunes(business.RedactUntrustedSecrets(item.CategoryName), 128),
+					UploaderName: truncateToolRunes(business.RedactUntrustedSecrets(item.UploaderName), 128), CreatedAt: truncateToolRunes(item.CreatedAt, 64),
 				})
 			}
 			return marshal(result)
@@ -826,6 +858,9 @@ func boundKnowledgeSearchResult(query string, sources []business.KnowledgeSource
 		capacity = maxKnowledgeToolSources
 	}
 	result := knowledgeSearchResult{Query: truncateToolRunes(query, maxKnowledgeToolTextRunes), Sources: make([]business.KnowledgeSource, 0, capacity)}
+	if len(sources) == 0 {
+		result.EmptyMessage = "未找到匹配资料"
+	}
 	if result.Query != query {
 		result.Truncated = true
 	}
@@ -836,6 +871,10 @@ func boundKnowledgeSearchResult(query string, sources []business.KnowledgeSource
 			continue
 		}
 		bounded := source
+		bounded.Name = business.RedactUntrustedSecrets(bounded.Name)
+		bounded.Description = business.RedactUntrustedSecrets(bounded.Description)
+		bounded.Excerpt = business.RedactUntrustedSecrets(bounded.Excerpt)
+		bounded.CategoryName = business.RedactUntrustedSecrets(bounded.CategoryName)
 		var changed bool
 		bounded.Name, changed = truncateKnowledgeText(bounded.Name, maxKnowledgeToolTextRunes)
 		result.Truncated = result.Truncated || changed
@@ -987,16 +1026,20 @@ func boundReportMaterials(result reportMaterialsResult) reportMaterialsResult {
 		materials = materials[:maxReportMaterialsPerPage]
 	}
 	result.Scope = truncateMetadata(result.Scope)
+	if len(materials) == 0 {
+		result.EmptyMessage = "没有已提交月报"
+	}
 
 	// Normalize fields that can otherwise bypass the body budget.  ParsedJSON
 	// is useful for structured reports, but an unexpectedly large parser result
 	// should not be copied wholesale into the LLM context.
 	for i := range materials {
-		materials[i].AuthorName = truncateMetadata(materials[i].AuthorName)
+		materials[i].AuthorName = truncateMetadata(business.RedactUntrustedSecrets(materials[i].AuthorName))
 		materials[i].Status = truncateMetadata(materials[i].Status)
-		materials[i].Title = truncateMetadata(materials[i].Title)
+		materials[i].Title = truncateMetadata(business.RedactUntrustedSecrets(materials[i].Title))
 		materials[i].ParseStatus = truncateMetadata(materials[i].ParseStatus)
-		materials[i].ParseError = truncateMetadata(materials[i].ParseError)
+		materials[i].ParseError = truncateMetadata(business.RedactUntrustedSecrets(materials[i].ParseError))
+		materials[i].BodyMarkdown = business.RedactUntrustedSecrets(materials[i].BodyMarkdown)
 		if materials[i].ParsedJSON != nil {
 			if data, err := json.Marshal(materials[i].ParsedJSON); err != nil || len([]rune(string(data))) > maxReportParsedJSONRunes {
 				materials[i].ParsedJSON = nil

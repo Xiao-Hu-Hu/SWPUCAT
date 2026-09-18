@@ -192,7 +192,7 @@ make agent-eval
 go run -buildvcs=false ./cmd/agent_eval -mode=live -suite=v1 -role=all -repeat=3 -format=json
 ```
 
-数据集结构、评分契约和安全约束见 [`internal/agent/eval/testdata/v1/README.md`](internal/agent/eval/testdata/v1/README.md)。
+数据集结构、评分契约和安全约束见 [`internal/agent/eval/testdata/v1/README.md`](internal/agent/eval/testdata/v1/README.md)。模型上下文、第三方处理、日志脱敏、保留和删除边界见 [`docs/agent-model-data-boundary.md`](docs/agent-model-data-boundary.md)，部署和最终验收记录见 [`docs/agent-acceptance-report.md`](docs/agent-acceptance-report.md)。
 
 ## 部署到生产服务器
 

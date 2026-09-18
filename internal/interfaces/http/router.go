@@ -82,6 +82,9 @@ func NewRouter(
 }
 
 func (r *Router) Setup() *gin.Engine {
+	r.engine.GET("/healthz", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "ok"})
+	})
 	api := r.engine.Group("/api")
 	{
 		// Public routes
