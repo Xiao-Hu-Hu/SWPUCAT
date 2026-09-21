@@ -43,7 +43,13 @@ func (r *AnnouncementDraftRepo) FindByID(ctx context.Context, id int64) (*announ
 func (r *AnnouncementDraftRepo) List(ctx context.Context, status announcementdraft.Status) ([]*announcementdraft.Draft, error) {
 	var models []database.AnnouncementDraftModel
 	query := r.db.WithContext(ctx).Order("updated_at DESC, id DESC")
-	if status != "" {
+	switch status {
+	case "":
+		// The management list shows drafts still awaiting human action. Drafts
+		// that were already published or discarded must not reappear here,
+		// otherwise a published draft would linger until something else changes.
+		query = query.Where("status IN ?", []string{string(announcementdraft.StatusDraft), string(announcementdraft.StatusConfirmed)})
+	default:
 		query = query.Where("status = ?", string(status))
 	}
 	if err := query.Find(&models).Error; err != nil {

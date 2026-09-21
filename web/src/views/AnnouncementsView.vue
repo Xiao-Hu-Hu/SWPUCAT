@@ -220,11 +220,15 @@ async function publishDraft(draft: AnnouncementDraft) {
 async function discardDraft(draft: AnnouncementDraft) {
   try {
     await ElMessageBox.confirm('确定放弃这份公告草稿吗？', '放弃草稿', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
     await announcementDraftApi.discard(draft.id)
     ElMessage.success('草稿已放弃')
     await loadDrafts()
   } catch {
-    // Cancelled or failed.
+    ElMessage.error('放弃失败，草稿可能已发布或状态已变更')
   }
 }
 
