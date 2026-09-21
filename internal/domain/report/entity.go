@@ -131,6 +131,15 @@ type ReportAsset struct {
 	Note            string
 }
 
+// RosterEntry couples a required submitter with the submission state of their
+// monthly report, letting the roster view show who has submitted and when.
+type RosterEntry struct {
+	PeriodMember
+	ReportID     int64
+	ReportStatus ReportStatus
+	SubmittedAt  *time.Time
+}
+
 var periodKeyPattern = regexp.MustCompile(`^\d{4}-(0[1-9]|1[0-2])$`)
 
 func NewReportPeriod(periodKey string, startsOn, endsOn time.Time, timezone string, dueAt *time.Time, createdBy int64, createdByName string) (*ReportPeriod, error) {

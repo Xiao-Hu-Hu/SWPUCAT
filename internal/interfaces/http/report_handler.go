@@ -43,6 +43,19 @@ func (h *ReportHandler) ListPeriods(c *gin.Context) {
 	Success(c, items)
 }
 
+func (h *ReportHandler) ListRoster(c *gin.Context) {
+	periodID, ok := reportIDParam(c, "period id")
+	if !ok {
+		return
+	}
+	items, err := h.service.ListRoster(c.Request.Context(), periodID)
+	if err != nil {
+		handleReportError(c, err)
+		return
+	}
+	Success(c, items)
+}
+
 func (h *ReportHandler) AddPeriodMember(c *gin.Context) {
 	periodID, ok := reportIDParam(c, "period id")
 	if !ok {

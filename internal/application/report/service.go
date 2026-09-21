@@ -113,6 +113,17 @@ type AssetDTO struct {
 	Note            string `json:"note,omitempty"`
 }
 
+type RosterEntryDTO struct {
+	UserID          int64  `json:"user_id"`
+	DisplayName     string `json:"display_name"`
+	Required        bool   `json:"required"`
+	Exempt          bool   `json:"exempt"`
+	ExemptionReason string `json:"exemption_reason,omitempty"`
+	ReportID        int64  `json:"report_id,omitempty"`
+	ReportStatus    string `json:"report_status,omitempty"`
+	SubmittedAt     string `json:"submitted_at,omitempty"`
+}
+
 type Service struct {
 	repo domain.Repository
 }
@@ -149,6 +160,26 @@ func (s *Service) ListPeriods(ctx context.Context) ([]PeriodDTO, error) {
 	result := make([]PeriodDTO, 0, len(periods))
 	for _, period := range periods {
 		result = append(result, *toPeriodDTO(period))
+	}
+	return result, nil
+}
+
+func (s *Service) ListRoster(ctx context.Context, periodID int64) ([]RosterEntryDTO, error) {
+	entries, err := s.repo.ListRoster(ctx, periodID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]RosterEntryDTO, 0, len(entries))
+	for _, entry := range entries {
+		dto := RosterEntryDTO{
+			UserID: entry.UserID, DisplayName: entry.DisplayName, Required: entry.Required,
+			Exempt: entry.Exempt, ExemptionReason: entry.ExemptionReason,
+			ReportID: entry.ReportID, ReportStatus: string(entry.ReportStatus),
+		}
+		if entry.SubmittedAt != nil {
+			dto.SubmittedAt = entry.SubmittedAt.Format(time.RFC3339)
+		}
+		result = append(result, dto)
 	}
 	return result, nil
 }

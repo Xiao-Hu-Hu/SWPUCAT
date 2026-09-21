@@ -9,6 +9,7 @@ type Repository interface {
 	CreatePeriod(ctx context.Context, period *ReportPeriod) error
 	FindPeriodByID(ctx context.Context, id int64) (*ReportPeriod, error)
 	ListPeriods(ctx context.Context) ([]*ReportPeriod, error)
+	ListRoster(ctx context.Context, periodID int64) ([]RosterEntry, error)
 	AddPeriodMember(ctx context.Context, member *PeriodMember) error
 
 	CreateReport(ctx context.Context, item *Report) error

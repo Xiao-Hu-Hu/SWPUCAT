@@ -98,6 +98,57 @@ func (r *ReportRepo) ListPendingReportMemberIDs(ctx context.Context, periodID in
 	return ids, err
 }
 
+// ListRoster returns every required, non-exempt submitter for a period together
+// with the submission state of their monthly report. A member counts as having
+// submitted when a version is currently submitted or reviewed, so a rejection
+// that reset the report to draft clears the submitted time again.
+func (r *ReportRepo) ListRoster(ctx context.Context, periodID int64) ([]report.RosterEntry, error) {
+	type rostRow struct {
+		UserID          int64
+		DisplayName     string
+		Required        bool
+		Exempt          bool
+		ExemptionReason string
+		ReportID        int64
+		ReportStatus    string
+		SubmittedAt     *time.Time
+	}
+	var rows []rostRow
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT rpm.user_id, rpm.display_name, rpm.required, rpm.exempt, rpm.exemption_reason,
+		       COALESCE(r.id, 0) AS report_id, COALESCE(r.status, '') AS report_status,
+		       sub.submitted_at
+		FROM report_period_members rpm
+		LEFT JOIN reports r
+		       ON r.period_id = rpm.period_id AND r.author_id = rpm.user_id AND r.report_type = ?
+		LEFT JOIN LATERAL (
+		       SELECT v2.submitted_at
+		       FROM report_versions v2
+		       WHERE v2.report_id = r.id
+		         AND v2.status IN (?, ?)
+		         AND v2.submitted_at IS NOT NULL
+		       ORDER BY v2.submitted_at DESC
+		       LIMIT 1
+		) sub ON TRUE
+		WHERE rpm.period_id = ? AND rpm.required = TRUE AND rpm.exempt = FALSE
+		ORDER BY rpm.user_id ASC
+	`, string(report.ReportTypeMonthly), string(report.VersionStatusSubmitted), string(report.VersionStatusReviewed), periodID).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]report.RosterEntry, 0, len(rows))
+	for _, row := range rows {
+		entries = append(entries, report.RosterEntry{
+			PeriodMember: report.PeriodMember{
+				PeriodID: periodID, UserID: row.UserID, DisplayName: row.DisplayName,
+				Required: row.Required, Exempt: row.Exempt, ExemptionReason: row.ExemptionReason,
+			},
+			ReportID: row.ReportID, ReportStatus: report.ReportStatus(row.ReportStatus), SubmittedAt: row.SubmittedAt,
+		})
+	}
+	return entries, nil
+}
+
 func (r *ReportRepo) AddPeriodMember(ctx context.Context, member *report.PeriodMember) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var period database.ReportPeriodModel
