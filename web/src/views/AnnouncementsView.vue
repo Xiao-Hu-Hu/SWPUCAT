@@ -304,7 +304,7 @@ async function handleDelete(id: number) {
             </div>
           </div>
         </div>
-        <el-empty v-else :image-size="48" description="暂无待审核草稿" />
+        <div v-else class="draft-empty">暂无待审核草稿</div>
       </section>
 
       <div class="announcements-list">
@@ -501,6 +501,16 @@ async function handleDelete(id: number) {
   display: flex;
   flex-shrink: 0;
   gap: 0.25rem;
+}
+
+.draft-empty {
+  display: flex;
+  align-items: center;
+  padding: 0.375rem 0.625rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: 0.875rem;
 }
 
 /* Card list */
