@@ -442,8 +442,8 @@ async function handleDelete(id: number) {
 }
 
 .draft-section {
-  margin-bottom: 1.25rem;
-  padding: 0.875rem;
+  margin-bottom: 1rem;
+  padding: 0.625rem 0.75rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-deep);
@@ -453,7 +453,7 @@ async function handleDelete(id: number) {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.5rem;
   color: var(--text);
   font-size: 0.875rem;
   font-weight: 600;
@@ -462,15 +462,15 @@ async function handleDelete(id: number) {
 .draft-list {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.375rem;
 }
 
 .draft-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.625rem 0.75rem;
+  gap: 0.5rem;
+  padding: 0.375rem 0.625rem;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -479,7 +479,7 @@ async function handleDelete(id: number) {
 .draft-main {
   display: flex;
   align-items: baseline;
-  gap: 0.75rem;
+  gap: 0.5rem;
   min-width: 0;
 }
 
