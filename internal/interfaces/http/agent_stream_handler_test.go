@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	conversationapp "SWPUCAT/internal/application/conversation"
+	"SWPUCAT/internal/agent/confirmation"
 	"SWPUCAT/internal/infrastructure/agentclient"
 
 	"github.com/gin-gonic/gin"
@@ -141,6 +142,62 @@ func TestAgentChatStreamRegenerationReplacesAssistantWithoutDuplicatingUser(t *t
 	}
 	if client.streamCalls != 2 {
 		t.Fatalf("stream calls = %d, want 2", client.streamCalls)
+	}
+}
+
+func TestAgentChatStreamKeepsLiveConfirmationTokenInDoneEvent(t *testing.T) {
+	repo := &publicAgentConversationRepo{}
+	const signedToken = "signed-confirmation-token-abc123"
+	client := &publicStreamingAgentClient{
+		responses: []agentclient.ChatResponse{{
+			Answer:    "已生成待确认卡片，业务操作尚未执行。请核对卡片信息并点击“确认执行”；最终结果以确认后服务端返回的结构化结果卡片为准。",
+			SessionID: "private",
+			Proposals: []confirmation.Proposal{{
+				Tool: "generate_invitation_code", Title: "生成邀请码", Summary: "确认后将生成一个 10 分钟有效的邀请码",
+				Token: signedToken, ExpiresAt: "2026-09-18T00:00:00Z",
+			}},
+		}},
+		deltas: [][]string{{"已生成待确认卡片"}},
+	}
+	engine := publicAgentStreamRouter(client, repo)
+
+	response := performPublicAgentStream(engine, streamGenerationID1, false)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+
+	// The streaming handler rebuilds the done event from the persisted turn when
+	// persistence succeeds. The persisted actions_json strips confirmation
+	// tokens for privacy, so the rebuild previously lost the token and left the
+	// browser with a disabled "确认执行" card. The done event must carry the live
+	// token while still attaching the DB-issued message IDs.
+	var done agentPublicStreamEnvelope
+	found := false
+	for _, line := range strings.Split(body, "\n") {
+		if strings.TrimSpace(line) == "" || !strings.Contains(line, `"type":"done"`) {
+			continue
+		}
+		if err := json.Unmarshal([]byte(line), &done); err != nil {
+			t.Fatalf("parse done event: %v", err)
+		}
+		found = true
+		break
+	}
+	if !found || done.Data == nil {
+		t.Fatalf("done event missing: %q", body)
+	}
+	if len(done.Data.Proposals) != 1 || done.Data.Proposals[0].Token != signedToken {
+		t.Fatalf("done proposal token = %+v, want live token %q", done.Data.Proposals, signedToken)
+	}
+	if done.Data.MessageID == 0 || done.Data.UserMessageID == 0 {
+		t.Fatalf("persisted message IDs not attached to done event: %+v", *done.Data)
+	}
+	if len(repo.messages) != 2 {
+		t.Fatalf("persisted messages = %d, want 2", len(repo.messages))
+	}
+	if persisted := repo.messages[1].ActionsJSON; strings.Contains(persisted, signedToken) || strings.Contains(persisted, `"token"`) {
+		t.Fatalf("persisted actions_json leaked confirmation token: %s", persisted)
 	}
 }
 

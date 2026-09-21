@@ -42,6 +42,7 @@ type Record struct {
 type Repository interface {
 	Claim(ctx context.Context, record *Record) (existing *Record, claimed bool, err error)
 	Complete(ctx context.Context, tokenHash, status, resultJSON, errorCode string, completedAt time.Time) error
+	FindLatest(ctx context.Context, userID int64, sessionID, toolName, parametersDigest string) (*Record, error)
 }
 
 type CheckinWriter interface {
@@ -55,6 +56,11 @@ type DraftWriter interface {
 
 type ConfirmationVerifier interface {
 	Verify(token string, userID int64, sessionID, toolName string, parameters json.RawMessage) (*confirmation.Claims, json.RawMessage, error)
+}
+
+type ConfirmationSigner interface {
+	ConfirmationVerifier
+	Propose(userID int64, sessionID, toolName, title, summary string, parameters any) (*confirmation.Proposal, error)
 }
 
 type KnowledgeReviewWriter interface {
@@ -81,6 +87,22 @@ type ExecuteRequest struct {
 	Parameters json.RawMessage
 }
 
+type RecoverRequest struct {
+	UserID     int64
+	Role       string
+	ActorName  string
+	SessionID  string
+	Tool       string
+	Title      string
+	Summary    string
+	Parameters json.RawMessage
+}
+
+type RecoverResult struct {
+	Result   *Result                `json:"result,omitempty"`
+	Proposal *confirmation.Proposal `json:"proposal,omitempty"`
+}
+
 type Result struct {
 	Tool     string          `json:"tool"`
 	Status   string          `json:"status"`
@@ -93,7 +115,7 @@ type Result struct {
 type Service struct {
 	enabled     bool
 	repo        Repository
-	signer      ConfirmationVerifier
+	signer      ConfirmationSigner
 	checkin     CheckinWriter
 	drafts      DraftWriter
 	knowledge   KnowledgeReviewWriter
@@ -115,7 +137,7 @@ func WithEvaluationDrafts(writer EvaluationDraftWriter) Option {
 	return func(service *Service) { service.evaluations = writer }
 }
 
-func NewService(enabled bool, repo Repository, signer ConfirmationVerifier, checkin CheckinWriter, drafts DraftWriter, options ...Option) *Service {
+func NewService(enabled bool, repo Repository, signer ConfirmationSigner, checkin CheckinWriter, drafts DraftWriter, options ...Option) *Service {
 	service := &Service{enabled: enabled, repo: repo, signer: signer, checkin: checkin, drafts: drafts}
 	for _, option := range options {
 		if option != nil {
@@ -167,6 +189,42 @@ func (s *Service) Execute(ctx context.Context, req ExecuteRequest) (*Result, err
 		return nil, err
 	}
 	return result, nil
+}
+
+// Recover restores a previously presented action proposal after a page reload.
+// The persisted actions_json deliberately strips the confirmation token for
+// privacy, so a reloaded card cannot be confirmed directly. If the proposal was
+// already confirmed, Recover returns the stored result (keyed by the canonical
+// parameter digest) so the outcome can be shown again; otherwise it re-signs a
+// fresh, short-lived token for the same proposal so the user can still confirm.
+func (s *Service) Recover(ctx context.Context, req RecoverRequest) (*RecoverResult, error) {
+	if s == nil || !s.enabled {
+		return nil, ErrActionDisabled
+	}
+	if s.repo == nil || s.signer == nil || req.UserID <= 0 || strings.TrimSpace(req.SessionID) == "" || !confirmation.SupportedTool(req.Tool) || len(req.Parameters) == 0 {
+		return nil, ErrInvalidConfirmation
+	}
+	canonical, err := confirmation.CanonicalParameters(req.Parameters)
+	if err != nil {
+		return nil, ErrInvalidConfirmation
+	}
+	digest := confirmation.ParametersDigest(canonical)
+	record, err := s.repo.FindLatest(ctx, req.UserID, req.SessionID, req.Tool, digest)
+	if err != nil {
+		return nil, err
+	}
+	if record != nil {
+		result, err := replayResult(record)
+		if err != nil {
+			return nil, err
+		}
+		return &RecoverResult{Result: result}, nil
+	}
+	proposal, err := s.signer.Propose(req.UserID, req.SessionID, req.Tool, req.Title, req.Summary, canonical)
+	if err != nil {
+		return nil, err
+	}
+	return &RecoverResult{Proposal: proposal}, nil
 }
 
 func (s *Service) executeClaimed(ctx context.Context, req ExecuteRequest, tokenHash string, parameters json.RawMessage) *Result {

@@ -54,6 +54,11 @@ export interface AgentActionResult {
   replayed?: boolean
 }
 
+export interface AgentActionRecoverResult {
+  result?: AgentActionResult
+  proposal?: AgentActionProposal
+}
+
 export interface AgentConversation {
   id: number
   session_id: string
@@ -217,6 +222,15 @@ export const agentApi = {
       session_id: sessionId,
       tool: proposal.tool,
       token: proposal.token || '',
+      parameters: proposal.parameters
+    }, { timeout: 30000 })
+  },
+  recoverAction(sessionId: string, proposal: AgentActionProposal) {
+    return api.post<AgentActionRecoverResult>('/agent/actions/recover', {
+      session_id: sessionId,
+      tool: proposal.tool,
+      title: proposal.title,
+      summary: proposal.summary,
       parameters: proposal.parameters
     }, { timeout: 30000 })
   }

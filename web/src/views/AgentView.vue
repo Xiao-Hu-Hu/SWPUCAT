@@ -195,6 +195,7 @@ async function loadConversation(targetSessionId: string) {
     if (messages.value.length === 0) {
       messages.value = [newGreetingMessage()]
     }
+    recoverTokenlessProposals()
   } catch (error: any) {
     if (requestId !== historyRequestId.value) return
     if (error?.response?.status === 404) {
@@ -361,8 +362,12 @@ async function runGeneration(assistantIndex: number) {
   }
 }
 
+function proposalStableKey(proposal: AgentActionProposal): string {
+  return `${proposal.tool}|${JSON.stringify(proposal.parameters || {})}`
+}
+
 function actionKey(item: ChatMessage, proposal: AgentActionProposal): string {
-  return `${item.localId}:${proposal.token || `${proposal.tool}:${proposal.expires_at}`}`
+  return `${item.localId}|${proposalStableKey(proposal)}`
 }
 
 function actionExpired(proposal: AgentActionProposal): boolean {
@@ -414,7 +419,7 @@ async function confirmAction(item: ChatMessage, proposal: AgentActionProposal) {
     const response = await agentApi.confirmAction(sessionId.value, proposal)
     const result = response.data
     item.actionResults ||= {}
-    item.actionResults[proposal.token] = result
+    item.actionResults[proposalStableKey(proposal)] = result
     if (result.status === 'success') ElMessage.success(result.message)
     else if (result.status === 'pending') ElMessage.info(result.message)
     else ElMessage.error(result.message)
@@ -422,6 +427,40 @@ async function confirmAction(item: ChatMessage, proposal: AgentActionProposal) {
     ElMessage.error(error?.response?.data?.message || '操作确认失败，请稍后重试')
   } finally {
     delete actionConfirming.value[key]
+  }
+}
+
+// A persisted action card strips the confirmation token for privacy, so a
+// reloaded proposal cannot be confirmed directly. Recovering asks the server for
+// the stored outcome, or for a freshly re-signed token, so the card stays usable.
+async function recoverProposal(item: ChatMessage, proposal: AgentActionProposal) {
+  if (proposal.token || loading.value) return
+  const key = actionKey(item, proposal)
+  if (actionConfirming.value[key]) return
+  actionConfirming.value[key] = true
+  try {
+    const response = await agentApi.recoverAction(sessionId.value, proposal)
+    const recovered = response.data
+    if (recovered.result) {
+      item.actionResults ||= {}
+      item.actionResults[proposalStableKey(proposal)] = recovered.result
+    } else if (recovered.proposal?.token) {
+      proposal.token = recovered.proposal.token
+      proposal.expires_at = recovered.proposal.expires_at
+    }
+  } catch {
+    // Keep the token-less card so it remains visibly expired/pending; a later
+    // reload will retry the recovery.
+  } finally {
+    delete actionConfirming.value[key]
+  }
+}
+
+function recoverTokenlessProposals() {
+  for (const item of messages.value) {
+    for (const proposal of item.proposals || []) {
+      void recoverProposal(item, proposal)
+    }
   }
 }
 
@@ -776,14 +815,14 @@ async function downloadSource(source: AgentKnowledgeSource) {
                       <div><dt>总结</dt><dd class="action-content-preview">{{ actionParameter(proposal, 'summary_markdown') }}</dd></div>
                     </dl>
                     <div class="action-card-expiry" :class="{ expired: actionExpired(proposal) }">{{ actionExpiryLabel(proposal) }}</div>
-                    <div v-if="proposal.token && item.actionResults?.[proposal.token]" class="action-result" :class="item.actionResults[proposal.token].status">
-                      <strong>{{ item.actionResults[proposal.token].title }}</strong>
-                      <span>{{ item.actionResults[proposal.token].message }}</span>
-                      <div v-if="proposal.tool === 'generate_invitation_code' && invitationCode(item.actionResults[proposal.token])" class="invitation-code-result">
-                        <code>{{ invitationCode(item.actionResults[proposal.token]) }}</code>
-                        <el-button text size="small" @click="copyInvitationCode(item.actionResults[proposal.token])">复制邀请码</el-button>
+                    <div v-if="item.actionResults?.[proposalStableKey(proposal)]" class="action-result" :class="item.actionResults[proposalStableKey(proposal)].status">
+                      <strong>{{ item.actionResults[proposalStableKey(proposal)].title }}</strong>
+                      <span>{{ item.actionResults[proposalStableKey(proposal)].message }}</span>
+                      <div v-if="proposal.tool === 'generate_invitation_code' && invitationCode(item.actionResults[proposalStableKey(proposal)])" class="invitation-code-result">
+                        <code>{{ invitationCode(item.actionResults[proposalStableKey(proposal)]) }}</code>
+                        <el-button text size="small" @click="copyInvitationCode(item.actionResults[proposalStableKey(proposal)])">复制邀请码</el-button>
                       </div>
-                      <small v-if="item.actionResults[proposal.token].replayed">已返回此前执行结果</small>
+                      <small v-if="item.actionResults[proposalStableKey(proposal)].replayed">已返回此前执行结果</small>
                     </div>
                     <el-button
                       v-else

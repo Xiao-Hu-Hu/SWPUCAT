@@ -51,6 +51,22 @@ func (r *fakeActionRepo) Complete(_ context.Context, tokenHash, status, resultJS
 	return nil
 }
 
+func (r *fakeActionRepo) FindLatest(_ context.Context, userID int64, sessionID, toolName, parametersDigest string) (*Record, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var latest *Record
+	for _, record := range r.records {
+		if record.UserID != userID || record.SessionID != sessionID || record.ToolName != toolName || record.ParametersDigest != parametersDigest {
+			continue
+		}
+		if latest == nil || record.CreatedAt.After(latest.CreatedAt) {
+			copy := *record
+			latest = &copy
+		}
+	}
+	return latest, nil
+}
+
 type fakeCheckinWriter struct {
 	clockInCalls  int
 	clockOutCalls int
@@ -153,6 +169,10 @@ type expiredVerifier struct{}
 
 func (expiredVerifier) Verify(string, int64, string, string, json.RawMessage) (*confirmation.Claims, json.RawMessage, error) {
 	return nil, nil, confirmation.ErrExpiredToken
+}
+
+func (expiredVerifier) Propose(int64, string, string, string, string, any) (*confirmation.Proposal, error) {
+	return nil, nil
 }
 
 func newActionTestSigner(t *testing.T, ttl time.Duration) *confirmation.Signer {
@@ -386,5 +406,59 @@ func TestExecuteGovernedWriteFailureNeverClaimsSuccessAndIsNotRetried(t *testing
 	}
 	if writer.approveCalls != 1 {
 		t.Fatalf("failed business write calls = %d, want 1", writer.approveCalls)
+	}
+}
+
+func TestRecoverReturnsStoredResultAfterConfirmedAction(t *testing.T) {
+	signer := newActionTestSigner(t, time.Minute)
+	proposal, _ := signer.Propose(7, "session-7", confirmation.ToolClockIn, "上班打卡", "确认", map[string]any{})
+	service := NewService(true, &fakeActionRepo{}, signer, &fakeCheckinWriter{}, nil)
+	req := ExecuteRequest{UserID: 7, Role: "member", SessionID: "session-7", Tool: proposal.Tool, Token: proposal.Token, Parameters: proposal.Parameters}
+	if _, err := service.Execute(context.Background(), req); err != nil {
+		t.Fatalf("execute err=%v", err)
+	}
+	recovered, err := service.Recover(context.Background(), RecoverRequest{
+		UserID: 7, Role: "member", SessionID: "session-7", Tool: proposal.Tool, Parameters: proposal.Parameters,
+	})
+	if err != nil {
+		t.Fatalf("recover err=%v", err)
+	}
+	if recovered.Result == nil || recovered.Proposal != nil {
+		t.Fatalf("recovered = %+v, want stored result", recovered)
+	}
+	if recovered.Result.Status != "success" || !recovered.Result.Replayed {
+		t.Fatalf("recovered result = %+v", recovered.Result)
+	}
+}
+
+func TestRecoverReissuesFreshTokenForPendingProposal(t *testing.T) {
+	signer := newActionTestSigner(t, time.Minute)
+	proposal, _ := signer.Propose(7, "session-7", confirmation.ToolClockIn, "上班打卡", "确认", map[string]any{})
+	service := NewService(true, &fakeActionRepo{}, signer, &fakeCheckinWriter{}, nil)
+	recovered, err := service.Recover(context.Background(), RecoverRequest{
+		UserID: 7, Role: "member", SessionID: "session-7", Tool: proposal.Tool, Title: "上班打卡", Summary: "确认", Parameters: proposal.Parameters,
+	})
+	if err != nil {
+		t.Fatalf("recover err=%v", err)
+	}
+	if recovered.Result != nil || recovered.Proposal == nil {
+		t.Fatalf("recovered = %+v, want fresh proposal", recovered)
+	}
+	if recovered.Proposal.Token == "" || recovered.Proposal.Tool != confirmation.ToolClockIn {
+		t.Fatalf("fresh proposal = %+v", recovered.Proposal)
+	}
+}
+
+func TestRecoverRejectsDisabledInvalidAndEmptyParameters(t *testing.T) {
+	signer := newActionTestSigner(t, time.Minute)
+	if _, err := (&Service{}).Recover(context.Background(), RecoverRequest{UserID: 7, Role: "member", SessionID: "session-7", Tool: confirmation.ToolClockIn, Parameters: json.RawMessage(`{}`)}); !errors.Is(err, ErrActionDisabled) {
+		t.Fatalf("disabled recover err=%v", err)
+	}
+	service := NewService(true, &fakeActionRepo{}, signer, &fakeCheckinWriter{}, nil)
+	if _, err := service.Recover(context.Background(), RecoverRequest{UserID: 7, Role: "member", SessionID: "session-7", Tool: "unknown", Parameters: json.RawMessage(`{}`)}); !errors.Is(err, ErrInvalidConfirmation) {
+		t.Fatalf("unsupported tool recover err=%v", err)
+	}
+	if _, err := service.Recover(context.Background(), RecoverRequest{UserID: 7, Role: "member", SessionID: "session-7", Tool: confirmation.ToolClockIn}); !errors.Is(err, ErrInvalidConfirmation) {
+		t.Fatalf("empty parameters recover err=%v", err)
 	}
 }

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"SWPUCAT/internal/application/agentaction"
@@ -33,6 +34,24 @@ func (r *AgentActionRepo) Claim(ctx context.Context, record *agentaction.Record)
 		return nil, false, err
 	}
 	return actionModelToRecord(&existing), false, nil
+}
+
+func (r *AgentActionRepo) FindLatest(ctx context.Context, userID int64, sessionID, toolName, parametersDigest string) (*agentaction.Record, error) {
+	if r == nil || r.db == nil || userID <= 0 || sessionID == "" || toolName == "" || parametersDigest == "" {
+		return nil, shared.ErrValidation
+	}
+	var model database.AgentActionConfirmationModel
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND session_id = ? AND tool_name = ? AND parameters_digest = ?",
+			userID, sessionID, toolName, parametersDigest).
+		Order("created_at DESC").First(&model).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return actionModelToRecord(&model), nil
 }
 
 func (r *AgentActionRepo) Complete(ctx context.Context, tokenHash, status, resultJSON, errorCode string, completedAt time.Time) error {

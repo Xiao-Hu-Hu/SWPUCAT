@@ -55,6 +55,22 @@ func (r *actionHandlerRepo) Complete(_ context.Context, tokenHash, status, resul
 	return nil
 }
 
+func (r *actionHandlerRepo) FindLatest(_ context.Context, userID int64, sessionID, toolName, parametersDigest string) (*agentaction.Record, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var latest *agentaction.Record
+	for _, record := range r.records {
+		if record.UserID != userID || record.SessionID != sessionID || record.ToolName != toolName || record.ParametersDigest != parametersDigest {
+			continue
+		}
+		if latest == nil || record.CreatedAt.After(latest.CreatedAt) {
+			copy := *record
+			latest = &copy
+		}
+	}
+	return latest, nil
+}
+
 type actionHandlerCheckins struct {
 	clockInCalls  int
 	clockOutCalls int
@@ -128,6 +144,12 @@ type actionHandlerEnvelope struct {
 	Code    int                 `json:"code"`
 	Message string              `json:"message"`
 	Data    *agentaction.Result `json:"data"`
+}
+
+type actionHandlerRecoverEnvelope struct {
+	Code    int                        `json:"code"`
+	Message string                     `json:"message"`
+	Data    *agentaction.RecoverResult `json:"data"`
 }
 
 func TestConfirmActionAcceptsValidTokenAndReplaysWithoutAnotherWrite(t *testing.T) {
@@ -290,6 +312,44 @@ func TestConfirmActionExecutesGovernedToolsThroughPublicEndpoint(t *testing.T) {
 	})
 }
 
+func TestRecoverActionReturnsStoredResultOrReissuesFreshToken(t *testing.T) {
+	signer := newActionHandlerSigner(t, time.Minute)
+
+	t.Run("confirmed returns stored result", func(t *testing.T) {
+		proposal, err := signer.Propose(7, "session-7", confirmation.ToolClockIn, "上班打卡", "确认", map[string]any{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		repo, checkins := &actionHandlerRepo{}, &actionHandlerCheckins{}
+		handler := &AgentHandler{actions: agentaction.NewService(true, repo, signer, checkins, nil)}
+		if status, _ := performActionConfirmation(t, handler, 7, "member", proposal.Tool, proposal.Token, "session-7", proposal.Parameters); status != http.StatusOK {
+			t.Fatalf("confirm status = %d", status)
+		}
+		status, response := performActionRecovery(t, handler, 7, "member", proposal.Tool, "session-7", proposal.Parameters)
+		if status != http.StatusOK || response.Data == nil || response.Data.Result == nil || response.Data.Proposal != nil {
+			t.Fatalf("status=%d response=%+v", status, response)
+		}
+		if response.Data.Result.Status != "success" || !response.Data.Result.Replayed {
+			t.Fatalf("recovered result = %+v", response.Data.Result)
+		}
+		if checkins.clockInCalls != 1 {
+			t.Fatalf("clock-in calls = %d, want 1", checkins.clockInCalls)
+		}
+	})
+
+	t.Run("pending reissues fresh token", func(t *testing.T) {
+		proposal, err := signer.Propose(7, "session-pending", confirmation.ToolClockIn, "上班打卡", "确认", map[string]any{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		handler := &AgentHandler{actions: agentaction.NewService(true, &actionHandlerRepo{}, signer, &actionHandlerCheckins{}, nil)}
+		status, response := performActionRecovery(t, handler, 7, "member", proposal.Tool, "session-pending", proposal.Parameters)
+		if status != http.StatusOK || response.Data == nil || response.Data.Result != nil || response.Data.Proposal == nil || response.Data.Proposal.Token == "" {
+			t.Fatalf("status=%d response=%+v", status, response)
+		}
+	})
+}
+
 func TestPersistedActionCardsNeverContainRawConfirmationToken(t *testing.T) {
 	original := []confirmation.Proposal{{
 		Tool: confirmation.ToolClockIn, Title: "上班打卡", Summary: "请确认",
@@ -334,6 +394,29 @@ func performActionConfirmation(t *testing.T, handler *AgentHandler, userID int64
 	ctx.Set(ContextUsername, "测试用户")
 	handler.ConfirmAction(ctx)
 	var response actionHandlerEnvelope
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response %q: %v", recorder.Body.String(), err)
+	}
+	return recorder.Code, response
+}
+
+func performActionRecovery(t *testing.T, handler *AgentHandler, userID int64, role, toolName, sessionID string, parameters json.RawMessage) (int, actionHandlerRecoverEnvelope) {
+	t.Helper()
+	payload, err := json.Marshal(agentActionRecoverRequest{
+		SessionID: sessionID, Tool: toolName, Title: "恢复提议", Summary: "恢复确认", Parameters: parameters,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/agent/actions/recover", bytes.NewReader(payload))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Set(ContextUserID, userID)
+	ctx.Set(ContextRole, role)
+	ctx.Set(ContextUsername, "测试用户")
+	handler.RecoverAction(ctx)
+	var response actionHandlerRecoverEnvelope
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response %q: %v", recorder.Body.String(), err)
 	}

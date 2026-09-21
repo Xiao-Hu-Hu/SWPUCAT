@@ -113,6 +113,14 @@ type agentActionConfirmRequest struct {
 	Parameters json.RawMessage `json:"parameters"`
 }
 
+type agentActionRecoverRequest struct {
+	SessionID  string          `json:"session_id"`
+	Tool       string          `json:"tool"`
+	Title      string          `json:"title"`
+	Summary    string          `json:"summary"`
+	Parameters json.RawMessage `json:"parameters"`
+}
+
 type agentCreateConversationRequest struct {
 	Title string `json:"title,omitempty"`
 }
@@ -607,7 +615,15 @@ func (h *AgentHandler) ChatStream(c *gin.Context) {
 		log.Printf("agent conversation persistence failed for user %d: %v", userID, persistErr)
 	} else {
 		outcome.setConversationPersisted(true)
-		publicResult = publicAgentResponseFromTurn(turn, false)
+		// Keep the live proposals from the Agent, because they carry the
+		// short-lived confirmation token the browser needs to confirm. The
+		// persisted actions_json deliberately strips tokens for privacy, so it
+		// must not replace the live proposals. The persisted turn is still the
+		// source of the DB-issued message IDs that are only known after commit.
+		turnPublic := publicAgentResponseFromTurn(turn, false)
+		publicResult.MessageID = turnPublic.MessageID
+		publicResult.UserMessageID = turnPublic.UserMessageID
+		publicResult.ConversationPersisted = true
 	}
 	status := http.StatusOK
 	outcome.httpStatus = &status
@@ -679,6 +695,48 @@ func (h *AgentHandler) ConfirmAction(c *gin.Context) {
 			Forbidden(c, "this account cannot execute the proposed action")
 		default:
 			InternalError(c, "action confirmation failed")
+		}
+		return
+	}
+	Success(c, result)
+}
+
+// RecoverAction restores a previously presented action proposal after a page
+// reload. The persisted actions_json strips the confirmation token for privacy,
+// so a loaded card cannot be confirmed directly. If the proposal was already
+// confirmed, Recover returns the stored result (keyed by the canonical parameter
+// digest) so the outcome can be shown again; otherwise it re-signs a fresh,
+// short-lived token for the same proposal so the user can still confirm.
+func (h *AgentHandler) RecoverAction(c *gin.Context) {
+	if h == nil || h.actions == nil {
+		Error(c, http.StatusServiceUnavailable, 503, "agent actions are not configured")
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 300<<10)
+	var req agentActionRecoverRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid action recovery request")
+		return
+	}
+	sessionID, err := normalizeAgentSessionID(req.SessionID)
+	if err != nil || strings.TrimSpace(req.SessionID) == "" || strings.TrimSpace(req.Tool) == "" || len(req.Parameters) == 0 {
+		BadRequest(c, "session_id, tool and parameters are required")
+		return
+	}
+	result, err := h.actions.Recover(c.Request.Context(), agentaction.RecoverRequest{
+		UserID: GetUserID(c), Role: GetRole(c), ActorName: GetUsername(c), SessionID: sessionID,
+		Tool: strings.TrimSpace(req.Tool), Title: req.Title, Summary: req.Summary, Parameters: req.Parameters,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, agentaction.ErrInvalidConfirmation):
+			BadRequest(c, "action proposal is invalid or was modified")
+		case errors.Is(err, agentaction.ErrActionDisabled):
+			Error(c, http.StatusServiceUnavailable, 503, "agent actions are disabled")
+		case errors.Is(err, shared.ErrForbidden):
+			Forbidden(c, "this account cannot execute the proposed action")
+		default:
+			InternalError(c, "action recovery failed")
 		}
 		return
 	}
