@@ -10,7 +10,6 @@ import { normalizeCheckinStats, type CheckinChartStat } from '@/utils/checkinCha
 const authStore = useAuthStore()
 const chartRef = ref<HTMLElement | null>(null)
 let chart: echarts.ECharts | null = null
-let chartResizeObserver: ResizeObserver | null = null
 let midnightTimer: ReturnType<typeof setTimeout> | null = null
 let tickTimer: ReturnType<typeof setInterval> | null = null
 let statsRequestId = 0
@@ -149,24 +148,21 @@ onMounted(async () => {
 onUnmounted(() => {
   if (midnightTimer) clearTimeout(midnightTimer)
   if (tickTimer) clearInterval(tickTimer)
-  chartResizeObserver?.disconnect()
-  chartResizeObserver = null
+  window.removeEventListener('resize', handleResize)
   chart?.dispose()
   chart = null
 })
+
+function handleResize() {
+  chart?.resize()
+}
 
 function initChart() {
   if (!chartRef.value) return
   chart?.dispose()
   chart = echarts.init(chartRef.value, undefined, { renderer: 'canvas' })
-  // Make sure the canvas picks up the layout size before the first render so the
-  // entrance animation plays on a correctly-sized surface instead of being
-  // consumed on an implicit 0x0 canvas.
-  chart.resize()
   updateChart()
-  chartResizeObserver?.disconnect()
-  chartResizeObserver = new ResizeObserver(() => chart?.resize())
-  chartResizeObserver.observe(chartRef.value)
+  window.addEventListener('resize', handleResize)
 }
 
 function updateChart() {
@@ -228,8 +224,7 @@ function updateChart() {
         fontSize: 11
       }
     }]
-  }, { notMerge: false })
-  chart.resize()
+  })
 }
 
 async function setChartFilter(filter: ChartPeriod) {
