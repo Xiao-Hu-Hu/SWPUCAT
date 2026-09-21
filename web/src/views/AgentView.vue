@@ -56,6 +56,7 @@ const deletingSessionId = ref('')
 const activeAbortController = ref<AbortController | null>(null)
 const feedbackSaving = ref<Record<string, boolean>>({})
 const actionConfirming = ref<Record<string, boolean>>({})
+const expandedSources = ref<Record<string, boolean>>({})
 
 const sessionStorageKey = () => `swpucat-agent-session:${authStore.user?.id || 'anonymous'}`
 
@@ -605,6 +606,14 @@ function sourceMatchLabel(source: AgentKnowledgeSource): string {
   return ''
 }
 
+function isSourcesExpanded(localId: string): boolean {
+  return Boolean(expandedSources.value[localId])
+}
+
+function toggleSources(localId: string) {
+  expandedSources.value[localId] = !expandedSources.value[localId]
+}
+
 function externalSourceURL(source: AgentKnowledgeSource): string {
   const raw = (source.url || '').trim()
   if (!raw) return ''
@@ -758,32 +767,44 @@ async function downloadSource(source: AgentKnowledgeSource) {
                 </div>
                 <div v-else class="message-bubble">{{ item.content }}</div>
                 <div v-if="item.role === 'assistant' && item.sources?.length" class="source-list">
-                  <div class="source-list-title">参考资料</div>
-                  <div v-for="source in item.sources" :key="`${index}-${source.id}-${source.name}`" class="source-card">
-                    <div class="source-heading">
-                      <span class="source-kind">{{ sourceKindLabel(source) }}</span>
-                      <strong>{{ source.name || '未命名资料' }}</strong>
-                    </div>
-                    <p v-if="sourceExcerpt(source)" class="source-excerpt">{{ sourceExcerpt(source) }}</p>
-                    <div class="source-meta">
-                      <span v-if="source.category_name">{{ source.category_name }}</span>
-                      <span v-if="sourceMatchLabel(source)">{{ sourceMatchLabel(source) }}</span>
-                    </div>
-                    <div class="source-actions">
-                      <el-button
-                        v-if="canDownloadSource(source)"
-                        text
-                        size="small"
-                        :loading="downloadingSources[source.id]"
-                        @click="downloadSource(source)"
-                      >下载文件</el-button>
-                      <a
-                        v-if="externalSourceURL(source)"
-                        class="source-link"
-                        :href="externalSourceURL(source)"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >打开链接</a>
+                  <button
+                    class="source-list-toggle"
+                    :class="{ expanded: isSourcesExpanded(item.localId) }"
+                    :aria-expanded="isSourcesExpanded(item.localId)"
+                    @click="toggleSources(item.localId)"
+                  >
+                    <span class="source-list-title">参考资料</span>
+                    <el-icon class="source-list-arrow"><ArrowRight /></el-icon>
+                  </button>
+                  <div class="source-collapse" :class="{ expanded: isSourcesExpanded(item.localId) }">
+                    <div class="source-cards">
+                      <div v-for="source in item.sources" :key="`${index}-${source.id}-${source.name}`" class="source-card">
+                        <div class="source-heading">
+                          <span class="source-kind">{{ sourceKindLabel(source) }}</span>
+                          <strong>{{ source.name || '未命名资料' }}</strong>
+                        </div>
+                        <p v-if="sourceExcerpt(source)" class="source-excerpt">{{ sourceExcerpt(source) }}</p>
+                        <div class="source-meta">
+                          <span v-if="source.category_name">{{ source.category_name }}</span>
+                          <span v-if="sourceMatchLabel(source)">{{ sourceMatchLabel(source) }}</span>
+                        </div>
+                        <div class="source-actions">
+                          <el-button
+                            v-if="canDownloadSource(source)"
+                            text
+                            size="small"
+                            :loading="downloadingSources[source.id]"
+                            @click="downloadSource(source)"
+                          >下载文件</el-button>
+                          <a
+                            v-if="externalSourceURL(source)"
+                            class="source-link"
+                            :href="externalSourceURL(source)"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >打开链接</a>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1176,6 +1197,11 @@ async function downloadSource(source: AgentKnowledgeSource) {
   margin-bottom: 0;
 }
 
+.markdown-body :deep(.md-source-label) {
+  color: #2563eb;
+  font-weight: 600;
+}
+
 .markdown-body :deep(h1),
 .markdown-body :deep(h2),
 .markdown-body :deep(h3),
@@ -1286,10 +1312,57 @@ async function downloadSource(source: AgentKnowledgeSource) {
   gap: 0.45rem;
 }
 
+.source-list-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+}
+
 .source-list-title {
   color: var(--text-secondary);
   font-size: 0.75rem;
   font-weight: 600;
+}
+
+.source-list-toggle:hover .source-list-title {
+  color: var(--text);
+}
+
+.source-list-arrow {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  transition: transform 0.28s ease;
+}
+
+.source-list-toggle.expanded .source-list-arrow {
+  transform: rotate(90deg);
+}
+
+.source-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 0.28s ease, opacity 0.25s ease;
+}
+
+.source-collapse.expanded {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.source-collapse > .source-cards {
+  overflow: hidden;
+  min-height: 0;
+  display: grid;
+  gap: 0.45rem;
 }
 
 .source-card {

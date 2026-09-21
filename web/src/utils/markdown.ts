@@ -38,5 +38,8 @@ safeRenderer.image = ({ href, title, text }: Tokens.Image) => {
 }
 
 export function renderMarkdown(value: string): string {
-  return marked.parse(value || '', { breaks: true, gfm: true, renderer: safeRenderer }) as string
+  const html = marked.parse(value || '', { breaks: true, gfm: true, renderer: safeRenderer }) as string
+  // The agent format uses a "来源：" marker at the end of knowledge answers; give
+  // the label its own style so it reads as a citation rather than answer text.
+  return html.replace(/来源[：:]/g, '<span class="md-source-label">$&</span>')
 }

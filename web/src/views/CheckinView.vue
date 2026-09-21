@@ -170,6 +170,11 @@ function updateChart() {
   const data = filteredStats.value
   const periodLabel = chartFilter.value === 'today' ? '今日' : chartFilter.value === 'month' ? '本月' : '本周'
   chart.setOption({
+    animation: true,
+    animationDuration: 700,
+    animationEasing: 'cubicOut',
+    animationDurationUpdate: 700,
+    animationEasingUpdate: 'cubicOut',
     tooltip: {
       trigger: 'axis',
       backgroundColor: '#ffffff',
@@ -219,7 +224,7 @@ function updateChart() {
         fontSize: 11
       }
     }]
-  }, { notMerge: true })
+  }, { notMerge: false })
   chart.resize()
 }
 
