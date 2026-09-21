@@ -159,6 +159,10 @@ function initChart() {
   if (!chartRef.value) return
   chart?.dispose()
   chart = echarts.init(chartRef.value, undefined, { renderer: 'canvas' })
+  // Make sure the canvas picks up the layout size before the first render so the
+  // entrance animation plays on a correctly-sized surface instead of being
+  // consumed on an implicit 0x0 canvas.
+  chart.resize()
   updateChart()
   chartResizeObserver?.disconnect()
   chartResizeObserver = new ResizeObserver(() => chart?.resize())
@@ -281,7 +285,9 @@ async function handleClockOut() {
 
 async function loadStats() {
   const requestId = ++statsRequestId
-  statsLoading.value = true
+  // Only mask the chart on first load / when it is currently empty. During a
+  // filter switch the previous bars stay visible and animate into the new data.
+  if (filteredStats.value.length === 0) statsLoading.value = true
   statsError.value = ''
   try {
     const res = await checkinApi.getStats(chartFilter.value)

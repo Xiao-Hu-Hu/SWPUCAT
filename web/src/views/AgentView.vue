@@ -1315,8 +1315,7 @@ async function downloadSource(source: AgentKnowledgeSource) {
 .source-list-toggle {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.4rem;
+  gap: 0.25rem;
   width: 100%;
   padding: 0;
   border: none;
