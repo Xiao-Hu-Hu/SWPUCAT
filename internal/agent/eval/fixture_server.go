@@ -340,7 +340,7 @@ func (item *boundFixtureCase) allows(route fixtureRoute) bool {
 		return false
 	}
 	switch route.tool {
-	case "query_team_members", "get_checkin_stats", "list_pending_knowledge", "draft_announcement":
+	case "query_team_members", "get_checkin_stats", "get_report_roster", "list_pending_knowledge", "draft_announcement":
 		return item.role == "captain" || item.role == "super_admin"
 	default:
 		return true
@@ -415,6 +415,8 @@ func (s *FixtureServer) validateRequest(item *boundFixtureCase, route fixtureRou
 		if route.versionKey != "" {
 			return rejectUnexpectedQuery(query)
 		}
+	case "get_report_roster":
+		return rejectUnexpectedQuery(query)
 	}
 	return nil
 }
@@ -585,6 +587,13 @@ func fixtureRouteForPath(path string) (fixtureRoute, bool) {
 		return route, true
 	}
 	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	if len(parts) == 4 && parts[0] == "api" && parts[1] == "report-periods" && parts[3] == "members" {
+		periodID, err := strconv.ParseInt(parts[2], 10, 64)
+		if err != nil || periodID <= 0 {
+			return fixtureRoute{}, false
+		}
+		return fixtureRoute{tool: "get_report_roster", method: http.MethodGet}, true
+	}
 	if len(parts) != 5 || parts[0] != "api" || parts[1] != "reports" || parts[3] != "versions" {
 		return fixtureRoute{}, false
 	}

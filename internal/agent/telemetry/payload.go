@@ -162,6 +162,12 @@ func projectArguments(toolName string, decoded any) any {
 		projectArgumentNumber(result, object, "limit", 0, 8, true)
 		projectArgumentEnum(result, object, "scope", "mine", "team")
 		return result
+	case "get_report_roster":
+		result := make(map[string]any)
+		projectArgumentPresence(result, object, "period_id")
+		projectArgumentNumber(result, object, "limit", 0, 200, true)
+		projectArgumentEnum(result, object, "report_status", "missing", "draft", "submitted", "reviewed")
+		return result
 	case "draft_announcement":
 		return map[string]any{
 			"title_length":       trimmedStringLength(object["title"]),
@@ -379,6 +385,17 @@ func projectResult(toolName string, decoded any) any {
 			"skipped_reports": numberOrNil(object["skipped_reports"]),
 			"materials":       projectReportMaterials(object["materials"]),
 		}
+	case "get_report_roster":
+		return map[string]any{
+			"period_id":       numberOrNil(object["period_id"]),
+			"report_status":   enumOrOther(object["report_status"], "", "missing", "draft", "submitted", "reviewed"),
+			"required_count":  numberOrNil(object["required_count"]),
+			"submitted_count": numberOrNil(object["submitted_count"]),
+			"missing_count":   numberOrNil(object["missing_count"]),
+			"total":           numberOrNil(object["total"]),
+			"truncated":       boolOrNil(object["truncated"]),
+			"entries":         projectReportRosterEntries(object["entries"]),
+		}
 	case "draft_announcement":
 		if object["status"] == "confirmation_required" {
 			return projectActionProposal(object)
@@ -516,6 +533,29 @@ func projectReportMaterials(value any) []any {
 	return result
 }
 
+func projectReportRosterEntries(value any) []any {
+	items, _ := value.([]any)
+	if len(items) > maxProjectionItems {
+		items = items[:maxProjectionItems]
+	}
+	result := make([]any, 0, len(items))
+	for _, item := range items {
+		object, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		result = append(result, map[string]any{
+			"user_id":       numberOrNil(object["user_id"]),
+			"display_name":  stringOrNil(object["display_name"]),
+			"required":      boolOrNil(object["required"]),
+			"exempt":        boolOrNil(object["exempt"]),
+			"report_status": enumOrOther(object["report_status"], "", "missing", "draft", "submitted", "reviewed", "archived"),
+			"submitted_at":  stringOrNil(object["submitted_at"]),
+		})
+	}
+	return result
+}
+
 func collectNumberField(value any, field string) []any {
 	items, _ := value.([]any)
 	if len(items) > maxProjectionItems {
@@ -613,6 +653,13 @@ func numberOrNil(value any) any {
 func boolOrNil(value any) any {
 	if boolean, ok := value.(bool); ok {
 		return boolean
+	}
+	return nil
+}
+
+func stringOrNil(value any) any {
+	if text, ok := value.(string); ok && text != "" {
+		return text
 	}
 	return nil
 }

@@ -327,6 +327,7 @@ func TestFixtureRouteForPathCoversBusinessClientContract(t *testing.T) {
 		{path: "/api/checkin/stats", method: http.MethodGet, tool: "get_checkin_stats"},
 		{path: "/api/analysis/team", method: http.MethodGet, tool: "query_team_members"},
 		{path: "/api/report-periods", method: http.MethodGet, tool: "list_report_periods"},
+		{path: "/api/report-periods/31/members", method: http.MethodGet, tool: "get_report_roster"},
 		{path: "/api/reports", method: http.MethodGet, tool: "get_report_materials", reportList: true},
 		{path: "/api/reports/101/versions/3", method: http.MethodGet, tool: "get_report_materials", versionKey: "101:3"},
 		{path: "/api/announcement-drafts", method: http.MethodPost, tool: "draft_announcement", write: true},

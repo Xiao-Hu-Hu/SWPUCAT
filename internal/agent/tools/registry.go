@@ -137,6 +137,35 @@ type reportPeriodsResult struct {
 	Periods      []business.ReportPeriod `json:"periods"`
 }
 
+type reportRosterInput struct {
+	PeriodID     int64  `json:"period_id" jsonschema_description:"报告周期 ID，必须来自 list_report_periods 的返回值或由用户明确提供，禁止猜测"`
+	ReportStatus string `json:"report_status,omitempty" jsonschema_description:"可选筛选：missing、draft、submitted 或 reviewed；missing 表示应提交但尚未提交（含仅有草稿）"`
+	Limit        int    `json:"limit,omitempty" jsonschema_description:"最大返回成员数，默认 100，最大 200"`
+}
+
+type reportRosterEntry struct {
+	UserID          int64  `json:"user_id"`
+	DisplayName     string `json:"display_name"`
+	Required        bool   `json:"required"`
+	Exempt          bool   `json:"exempt"`
+	ExemptionReason string `json:"exemption_reason,omitempty"`
+	ReportID        int64  `json:"report_id,omitempty"`
+	ReportStatus    string `json:"report_status,omitempty"`
+	SubmittedAt     string `json:"submitted_at,omitempty"`
+}
+
+type reportRosterResult struct {
+	PeriodID       int64               `json:"period_id"`
+	ReportStatus   string              `json:"report_status,omitempty"`
+	RequiredCount  int                 `json:"required_count"`
+	SubmittedCount int                 `json:"submitted_count"`
+	MissingCount   int                 `json:"missing_count"`
+	Total          int                 `json:"total"`
+	Truncated      bool                `json:"truncated,omitempty"`
+	Entries        []reportRosterEntry `json:"entries"`
+	EmptyMessage   string              `json:"empty_message,omitempty"`
+}
+
 type knowledgeSearchResult struct {
 	Query          string                     `json:"query"`
 	Sources        []business.KnowledgeSource `json:"sources"`
@@ -523,6 +552,77 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
+	reportRosterTool, err := toolutils.InferTool[reportRosterInput, string](
+		"get_report_roster",
+		"读取指定报告周期内应提交成员的名单及每个人本月的月报提交状态。period_id 必须来自 list_report_periods 或由用户明确提供；要求团队已提交/已审核月报的 report_status 为 submitted 或 reviewed，未交或仅有草稿为 missing；返回 required_count、submitted_count、missing_count 及每人的 submitted_at，适合回答“该周期谁已提交/谁还没交/谁免交”及催交名单；仅队长或超级管理员可用。",
+		func(ctx context.Context, input reportRosterInput) (string, error) {
+			if input.PeriodID <= 0 {
+				return "", fmt.Errorf("period_id is required")
+			}
+			identity := business.RequestContextFrom(ctx)
+			if identity.Role != "captain" && identity.Role != "super_admin" {
+				return "", fmt.Errorf("captain or super_admin role is required")
+			}
+			status := strings.TrimSpace(input.ReportStatus)
+			if status != "" && status != "missing" && status != "draft" && status != "submitted" && status != "reviewed" {
+				return "", fmt.Errorf("invalid report_status")
+			}
+			limit := input.Limit
+			if limit == 0 {
+				limit = 100
+			}
+			if limit < 1 || limit > 200 {
+				return "", fmt.Errorf("limit must be between 1 and 200")
+			}
+			entries, err := r.client.ListRoster(ctx, input.PeriodID)
+			if err != nil {
+				return "", err
+			}
+			result := reportRosterResult{PeriodID: input.PeriodID, ReportStatus: status, RequiredCount: len(entries), Entries: make([]reportRosterEntry, 0, len(entries))}
+			for _, raw := range entries {
+				if isReportSubmitted(raw.ReportStatus) {
+					result.SubmittedCount++
+				}
+			}
+			result.MissingCount = result.RequiredCount - result.SubmittedCount
+			for _, raw := range entries {
+				state := strings.TrimSpace(raw.ReportStatus)
+				if status != "" {
+					switch status {
+					case "missing":
+						if state != "" && state != "draft" {
+							continue
+						}
+					case "draft":
+						if state != "draft" {
+							continue
+						}
+					default:
+						if state != status {
+							continue
+						}
+					}
+				}
+				result.Entries = append(result.Entries, reportRosterEntry{
+					UserID: raw.UserID, DisplayName: truncateToolRunes(raw.DisplayName, 64),
+					Required: raw.Required, Exempt: raw.Exempt, ExemptionReason: truncateToolRunes(raw.ExemptionReason, 128),
+					ReportID: raw.ReportID, ReportStatus: raw.ReportStatus, SubmittedAt: raw.SubmittedAt,
+				})
+				if len(result.Entries) >= limit {
+					result.Truncated = true
+					break
+				}
+			}
+			result.Total = len(result.Entries)
+			if len(result.Entries) == 0 {
+				result.EmptyMessage = "该周期没有匹配的应提交月报成员"
+			}
+			return marshal(result)
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
 	announcementDraftTool, err := toolutils.InferTool[announcementDraftInput, string](
 		"draft_announcement",
 		"根据队长要求提出公告草稿创建方案。只生成待确认提议，不会立即保存；用户必须在界面确认后才创建草稿。",
@@ -605,7 +705,7 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
-	result := []tool.BaseTool{statusTool, personalWorkHoursTool, checkinHistoryTool, checkinRequirementsTool, knowledgeTool, recommendTool, teamQueryTool, statsTool, reportPeriodsTool, reportTool, pendingKnowledgeTool, onlineSummaryTool}
+	result := []tool.BaseTool{statusTool, personalWorkHoursTool, checkinHistoryTool, checkinRequirementsTool, knowledgeTool, recommendTool, teamQueryTool, statsTool, reportPeriodsTool, reportRosterTool, reportTool, pendingKnowledgeTool, onlineSummaryTool}
 	if r.writeEnabled {
 		result = append(result, announcementDraftTool)
 		knowledgeReviewTool, err := toolutils.InferTool[knowledgeReviewInput, string](
@@ -969,6 +1069,17 @@ func stripKnowledgeOptionalField(sources []business.KnowledgeSource) bool {
 		}
 	}
 	return false
+}
+
+// isReportSubmitted reports whether a roster entry's report has reached a
+// submitted or reviewed state, i.e. the member has handed in a usable report.
+func isReportSubmitted(reportStatus string) bool {
+	switch strings.TrimSpace(reportStatus) {
+	case "submitted", "reviewed":
+		return true
+	default:
+		return false
+	}
 }
 
 func mergeReports(submitted, reviewed []business.Report, scope string, userID int64) []business.Report {

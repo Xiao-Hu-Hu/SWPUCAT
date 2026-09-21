@@ -36,6 +36,7 @@ var allToolNames = []string{
 	"get_checkin_stats",
 	"list_report_periods",
 	"get_report_materials",
+	"get_report_roster",
 	"list_pending_knowledge",
 	"get_online_summary",
 	"draft_announcement",
@@ -57,6 +58,7 @@ var writeToolNames = map[string]struct{}{
 
 var memberForbiddenTools = map[string]struct{}{
 	"query_team_members":       {},
+	"get_report_roster":        {},
 	"get_checkin_stats":        {},
 	"list_pending_knowledge":   {},
 	"draft_announcement":       {},
@@ -76,6 +78,7 @@ var argumentProjectionKeys = map[string]map[string]struct{}{
 	"get_checkin_stats":        stringSet([]string{"period"}),
 	"list_report_periods":      stringSet([]string{"limit", "period_key", "status"}),
 	"get_report_materials":     stringSet([]string{"period_id_provided", "offset", "limit", "scope"}),
+	"get_report_roster":        stringSet([]string{"period_id_provided", "limit", "report_status"}),
 	"list_pending_knowledge":   stringSet([]string{"limit"}),
 	"get_online_summary":       {},
 	"draft_announcement":       stringSet([]string{"title_length", "content_length", "source_note_length", "pinned", "recipient_count"}),
@@ -540,7 +543,7 @@ func (s *Suite) Validate() error {
 
 func toolAcceptsArguments(toolName string) bool {
 	switch toolName {
-	case "get_my_checkin_history", "query_team_members", "get_checkin_stats", "list_report_periods", "get_report_materials", "list_pending_knowledge", "draft_announcement", "review_knowledge_item", "generate_invitation_code", "save_evaluation_draft":
+	case "get_my_checkin_history", "query_team_members", "get_checkin_stats", "list_report_periods", "get_report_materials", "get_report_roster", "list_pending_knowledge", "draft_announcement", "review_knowledge_item", "generate_invitation_code", "save_evaluation_draft":
 		return true
 	default:
 		return false

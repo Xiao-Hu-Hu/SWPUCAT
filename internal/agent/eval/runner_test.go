@@ -28,8 +28,8 @@ func TestValidateReportsCompleteOfflineSuite(t *testing.T) {
 	if report.Mode != "validate" || report.Suite != DefaultSuite {
 		t.Fatalf("report mode/suite = %q/%q, want validate/%s", report.Mode, report.Suite, DefaultSuite)
 	}
-	if report.SuiteCases != 54 || report.SelectedCases != 54 || report.Coverage.Cases != 54 {
-		t.Fatalf("case counts = suite:%d selected:%d coverage:%d, want 54/54/54", report.SuiteCases, report.SelectedCases, report.Coverage.Cases)
+	if report.SuiteCases != 55 || report.SelectedCases != 55 || report.Coverage.Cases != 55 {
+		t.Fatalf("case counts = suite:%d selected:%d coverage:%d, want 55/55/55", report.SuiteCases, report.SelectedCases, report.Coverage.Cases)
 	}
 	if report.Repeat != 1 || !report.Success || len(report.Runs) != 0 {
 		t.Fatalf("offline report execution fields = repeat:%d success:%v runs:%d", report.Repeat, report.Success, len(report.Runs))
@@ -39,17 +39,18 @@ func TestValidateReportsCompleteOfflineSuite(t *testing.T) {
 	}
 
 	for _, role := range []string{"member", "captain", "super_admin"} {
+		want := map[string]int{"member": 18, "captain": 19, "super_admin": 18}[role]
 		role := role
 		t.Run(role, func(t *testing.T) {
 			filtered, err := ValidateRole(DefaultSuite, role)
 			if err != nil {
 				t.Fatalf("ValidateRole(%q, %q) error = %v", DefaultSuite, role, err)
 			}
-			if filtered.Role != role || filtered.SuiteCases != 54 || filtered.SelectedCases != 18 || filtered.Coverage.Cases != 18 {
-				t.Fatalf("filtered report = role:%q suite:%d selected:%d coverage:%d", filtered.Role, filtered.SuiteCases, filtered.SelectedCases, filtered.Coverage.Cases)
+			if filtered.Role != role || filtered.SuiteCases != 55 || filtered.SelectedCases != want || filtered.Coverage.Cases != want {
+				t.Fatalf("filtered report = role:%q suite:%d selected:%d coverage:%d, want suite:55 selected:%d coverage:%d", filtered.Role, filtered.SuiteCases, filtered.SelectedCases, filtered.Coverage.Cases, want, want)
 			}
-			if got := filtered.Coverage.Roles[role]; got != 18 {
-				t.Fatalf("Coverage.Roles[%q] = %d, want 18", role, got)
+			if got := filtered.Coverage.Roles[role]; got != want {
+				t.Fatalf("Coverage.Roles[%q] = %d, want %d", role, got, want)
 			}
 			if len(filtered.Coverage.Roles) != 1 {
 				t.Fatalf("Coverage.Roles = %#v, want only selected role", filtered.Coverage.Roles)
@@ -80,8 +81,8 @@ func TestValidateCoverageRequiresEveryProductionTool(t *testing.T) {
 		t.Fatalf("Validate(%q) error = %v", DefaultSuite, err)
 	}
 	tools := ToolNames()
-	if len(tools) != 18 {
-		t.Fatalf("ToolNames count = %d, want 18", len(tools))
+	if len(tools) != 19 {
+		t.Fatalf("ToolNames count = %d, want 19", len(tools))
 	}
 	if len(report.Coverage.Tools) != len(tools) {
 		t.Fatalf("Coverage.Tools = %#v, want exactly the %d production tools", report.Coverage.Tools, len(tools))

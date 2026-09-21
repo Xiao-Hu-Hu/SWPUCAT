@@ -19,14 +19,14 @@ func TestEmbeddedSuiteIsStrictAndComplete(t *testing.T) {
 	if suite.Manifest.SuiteID != "swpucat-agent-role-eval-v1" {
 		t.Fatalf("suite id = %q", suite.Manifest.SuiteID)
 	}
-	if len(suite.Cases) != 54 {
-		t.Fatalf("case count = %d, want 54", len(suite.Cases))
+	if len(suite.Cases) != 55 {
+		t.Fatalf("case count = %d, want 55", len(suite.Cases))
 	}
 	counts := map[string]int{}
 	for _, item := range suite.Cases {
 		counts[item.Role]++
 	}
-	if !reflect.DeepEqual(counts, map[string]int{"member": 18, "captain": 18, "super_admin": 18}) {
+	if !reflect.DeepEqual(counts, map[string]int{"member": 18, "captain": 19, "super_admin": 18}) {
 		t.Fatalf("role counts = %#v", counts)
 	}
 }

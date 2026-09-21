@@ -406,6 +406,21 @@ type ReportPeriod struct {
 	MemberCount   int    `json:"member_count"`
 }
 
+// RosterEntry is the report-roster projection surfaced to the assistant. It
+// couples each required submitter with the submission state of their monthly
+// report so the assistant can answer "who submitted and when" and "who should
+// have submitted but did not".
+type RosterEntry struct {
+	UserID          int64  `json:"user_id"`
+	DisplayName     string `json:"display_name"`
+	Required        bool   `json:"required"`
+	Exempt          bool   `json:"exempt"`
+	ExemptionReason string `json:"exemption_reason,omitempty"`
+	ReportID        int64  `json:"report_id,omitempty"`
+	ReportStatus    string `json:"report_status,omitempty"`
+	SubmittedAt     string `json:"submitted_at,omitempty"`
+}
+
 type ReportVersion struct {
 	ID           int64          `json:"id"`
 	ReportID     int64          `json:"report_id"`
@@ -559,6 +574,12 @@ func (c *Client) QueryTeam(ctx context.Context, period string, periodID int64, m
 func (c *Client) ListReportPeriods(ctx context.Context) ([]ReportPeriod, error) {
 	var result []ReportPeriod
 	err := c.do(ctx, http.MethodGet, "/api/report-periods", nil, nil, &result)
+	return result, err
+}
+
+func (c *Client) ListRoster(ctx context.Context, periodID int64) ([]RosterEntry, error) {
+	var result []RosterEntry
+	err := c.do(ctx, http.MethodGet, fmt.Sprintf("/api/report-periods/%d/members", periodID), nil, nil, &result)
 	return result, err
 }
 
