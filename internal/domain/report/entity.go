@@ -181,7 +181,9 @@ func NewReport(periodID, authorID int64, reportType ReportType, authorName strin
 }
 
 func (r *Report) CreateVersion(version int, title, body string, createdBy int64) (*ReportVersion, error) {
-	if r == nil || version <= 0 || createdBy <= 0 || version != r.CurrentVersion+1 || r.Status == ReportStatusArchived {
+	// A new version may only be made while the report is a draft; once submitted
+	// the author can revise only after a rejection resets the report to draft.
+	if r == nil || version <= 0 || createdBy <= 0 || version != r.CurrentVersion+1 || r.Status != ReportStatusDraft {
 		return nil, ErrInvalidVersion
 	}
 	now := time.Now()
@@ -218,6 +220,18 @@ func (v *ReportVersion) Review(approved bool) error {
 	} else {
 		v.Status = VersionStatusRejected
 	}
+	return nil
+}
+
+// Withdraw lets the author pull a submitted version back to draft before a
+// manager reviews it, so the report can be revised and resubmitted.
+func (v *ReportVersion) Withdraw() error {
+	if v == nil || v.Status != VersionStatusSubmitted {
+		return ErrInvalidVersionState
+	}
+	v.Status = VersionStatusDraft
+	v.SubmittedBy = 0
+	v.SubmittedAt = nil
 	return nil
 }
 

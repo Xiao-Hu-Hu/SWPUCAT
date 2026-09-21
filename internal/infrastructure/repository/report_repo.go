@@ -171,7 +171,7 @@ func (r *ReportRepo) CreateVersion(ctx context.Context, version *report.ReportVe
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&parent, version.ReportID).Error; err != nil {
 			return err
 		}
-		if parent.CurrentVersion != expectedCurrent || version.Version != expectedCurrent+1 || parent.Status == string(report.ReportStatusArchived) {
+		if parent.CurrentVersion != expectedCurrent || version.Version != expectedCurrent+1 || parent.Status != string(report.ReportStatusDraft) {
 			return report.ErrInvalidVersion
 		}
 		model := &database.ReportVersionModel{
@@ -194,8 +194,20 @@ func (r *ReportRepo) CreateVersion(ctx context.Context, version *report.ReportVe
 }
 
 func (r *ReportRepo) FindVersion(ctx context.Context, reportID int64, version int) (*report.ReportVersion, error) {
+	return r.findVersionWhere(ctx, func(tx *gorm.DB) *gorm.DB {
+		return tx.Where("report_id = ? AND version = ?", reportID, version)
+	})
+}
+
+func (r *ReportRepo) FindSubmittedVersion(ctx context.Context, reportID int64) (*report.ReportVersion, error) {
+	return r.findVersionWhere(ctx, func(tx *gorm.DB) *gorm.DB {
+		return tx.Where("report_id = ? AND status = ?", reportID, string(report.VersionStatusSubmitted))
+	})
+}
+
+func (r *ReportRepo) findVersionWhere(ctx context.Context, build func(*gorm.DB) *gorm.DB) (*report.ReportVersion, error) {
 	var model database.ReportVersionModel
-	if err := r.db.WithContext(ctx).Where("report_id = ? AND version = ?", reportID, version).First(&model).Error; err != nil {
+	if err := build(r.db.WithContext(ctx)).Order("version DESC").First(&model).Error; err != nil {
 		return nil, err
 	}
 	result := toDomainReportVersion(&model)

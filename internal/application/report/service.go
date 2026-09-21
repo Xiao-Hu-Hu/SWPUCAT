@@ -271,6 +271,50 @@ func (s *Service) GetVersion(ctx context.Context, reportID int64, version int, v
 	return toVersionDTO(item), nil
 }
 
+func (s *Service) GetSubmittedVersion(ctx context.Context, reportID int64, viewerID int64, manager bool) (*VersionDTO, error) {
+	parent, err := s.repo.FindReportByID(ctx, reportID)
+	if err != nil {
+		return nil, err
+	}
+	if !canAccess(parent, viewerID, manager) {
+		return nil, shared.ErrForbidden
+	}
+	item, err := s.repo.FindSubmittedVersion(ctx, reportID)
+	if err != nil {
+		return nil, err
+	}
+	return toVersionDTO(item), nil
+}
+
+// WithdrawVersion lets the author cancel their own submission, returning the
+// report to draft so it can be edited and resubmitted.
+func (s *Service) WithdrawVersion(ctx context.Context, reportID int64, _ int, actorID int64) (*VersionDTO, error) {
+	parent, err := s.repo.FindReportByID(ctx, reportID)
+	if err != nil {
+		return nil, err
+	}
+	if parent.AuthorID != actorID {
+		return nil, shared.ErrForbidden
+	}
+	if parent.Status != domain.ReportStatusSubmitted {
+		return nil, domain.ErrInvalidVersionState
+	}
+	version, err := s.repo.FindSubmittedVersion(ctx, reportID)
+	if err != nil {
+		return nil, err
+	}
+	if err := version.Withdraw(); err != nil {
+		return nil, err
+	}
+	if err := s.repo.UpdateVersion(ctx, version); err != nil {
+		return nil, err
+	}
+	if err := s.repo.UpdateReportStatus(ctx, reportID, domain.ReportStatusDraft); err != nil {
+		return nil, err
+	}
+	return toVersionDTO(version), nil
+}
+
 func (s *Service) SubmitVersion(ctx context.Context, reportID int64, versionNumber int, actorID int64, manager bool) (*VersionDTO, error) {
 	parent, err := s.repo.FindReportByID(ctx, reportID)
 	if err != nil {
@@ -295,11 +339,20 @@ func (s *Service) SubmitVersion(ctx context.Context, reportID int64, versionNumb
 	return toVersionDTO(version), nil
 }
 
-func (s *Service) ReviewVersion(ctx context.Context, reportID int64, versionNumber int, approved bool, manager bool) (*VersionDTO, error) {
+func (s *Service) ReviewVersion(ctx context.Context, reportID int64, _ int, approved bool, manager bool) (*VersionDTO, error) {
 	if !manager {
 		return nil, shared.ErrForbidden
 	}
-	version, err := s.repo.FindVersion(ctx, reportID, versionNumber)
+	parent, err := s.repo.FindReportByID(ctx, reportID)
+	if err != nil {
+		return nil, err
+	}
+	if parent.Status != domain.ReportStatusSubmitted {
+		return nil, domain.ErrInvalidVersionState
+	}
+	// Review always targets the submitted version, not whatever current_version
+	// points at, so a stray post-submit draft can never cause a state conflict.
+	version, err := s.repo.FindSubmittedVersion(ctx, reportID)
 	if err != nil {
 		return nil, err
 	}

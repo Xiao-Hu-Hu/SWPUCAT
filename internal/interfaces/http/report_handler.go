@@ -147,12 +147,38 @@ func (h *ReportHandler) GetVersion(c *gin.Context) {
 	Success(c, item)
 }
 
+func (h *ReportHandler) GetSubmittedVersion(c *gin.Context) {
+	reportID, ok := reportIDParam(c, "report id")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetSubmittedVersion(c.Request.Context(), reportID, GetUserID(c), IsCaptain(c))
+	if err != nil {
+		handleReportError(c, err)
+		return
+	}
+	Success(c, item)
+}
+
 func (h *ReportHandler) SubmitVersion(c *gin.Context) {
 	reportID, version, ok := reportVersionParams(c)
 	if !ok {
 		return
 	}
 	item, err := h.service.SubmitVersion(c.Request.Context(), reportID, version, GetUserID(c), IsCaptain(c))
+	if err != nil {
+		handleReportError(c, err)
+		return
+	}
+	Success(c, item)
+}
+
+func (h *ReportHandler) WithdrawVersion(c *gin.Context) {
+	reportID, version, ok := reportVersionParams(c)
+	if !ok {
+		return
+	}
+	item, err := h.service.WithdrawVersion(c.Request.Context(), reportID, version, GetUserID(c))
 	if err != nil {
 		handleReportError(c, err)
 		return

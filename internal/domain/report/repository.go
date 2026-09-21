@@ -16,6 +16,7 @@ type Repository interface {
 	ListReports(ctx context.Context, authorID int64, manager bool, periodID *int64, status ReportStatus, page, pageSize int) ([]*Report, error)
 	CreateVersion(ctx context.Context, version *ReportVersion, expectedCurrent int) error
 	FindVersion(ctx context.Context, reportID int64, version int) (*ReportVersion, error)
+	FindSubmittedVersion(ctx context.Context, reportID int64) (*ReportVersion, error)
 	UpdateVersion(ctx context.Context, version *ReportVersion) error
 	UpdateVersionQuality(ctx context.Context, versionID int64, status, resultJSON string, checkedAt *time.Time) error
 	SaveQualityDecision(ctx context.Context, versionID int64, findingIndex int, decision, note string, decidedBy int64) error

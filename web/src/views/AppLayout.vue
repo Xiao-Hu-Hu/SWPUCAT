@@ -14,6 +14,7 @@ const menuItems = [
   { path: '/app/agent-audits', icon: 'DataAnalysis', title: 'Agent 审计', show: authStore.isSuperAdmin },
   { path: '/app/announcements', icon: 'Bell', title: '公告管理' },
   { path: '/app/knowledge', icon: 'Folder', title: '知识库' },
+  { path: '/app/reports', icon: 'Document', title: '月报' },
   { path: '/app/members', icon: 'User', title: '成员管理' },
   { path: '/app/approvals', icon: 'Check', title: '审批管理' },
   { path: '/app/invitations', icon: 'Link', title: '邀请码管理', show: authStore.isSuperAdmin || authStore.isCaptain },
