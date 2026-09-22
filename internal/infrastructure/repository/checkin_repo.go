@@ -23,11 +23,12 @@ func NewCheckinRepo(db *gorm.DB) *CheckinRepo {
 
 func (r *CheckinRepo) Create(ctx context.Context, record *checkin.CheckinRecord) error {
 	model := &database.CheckinRecordModel{
-		ID:     record.ID,
-		UserID: record.UserID,
-		Type:   string(record.Type),
-		Date:   record.Date,
-		Time:   record.Time,
+		ID:      record.ID,
+		UserID:  record.UserID,
+		Type:    string(record.Type),
+		Date:    record.Date,
+		Time:    record.Time,
+		Minutes: record.Minutes,
 	}
 	if err := r.db.WithContext(ctx).Create(model).Error; err != nil {
 		return err
@@ -95,10 +96,11 @@ func (r *CheckinRepo) CreateTransition(ctx context.Context, record *checkin.Chec
 		}
 
 		model := &database.CheckinRecordModel{
-			UserID: record.UserID,
-			Type:   string(record.Type),
-			Date:   record.Date,
-			Time:   record.Time,
+			UserID:  record.UserID,
+			Type:    string(record.Type),
+			Date:    record.Date,
+			Time:    record.Time,
+			Minutes: record.Minutes,
 		}
 		if !record.CreatedAt.IsZero() {
 			model.CreatedAt = record.CreatedAt
@@ -136,20 +138,20 @@ func (r *CheckinRepo) CreateTransition(ctx context.Context, record *checkin.Chec
 	return created, err
 }
 
-// CreateMakeup writes a complete historical in/out pair atomically. The user
-// row lock serializes this correction with live clock-in/out requests, while
-// the date check prevents a second correction from inflating attendance time.
-func (r *CheckinRepo) CreateMakeup(ctx context.Context, inRecord, outRecord *checkin.CheckinRecord) error {
-	if inRecord == nil || outRecord == nil || inRecord.Type != checkin.CheckinTypeIn || outRecord.Type != checkin.CheckinTypeOut {
+// CreateMakeup persists a single makeup record that adds a fixed amount of work
+// minutes rather than a fabricated in/out pair. The user row lock serializes
+// this correction with live clock-in/out requests.
+func (r *CheckinRepo) CreateMakeup(ctx context.Context, record *checkin.CheckinRecord) error {
+	if record == nil || record.Type != checkin.CheckinTypeMakeup {
 		return checkin.ErrInvalidCheckinType
 	}
-	if inRecord.UserID != outRecord.UserID || inRecord.Date != outRecord.Date {
+	if record.UserID <= 0 || record.Date == "" || record.Minutes < 1 {
 		return shared.ErrValidation
 	}
 
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var account database.UserModel
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&account, inRecord.UserID).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&account, record.UserID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return user.ErrUserNotFound
 			}
@@ -159,47 +161,21 @@ func (r *CheckinRepo) CreateMakeup(ctx context.Context, inRecord, outRecord *che
 			return shared.ErrForbidden
 		}
 
-		var existing int64
-		if err := tx.Model(&database.CheckinRecordModel{}).
-			Where("user_id = ? AND date = ?", inRecord.UserID, inRecord.Date).
-			Count(&existing).Error; err != nil {
+		model := &database.CheckinRecordModel{
+			UserID:  record.UserID,
+			Type:    string(record.Type),
+			Date:    record.Date,
+			Time:    record.Time,
+			Minutes: record.Minutes,
+		}
+		if !record.CreatedAt.IsZero() {
+			model.CreatedAt = record.CreatedAt
+		}
+		if err := tx.Create(model).Error; err != nil {
 			return err
 		}
-		if existing > 0 {
-			return shared.ErrConflict
-		}
-
-		inModel := &database.CheckinRecordModel{
-			UserID: inRecord.UserID,
-			Type:   string(inRecord.Type),
-			Date:   inRecord.Date,
-			Time:   inRecord.Time,
-		}
-		outModel := &database.CheckinRecordModel{
-			UserID: outRecord.UserID,
-			Type:   string(outRecord.Type),
-			Date:   outRecord.Date,
-			Time:   outRecord.Time,
-		}
-		if !inRecord.CreatedAt.IsZero() {
-			inModel.CreatedAt = inRecord.CreatedAt
-		}
-		if !outRecord.CreatedAt.IsZero() {
-			outModel.CreatedAt = outRecord.CreatedAt
-		}
-		if err := tx.Create(inModel).Error; err != nil {
-			return err
-		}
-		if err := tx.Create(outModel).Error; err != nil {
-			return err
-		}
-		inRecord.ID, inRecord.CreatedAt = inModel.ID, inModel.CreatedAt
-		outRecord.ID, outRecord.CreatedAt = outModel.ID, outModel.CreatedAt
-		return tx.Model(&database.UserModel{}).Where("id = ?", inRecord.UserID).Updates(map[string]interface{}{
-			"checkin_count":     gorm.Expr("checkin_count + 1"),
-			"last_checkin_date": inRecord.Date,
-			"updated_at":        gorm.Expr("CURRENT_TIMESTAMP"),
-		}).Error
+		record.ID, record.CreatedAt = model.ID, model.CreatedAt
+		return nil
 	})
 }
 
@@ -399,6 +375,7 @@ func toDomainCheckinRecord(m *database.CheckinRecordModel) *checkin.CheckinRecor
 		Type:      checkin.CheckinType(m.Type),
 		Date:      m.Date,
 		Time:      m.Time,
+		Minutes:   m.Minutes,
 		CreatedAt: m.CreatedAt,
 	}
 }

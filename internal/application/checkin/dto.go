@@ -68,6 +68,7 @@ type TodayRecordDTO struct {
 	Date        string `json:"date"`
 	Time        string `json:"time"`
 	ClockInTime string `json:"clock_in_time,omitempty"`
+	Minutes     int    `json:"minutes,omitempty"`
 	Nickname    string `json:"nickname"`
 	StudentID   string `json:"student_id"`
 	Avatar      string `json:"avatar"`

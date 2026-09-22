@@ -7,10 +7,13 @@ type CheckinType string
 const (
 	CheckinTypeIn  CheckinType = "in"
 	CheckinTypeOut CheckinType = "out"
+	// CheckinTypeMakeup is a compensation record that adds a fixed amount of
+	// work minutes rather than a live in/out session. It has no clock time.
+	CheckinTypeMakeup CheckinType = "makeup"
 )
 
 func (t CheckinType) IsValid() bool {
-	return t == CheckinTypeIn || t == CheckinTypeOut
+	return t == CheckinTypeIn || t == CheckinTypeOut || t == CheckinTypeMakeup
 }
 
 var (

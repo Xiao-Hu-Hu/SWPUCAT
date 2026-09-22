@@ -69,6 +69,7 @@ type CheckinRecordModel struct {
 	Type      string    `gorm:"size:8;not null"`
 	Date      string    `gorm:"size:10;not null;index"`
 	Time      string    `gorm:"size:8;not null"`
+	Minutes   int       `gorm:"not null;default:0"`
 	CreatedAt time.Time `gorm:"not null;default:current_timestamp"`
 }
 

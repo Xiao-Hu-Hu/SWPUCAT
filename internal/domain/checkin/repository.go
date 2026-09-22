@@ -9,7 +9,9 @@ type Repository interface {
 	// idempotency key replays an existing result. Implementations must serialize
 	// transitions for the same user to prevent concurrent duplicate records.
 	CreateTransition(ctx context.Context, record *CheckinRecord, idempotencyKey string) (created bool, err error)
-	CreateMakeup(ctx context.Context, inRecord, outRecord *CheckinRecord) error
+	// CreateMakeup persists a single makeup record that adds a fixed amount of
+	// work minutes instead of fabricating a live in/out pair.
+	CreateMakeup(ctx context.Context, record *CheckinRecord) error
 	RunAutoClockOut(ctx context.Context, date, clockOutTime string) (processed int, skipped bool, err error)
 	FindByUserID(ctx context.Context, userID int64) ([]*CheckinRecord, error)
 	FindByUserIDAndDate(ctx context.Context, userID int64, date string) ([]*CheckinRecord, error)

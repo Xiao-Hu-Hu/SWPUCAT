@@ -278,3 +278,61 @@ func checkinRecord(id, userID int64, kind checkindomain.CheckinType, date, clock
 	parsed, _ := time.Parse("2006-01-02 15:04:05", date+" "+clock)
 	return &checkindomain.CheckinRecord{ID: id, UserID: userID, Type: kind, Date: date, Time: clock, CreatedAt: parsed}
 }
+
+type makeupCheckinRepo struct {
+	checkindomain.Repository
+	record *checkindomain.CheckinRecord
+	err    error
+}
+
+func (r *makeupCheckinRepo) CreateMakeup(_ context.Context, record *checkindomain.CheckinRecord) error {
+	r.record = record
+	return r.err
+}
+
+func TestMakeupStoresSingleMakeupRecordWithMinutes(t *testing.T) {
+	repo := &makeupCheckinRepo{}
+	users := &personalUserRepo{member: &userdomain.User{ID: 5, Status: userdomain.StatusActive}}
+	service := NewCheckinService(repo, users, nil, checkinSettingsStub{})
+
+	err := service.Makeup(context.Background(), MakeupRequest{UserID: 5, Date: "2026-09-15", Minutes: 90})
+	if err != nil {
+		t.Fatalf("Makeup() error = %v", err)
+	}
+	if repo.record == nil || repo.record.Type != checkindomain.CheckinTypeMakeup || repo.record.Minutes != 90 ||
+		repo.record.Date != "2026-09-15" || repo.record.Time != "" {
+		t.Fatalf("unexpected makeup record: %+v", repo.record)
+	}
+}
+
+func TestMakeupRejectsInvalidMinutesAndDate(t *testing.T) {
+	repo := &makeupCheckinRepo{}
+	users := &personalUserRepo{member: &userdomain.User{ID: 5, Status: userdomain.StatusActive}}
+	service := NewCheckinService(repo, users, nil, checkinSettingsStub{})
+
+	if err := service.Makeup(context.Background(), MakeupRequest{UserID: 5, Date: "2026-09-15", Minutes: 0}); err == nil {
+		t.Fatal("zero minutes should be rejected")
+	}
+	if err := service.Makeup(context.Background(), MakeupRequest{UserID: 5, Date: "2026-09-15", Minutes: 60}); err != nil {
+		t.Fatalf("valid makeup should succeed: %v", err)
+	}
+	if repo.record == nil || repo.record.Minutes != 60 {
+		t.Fatalf("makeup record = %+v", repo.record)
+	}
+}
+
+func TestSummarizeCheckinRecordsAddsMakeupMinutes(t *testing.T) {
+	records := []*checkindomain.CheckinRecord{
+		checkinRecord(1, 7, checkindomain.CheckinTypeMakeup, "2026-09-15", ""),
+		checkinRecord(2, 7, checkindomain.CheckinTypeIn, "2026-09-15", "08:00:00"),
+		checkinRecord(3, 7, checkindomain.CheckinTypeOut, "2026-09-15", "10:00:00"),
+	}
+	records[0].Minutes = 90
+	result := summarizeCheckinRecords(7, "成员", records)
+	if result.TotalMinutes != 210 {
+		t.Fatalf("summary = %+v, want total 210 (90 makeup + 120 in/out)", result)
+	}
+	if result.Status != "normal" || len(result.Anomalies) != 0 {
+		t.Fatalf("makeup should not be an anomaly: %+v", result)
+	}
+}

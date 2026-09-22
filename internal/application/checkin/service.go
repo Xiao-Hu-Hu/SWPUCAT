@@ -151,16 +151,22 @@ func (s *CheckinService) GetStatus(ctx context.Context, userID int64) (*CheckinS
 
 	// Find clock_in and clock_out times
 	var clockIn, clockOut string
+	var lastInOut *checkin.CheckinRecord
 	for _, r := range records {
-		if r.Type == checkin.CheckinTypeIn {
+		switch r.Type {
+		case checkin.CheckinTypeIn:
 			clockIn = r.Time
-		} else if r.Type == checkin.CheckinTypeOut {
+			lastInOut = r
+		case checkin.CheckinTypeOut:
 			clockOut = r.Time
+			lastInOut = r
 		}
 	}
 
-	last := records[len(records)-1]
-	if last.Type == checkin.CheckinTypeIn {
+	if lastInOut == nil {
+		return &CheckinStatusDTO{Status: "idle"}, nil
+	}
+	if lastInOut.Type == checkin.CheckinTypeIn {
 		return &CheckinStatusDTO{Status: "clocked_in", ClockIn: clockIn}, nil
 	}
 	return &CheckinStatusDTO{Status: "clocked_out", ClockIn: clockIn, ClockOut: clockOut}, nil
@@ -387,6 +393,8 @@ func summarizeCheckinRecords(userID int64, nickname string, records []*checkin.C
 					totalMinutes += outTime.Sub(inTime).Minutes()
 				}
 				openIn = nil
+			case checkin.CheckinTypeMakeup:
+				totalMinutes += float64(record.Minutes)
 			default:
 				anomalySet["invalid_type"] = struct{}{}
 			}
@@ -556,6 +564,9 @@ func (s *CheckinService) GetAllTodayRecords(ctx context.Context) ([]TodayRecordD
 				dto.ClockInTime = records[inIdx].Time
 			}
 		}
+		if r.Type == checkin.CheckinTypeMakeup {
+			dto.Minutes = r.Minutes
+		}
 		if u, ok := userMap[r.UserID]; ok {
 			dto.Nickname = u.DisplayName()
 			dto.StudentID = string(u.StudentID)
@@ -588,26 +599,17 @@ func (s *CheckinService) Makeup(ctx context.Context, req MakeupRequest) error {
 		return fmt.Errorf("%w: date cannot be in the future", shared.ErrValidation)
 	}
 
-	// Build both records before entering the repository transaction.
-	inRecord := &checkin.CheckinRecord{
+	// A makeup adds the requested work minutes directly to the member's weekly
+	// total as a standalone 补签 record, with no clock-in/out time.
+	record := &checkin.CheckinRecord{
 		UserID:    req.UserID,
-		Type:      checkin.CheckinTypeIn,
+		Type:      checkin.CheckinTypeMakeup,
 		Date:      req.Date,
-		Time:      "08:00:00",
+		Time:      "",
+		Minutes:   req.Minutes,
 		CreatedAt: time.Now(),
 	}
-	// Calculate out time
-	inTime, _ := time.Parse("15:04:05", "08:00:00")
-	outTime := inTime.Add(time.Duration(req.Minutes) * time.Minute)
-
-	outRecord := &checkin.CheckinRecord{
-		UserID:    req.UserID,
-		Type:      checkin.CheckinTypeOut,
-		Date:      req.Date,
-		Time:      outTime.Format("15:04:05"),
-		CreatedAt: time.Now(),
-	}
-	return s.checkinRepo.CreateMakeup(ctx, inRecord, outRecord)
+	return s.checkinRepo.CreateMakeup(ctx, record)
 }
 
 func (s *CheckinService) GetRequirements(ctx context.Context) RequirementsDTO {

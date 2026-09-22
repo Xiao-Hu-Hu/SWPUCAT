@@ -16,7 +16,7 @@ let statsRequestId = 0
 const now = ref(new Date())
 
 const status = ref({ status: 'idle', clock_in: '', clock_out: '' })
-const records = ref<Array<{ id: number; user_id: number; type: string; date: string; time: string; nickname: string; student_id: string; avatar: string }>>([])
+const records = ref<Array<{ id: number; user_id: number; type: string; date: string; time: string; nickname: string; student_id: string; avatar: string; minutes?: number }>>([])
 const statsData = ref<CheckinChartStat[]>([])
 const onlineMembers = ref<Array<{ user_id: number; nickname: string; online: boolean }>>([])
 type ChartPeriod = 'today' | 'week' | 'month'
@@ -426,8 +426,8 @@ async function loadOnlineMembers() {
           </el-table-column>
           <el-table-column label="类型" width="100">
             <template #default="{ row }">
-              <span class="tag" :class="row.type === 'in' ? 'tag-in' : 'tag-out'">
-                {{ row.type === 'in' ? '签到' : '签退' }}
+              <span class="tag" :class="row.type === 'in' ? 'tag-in' : row.type === 'out' ? 'tag-out' : 'tag-makeup'">
+                {{ row.type === 'in' ? '签到' : row.type === 'out' ? '签退' : '补签' }}
               </span>
             </template>
           </el-table-column>
@@ -443,7 +443,7 @@ async function loadOnlineMembers() {
           </el-table-column>
           <el-table-column label="工时" width="120">
             <template #default="{ row }">
-              <span class="mono-text bold">{{ row.type === 'out' ? calcDuration(row.clock_in_time, row.time) : '--' }}</span>
+              <span class="mono-text bold">{{ row.type === 'out' ? calcDuration(row.clock_in_time, row.time) : row.type === 'makeup' ? formatMinutes(row.minutes || 0) : '--' }}</span>
             </template>
           </el-table-column>
         </el-table>
@@ -755,6 +755,11 @@ async function loadOnlineMembers() {
 .tag-out {
   background: var(--danger-bg);
   color: var(--danger);
+}
+
+.tag-makeup {
+  background: var(--warning-bg);
+  color: var(--warning);
 }
 
 .mono-text {
