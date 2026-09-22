@@ -2,7 +2,6 @@ package reportapp
 
 import (
 	domain "SWPUCAT/internal/domain/report"
-	"SWPUCAT/internal/domain/shared"
 	"context"
 	"testing"
 )
@@ -63,7 +62,22 @@ func TestCreateReportRequiresConfiguredRosterMember(t *testing.T) {
 	repo := &fakeReportRepo{period: &domain.ReportPeriod{ID: 1, Status: domain.PeriodStatusOpen, Members: []domain.PeriodMember{{UserID: 3}}}}
 	svc := NewService(repo)
 	_, err := svc.CreateReport(context.Background(), 4, "其他成员", CreateReportRequest{PeriodID: 1, ReportType: domain.ReportTypeMonthly})
-	if err != shared.ErrForbidden {
+	if err != domain.ErrNotInRoster {
 		t.Fatalf("unlisted member was allowed: %v", err)
+	}
+}
+
+func TestIsPeriodMember(t *testing.T) {
+	repo := &fakeReportRepo{period: &domain.ReportPeriod{ID: 1, Status: domain.PeriodStatusOpen, Members: []domain.PeriodMember{{UserID: 3}, {UserID: 7}}}}
+	svc := NewService(repo)
+
+	member, err := svc.IsPeriodMember(context.Background(), 1, 7)
+	if err != nil || !member {
+		t.Fatalf("roster member not recognized: member=%v err=%v", member, err)
+	}
+
+	nonMember, err := svc.IsPeriodMember(context.Background(), 1, 99)
+	if err != nil || nonMember {
+		t.Fatalf("non-roster user recognized: member=%v err=%v", nonMember, err)
 	}
 }

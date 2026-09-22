@@ -208,6 +208,7 @@ func (r *Router) Setup() *gin.Engine {
 			protected.GET("/report-periods", r.reportHandler.ListPeriods)
 			protected.POST("/report-periods", RBACMiddleware("captain", "super_admin"), r.reportHandler.CreatePeriod)
 			protected.GET("/report-periods/:id/members", r.reportHandler.ListRoster)
+			protected.GET("/report-periods/:id/is-member", r.reportHandler.IsPeriodMember)
 			protected.POST("/report-periods/:id/members", RBACMiddleware("captain", "super_admin"), r.reportHandler.AddPeriodMember)
 			protected.POST("/reports", r.reportHandler.CreateReport)
 			protected.GET("/reports", r.reportHandler.ListReports)

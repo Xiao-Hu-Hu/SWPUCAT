@@ -56,6 +56,19 @@ func (h *ReportHandler) ListRoster(c *gin.Context) {
 	Success(c, items)
 }
 
+func (h *ReportHandler) IsPeriodMember(c *gin.Context) {
+	periodID, ok := reportIDParam(c, "period id")
+	if !ok {
+		return
+	}
+	isMember, err := h.service.IsPeriodMember(c.Request.Context(), periodID, GetUserID(c))
+	if err != nil {
+		handleReportError(c, err)
+		return
+	}
+	Success(c, gin.H{"is_member": isMember})
+}
+
 func (h *ReportHandler) AddPeriodMember(c *gin.Context) {
 	periodID, ok := reportIDParam(c, "period id")
 	if !ok {
@@ -321,6 +334,8 @@ func handleReportError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, shared.ErrForbidden):
 		Forbidden(c, "not allowed to access this report")
+	case errors.Is(err, domain.ErrNotInRoster):
+		Forbidden(c, "您不在本期的月报提交名单中")
 	case errors.Is(err, shared.ErrConflict), errors.Is(err, domain.ErrInvalidVersion), errors.Is(err, domain.ErrInvalidVersionState), errors.Is(err, domain.ErrDuplicateMember), errors.Is(err, domain.ErrDuplicateAsset):
 		Conflict(c, "report state conflicts with this request")
 	case errors.Is(err, shared.ErrValidation), errors.Is(err, domain.ErrInvalidPeriod), errors.Is(err, domain.ErrInvalidReport):

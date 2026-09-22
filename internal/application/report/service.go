@@ -199,6 +199,21 @@ func (s *Service) AddPeriodMember(ctx context.Context, periodID int64, req AddMe
 	return nil
 }
 
+// IsPeriodMember reports whether the user is on the period roster, which lets
+// the UI gate the "create report" action ahead of the backend check.
+func (s *Service) IsPeriodMember(ctx context.Context, periodID, userID int64) (bool, error) {
+	period, err := s.repo.FindPeriodByID(ctx, periodID)
+	if err != nil {
+		return false, err
+	}
+	for _, member := range period.Members {
+		if member.UserID == userID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (s *Service) CreateReport(ctx context.Context, authorID int64, authorName string, req CreateReportRequest) (*ReportDTO, error) {
 	period, err := s.repo.FindPeriodByID(ctx, req.PeriodID)
 	if err != nil {
@@ -213,7 +228,7 @@ func (s *Service) CreateReport(ctx context.Context, authorID int64, authorName s
 			}
 		}
 		if !found {
-			return nil, shared.ErrForbidden
+			return nil, domain.ErrNotInRoster
 		}
 	}
 	item, err := domain.NewReport(req.PeriodID, authorID, req.ReportType, authorName)

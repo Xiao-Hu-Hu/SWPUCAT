@@ -58,6 +58,7 @@ var (
 	ErrInvalidVersionState = errors.New("invalid report version state")
 	ErrDuplicateMember     = errors.New("report period member already exists")
 	ErrDuplicateAsset      = errors.New("report version asset already exists")
+	ErrNotInRoster         = errors.New("user is not in the report period roster")
 )
 
 type ReportPeriod struct {
