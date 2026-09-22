@@ -957,6 +957,9 @@ async function downloadSource(source: AgentKnowledgeSource) {
 
 .conversation-panel {
   min-height: 620px;
+  /* Cap the panel at the chat card's height so many sessions scroll internally
+     instead of stretching the row; mirrors the .messages min(58vh,560px)/320px. */
+  max-height: calc(max(min(58vh, 560px), 320px) + 194px);
   padding: 0.65rem;
   display: flex;
   flex-direction: column;
@@ -984,6 +987,7 @@ async function downloadSource(source: AgentKnowledgeSource) {
 .conversation-list {
   display: flex;
   flex: 1;
+  min-height: 0;
   flex-direction: column;
   gap: 0.2rem;
   overflow-y: auto;
