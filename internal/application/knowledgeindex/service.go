@@ -21,24 +21,26 @@ const (
 	// Bump when extraction or the synthetic description text changes so an
 	// upgrade automatically reindexes existing approved sources instead of
 	// leaving stale chunks in PostgreSQL.
-	indexFormatVersion = "knowledge-index-v2"
+	indexFormatVersion = "knowledge-index-v3"
 	defaultMaxAttempts = 5
 	maxQueryRunes      = 512
 )
 
 type Config struct {
-	Mode                string
-	CandidateLimit      int
-	FinalLimit          int
-	MinVectorScore      float64
-	ChunkRunes          int
-	ChunkOverlapRunes   int
-	MaxChunks           int
-	MaxExtractedRunes   int
-	WorkerInterval      time.Duration
-	EmbeddingModel      string
-	EmbeddingDimensions int
-	MaxAttempts         int
+	Mode                         string
+	CandidateLimit               int
+	FinalLimit                   int
+	MinVectorScore               float64
+	ChunkRunes                   int
+	ChunkOverlapRunes            int
+	DescriptionChunkRunes        int
+	DescriptionChunkOverlapRunes int
+	MaxChunks                    int
+	MaxExtractedRunes            int
+	WorkerInterval               time.Duration
+	EmbeddingModel               string
+	EmbeddingDimensions          int
+	MaxAttempts                  int
 }
 
 type Service struct {
@@ -64,6 +66,12 @@ func NewService(repo Repository, embedder Embedder, extractor TextExtractor, fil
 	}
 	if cfg.ChunkRunes < 1 || cfg.ChunkOverlapRunes < 0 || cfg.ChunkOverlapRunes >= cfg.ChunkRunes {
 		return nil, errors.New("invalid knowledge chunk limits")
+	}
+	if cfg.DescriptionChunkRunes <= 0 {
+		cfg.DescriptionChunkRunes = cfg.ChunkRunes
+	}
+	if cfg.DescriptionChunkOverlapRunes < 0 || cfg.DescriptionChunkOverlapRunes >= cfg.DescriptionChunkRunes {
+		cfg.DescriptionChunkOverlapRunes = 0
 	}
 	if cfg.MaxChunks < 1 || cfg.MaxChunks > 50000 {
 		return nil, errors.New("invalid knowledge max chunks")
@@ -197,7 +205,13 @@ func (s *Service) buildChunks(ctx context.Context, source Source) ([]Chunk, erro
 			if remaining <= 0 && strings.TrimSpace(part.text) != "" {
 				return nil, errChunkLimit
 			}
-			partChunks, err := splitTextBounded(part.text, s.config.ChunkRunes, s.config.ChunkOverlapRunes, remaining)
+			chunkRunes := s.config.ChunkRunes
+			chunkOverlap := s.config.ChunkOverlapRunes
+			if part.kind == "description" {
+				chunkRunes = s.config.DescriptionChunkRunes
+				chunkOverlap = s.config.DescriptionChunkOverlapRunes
+			}
+			partChunks, err := splitTextBounded(part.text, chunkRunes, chunkOverlap, remaining)
 			if err != nil {
 				return nil, err
 			}
@@ -311,7 +325,8 @@ func (s *Service) fingerprint(source Source) string {
 	payload, _ := json.Marshal([]any{
 		indexFormatVersion, source.ID, source.Type, source.Name, source.Description,
 		source.URL, source.FileKey, source.CategoryName, s.config.ChunkRunes,
-		s.config.ChunkOverlapRunes, s.config.MaxChunks, s.config.MaxExtractedRunes,
+		s.config.ChunkOverlapRunes, s.config.DescriptionChunkRunes, s.config.DescriptionChunkOverlapRunes,
+		s.config.MaxChunks, s.config.MaxExtractedRunes,
 		s.config.Mode,
 		s.config.EmbeddingModel, s.config.EmbeddingDimensions,
 	})

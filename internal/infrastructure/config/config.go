@@ -66,15 +66,17 @@ func (e EmbeddingConfig) Validate() error {
 }
 
 type RetrievalConfig struct {
-	Mode              string        `mapstructure:"mode"`
-	CandidateLimit    int           `mapstructure:"candidate_limit"`
-	FinalLimit        int           `mapstructure:"final_limit"`
-	MinVectorScore    float64       `mapstructure:"min_vector_score"`
-	ChunkRunes        int           `mapstructure:"chunk_runes"`
-	ChunkOverlapRunes int           `mapstructure:"chunk_overlap_runes"`
-	MaxChunks         int           `mapstructure:"max_chunks"`
-	MaxExtractedRunes int           `mapstructure:"max_extracted_runes"`
-	WorkerInterval    time.Duration `mapstructure:"worker_interval"`
+	Mode                         string        `mapstructure:"mode"`
+	CandidateLimit               int           `mapstructure:"candidate_limit"`
+	FinalLimit                   int           `mapstructure:"final_limit"`
+	MinVectorScore               float64       `mapstructure:"min_vector_score"`
+	ChunkRunes                   int           `mapstructure:"chunk_runes"`
+	ChunkOverlapRunes            int           `mapstructure:"chunk_overlap_runes"`
+	DescriptionChunkRunes        int           `mapstructure:"description_chunk_runes"`
+	DescriptionChunkOverlapRunes int           `mapstructure:"description_chunk_overlap_runes"`
+	MaxChunks                    int           `mapstructure:"max_chunks"`
+	MaxExtractedRunes            int           `mapstructure:"max_extracted_runes"`
+	WorkerInterval               time.Duration `mapstructure:"worker_interval"`
 }
 
 func (r RetrievalConfig) Validate(embeddingEnabled bool) error {
@@ -95,6 +97,12 @@ func (r RetrievalConfig) Validate(embeddingEnabled bool) error {
 	}
 	if r.ChunkRunes < 128 || r.ChunkRunes > 4000 {
 		return fmt.Errorf("retrieval.chunk_runes must be between 128 and 4000")
+	}
+	if r.DescriptionChunkRunes != 0 && (r.DescriptionChunkRunes < 128 || r.DescriptionChunkRunes > 4000) {
+		return fmt.Errorf("retrieval.description_chunk_runes must be between 128 and 4000")
+	}
+	if r.DescriptionChunkOverlapRunes < 0 {
+		return fmt.Errorf("retrieval.description_chunk_overlap_runes must be non-negative")
 	}
 	if r.ChunkOverlapRunes < 0 || r.ChunkOverlapRunes >= r.ChunkRunes {
 		return fmt.Errorf("retrieval.chunk_overlap_runes must be non-negative and less than chunk_runes")
@@ -410,6 +418,8 @@ func Load() (*Config, error) {
 	viper.SetDefault("retrieval.min_vector_score", 0.3)
 	viper.SetDefault("retrieval.chunk_runes", 600)
 	viper.SetDefault("retrieval.chunk_overlap_runes", 80)
+	viper.SetDefault("retrieval.description_chunk_runes", 1000)
+	viper.SetDefault("retrieval.description_chunk_overlap_runes", 0)
 	viper.SetDefault("retrieval.max_chunks", 10000)
 	viper.SetDefault("retrieval.max_extracted_runes", 500000)
 	viper.SetDefault("retrieval.worker_interval", 5*time.Second)

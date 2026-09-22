@@ -122,6 +122,7 @@ func main() {
 			Mode: cfg.Retrieval.Mode, CandidateLimit: cfg.Retrieval.CandidateLimit,
 			FinalLimit: cfg.Retrieval.FinalLimit, MinVectorScore: cfg.Retrieval.MinVectorScore,
 			ChunkRunes: cfg.Retrieval.ChunkRunes, ChunkOverlapRunes: cfg.Retrieval.ChunkOverlapRunes,
+			DescriptionChunkRunes: cfg.Retrieval.DescriptionChunkRunes, DescriptionChunkOverlapRunes: cfg.Retrieval.DescriptionChunkOverlapRunes,
 			MaxChunks:         cfg.Retrieval.MaxChunks,
 			MaxExtractedRunes: cfg.Retrieval.MaxExtractedRunes, WorkerInterval: cfg.Retrieval.WorkerInterval,
 			EmbeddingModel: cfg.Embedding.Model, EmbeddingDimensions: cfg.Embedding.Dimensions,

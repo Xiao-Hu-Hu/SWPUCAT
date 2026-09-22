@@ -7,6 +7,35 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { UploadFile, UploadUserFile } from 'element-plus'
 import { renderMarkdown } from '@/utils/markdown'
 
+const DESCRIPTION_TEMPLATE = `> 用途：一句话说明什么情况下使用这份资料
+> 关键词：关键词一、关键词二、关键词三
+> 适用对象：成员 / 队长 / 全体
+
+## 内容摘要
+用 2~3 句话概括这份资料回答什么问题、包含哪些核心内容。
+
+## 使用要点
+- 要点一：……
+- 要点二：……
+
+## 注意事项
+- 说明限制、假设或边界（例如「以系统实时查询为准」）。`
+
+const DESCRIPTION_EXAMPLE = `> 用途：查询上班打卡、下班签退的规则与异常处理
+> 关键词：打卡、签退、工时、异常、补签
+> 适用对象：全体成员
+
+## 内容摘要
+介绍打卡与签退的正常流程：同一天按时间顺序配对的上班—下班记录才会计入工时；日终会对未签退记录按 23:59:59 自动签退。
+
+## 使用要点
+- 开工执行上班打卡，收工执行下班打卡。
+- 仍处于上班状态的记录，日终任务会按 23:59:59 自动签退。
+
+## 注意事项
+- 异常记录助手不会自行猜测或补齐，需队长/超级管理员核对补签。
+- 具体工时要求请以系统实时查询为准。`
+
 const authStore = useAuthStore()
 const uploading = ref(false)
 const uploadPhase = ref<'sending' | 'saving'>('sending')
@@ -53,6 +82,8 @@ const showLinkDialog = ref(false)
 const showCategoryDialog = ref(false)
 const showUploadDialog = ref(false)
 const showPreviewDialog = ref(false)
+const showLinkTemplateHelp = ref(false)
+const showUploadTemplateHelp = ref(false)
 const previewItem = ref<{ name: string; description: string } | null>(null)
 const linkForm = ref({ name: '', url: '', description: '', category_id: 0 })
 const categoryForm = ref({ name: '' })
@@ -111,12 +142,13 @@ function handleSearch() {
 
 async function handleCreateLink() {
   try {
-    await knowledgeApi.createLink(linkForm.value.name, linkForm.value.url, linkForm.value.category_id, linkForm.value.description)
+    const res: any = await knowledgeApi.createLink(linkForm.value.name, linkForm.value.url, linkForm.value.category_id, linkForm.value.description)
     if (authStore.isCaptain || authStore.isSuperAdmin) {
       ElMessage.success('创建成功')
     } else {
       ElMessage.success('创建成功，等待队长审核')
     }
+    if (res?.warnings?.length) ElMessage.warning(res.warnings[0])
     showLinkDialog.value = false
     linkForm.value = { name: '', url: '', description: '', category_id: 0 }
     await loadItems()
@@ -235,7 +267,7 @@ async function handleUploadFile() {
   uploadController = controller
   let shouldRefresh = false
   try {
-    await knowledgeApi.uploadFile(selectedFile.value, uploadForm.value.category_id, uploadForm.value.description, {
+    const res: any = await knowledgeApi.uploadFile(selectedFile.value, uploadForm.value.category_id, uploadForm.value.description, {
       onProgress: (event) => {
         if (uploadController === controller) handleUploadProgress(event)
       },
@@ -247,6 +279,7 @@ async function handleUploadFile() {
     } else {
       ElMessage.success('上传成功，等待队长审核')
     }
+    if (res?.warnings?.length) ElMessage.warning(res.warnings[0])
     showUploadDialog.value = false
     resetUploadForm()
     shouldRefresh = true
@@ -448,10 +481,14 @@ async function handleDownloadFile(id: number, name: string) {
             v-model="linkForm.description"
             type="textarea"
             :rows="4"
-            placeholder="请输入描述（支持Markdown格式，0-1000字）"
+            placeholder="请按规范模板填写：用途 / 关键词 / 摘要 / 要点 / 注意事项"
             maxlength="1000"
             show-word-limit
           />
+          <el-button link type="primary" size="small" class="template-toggle" @click="showLinkTemplateHelp = !showLinkTemplateHelp">
+            {{ showLinkTemplateHelp ? '收起模板' : '查看模板' }}
+          </el-button>
+          <div v-if="showLinkTemplateHelp" class="markdown-preview template-help" v-html="renderMarkdown(DESCRIPTION_TEMPLATE + '\n\n---\n\n**填写示例**\n\n' + DESCRIPTION_EXAMPLE)"></div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -508,10 +545,14 @@ async function handleDownloadFile(id: number, name: string) {
             v-model="uploadForm.description"
             type="textarea"
             :rows="4"
-            placeholder="请输入描述（支持Markdown格式，0-1000字）"
+            placeholder="请按规范模板填写：用途 / 关键词 / 摘要 / 要点 / 注意事项"
             maxlength="1000"
             show-word-limit
           />
+          <el-button link type="primary" size="small" class="template-toggle" @click="showUploadTemplateHelp = !showUploadTemplateHelp">
+            {{ showUploadTemplateHelp ? '收起模板' : '查看模板' }}
+          </el-button>
+          <div v-if="showUploadTemplateHelp" class="markdown-preview template-help" v-html="renderMarkdown(DESCRIPTION_TEMPLATE + '\n\n---\n\n**填写示例**\n\n' + DESCRIPTION_EXAMPLE)"></div>
         </el-form-item>
       </el-form>
       <div v-if="uploading" class="upload-progress" aria-live="polite">
@@ -719,6 +760,22 @@ async function handleDownloadFile(id: number, name: string) {
   margin-top: 1.25rem;
   padding-top: 1rem;
   border-top: 1px solid var(--border);
+}
+
+.template-toggle {
+  margin-top: 0.25rem;
+  height: auto;
+}
+
+.template-help {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-deep);
+  max-height: 24rem;
+  overflow-y: auto;
+  font-size: 0.85rem;
 }
 
 .markdown-preview {

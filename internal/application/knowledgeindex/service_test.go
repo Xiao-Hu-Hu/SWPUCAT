@@ -83,7 +83,7 @@ func (e fakeEmbedder) EmbedBatch(_ context.Context, values []string) ([][]float3
 }
 
 func testConfig(mode string) Config {
-	return Config{Mode: mode, CandidateLimit: 10, FinalLimit: 5, MinVectorScore: 0.2, ChunkRunes: 40, ChunkOverlapRunes: 5, MaxChunks: 100, MaxExtractedRunes: 1000, WorkerInterval: time.Second, EmbeddingModel: "embed-test", EmbeddingDimensions: 2}
+	return Config{Mode: mode, CandidateLimit: 10, FinalLimit: 5, MinVectorScore: 0.2, ChunkRunes: 40, ChunkOverlapRunes: 5, DescriptionChunkRunes: 40, DescriptionChunkOverlapRunes: 0, MaxChunks: 100, MaxExtractedRunes: 1000, WorkerInterval: time.Second, EmbeddingModel: "embed-test", EmbeddingDimensions: 2}
 }
 
 func TestSplitTextBoundsAndOverlap(t *testing.T) {
@@ -188,6 +188,41 @@ func TestReconcileFingerprintChangesWithIndexConfiguration(t *testing.T) {
 	_, _ = serviceC.Reconcile(context.Background())
 	if repoA.ensured[1] == repoC.ensured[1] {
 		t.Fatalf("fingerprint did not reflect retrieval mode/chunk cap: %#v %#v", repoA.ensured, repoC.ensured)
+	}
+	repoD := &fakeRepository{sources: []Source{source}}
+	configD := testConfig("keyword")
+	configD.DescriptionChunkRunes++
+	serviceD, _ := NewService(repoD, nil, nil, nil, configD)
+	_, _ = serviceD.Reconcile(context.Background())
+	if repoA.ensured[1] == repoD.ensured[1] {
+		t.Fatalf("fingerprint did not reflect description chunk limits: %#v %#v", repoA.ensured, repoD.ensured)
+	}
+}
+
+// TestRunOnceUsesDescriptionChunkParams verifies the description part is chunked
+// with the description-specific limits rather than the general content limits,
+// so a long-but-bounded description stays one semantic chunk.
+func TestRunOnceUsesDescriptionChunkParams(t *testing.T) {
+	description := strings.Repeat("这条说明用于验证描述使用独立分块参数，避免与正文共用同一数值。", 6)
+	repo := &fakeRepository{job: &Job{Source: Source{ID: 10, Type: "link", Name: "资料", Description: description}, Attempts: 1}}
+	cfg := testConfig("keyword")
+	cfg.ChunkRunes = 40
+	cfg.ChunkOverlapRunes = 5
+	cfg.DescriptionChunkRunes = 4000
+	cfg.DescriptionChunkOverlapRunes = 0
+	service, err := NewService(repo, nil, nil, nil, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := service.RunOnce(context.Background())
+	if !claimed || err != nil {
+		t.Fatalf("RunOnce() = %v, %v", claimed, err)
+	}
+	if len(repo.completed) != 1 || repo.completed[0].SourceKind != "description" {
+		t.Fatalf("description should remain one chunk that fits the description limit: %#v", repo.completed)
+	}
+	if repo.completed[0].Content != "# 资料\n\n资料说明：\n"+description {
+		t.Fatalf("description chunk content mismatch: %q", repo.completed[0].Content)
 	}
 }
 

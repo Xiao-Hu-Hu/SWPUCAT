@@ -25,6 +25,8 @@ const (
 	maxUploadSize                 = 1 << 30
 	maxKnowledgeDescriptionRunes  = 20000
 	maxKnowledgeMetadataFieldSize = maxKnowledgeDescriptionRunes*utf8.UTFMax + 1024
+	// descriptionMinRunes 描述过短时给出模板提示的下限（仅建议，不阻断）。
+	descriptionMinRunes = 20
 )
 
 type KnowledgeHandler struct {
@@ -62,7 +64,7 @@ func (h *KnowledgeHandler) CreateLink(c *gin.Context) {
 		return
 	}
 
-	Created(c, dto)
+	CreatedWithWarnings(c, dto, descriptionWarnings(req.Description))
 }
 
 func (h *KnowledgeHandler) UploadFile(c *gin.Context) {
@@ -104,7 +106,7 @@ func (h *KnowledgeHandler) UploadFile(c *gin.Context) {
 		return
 	}
 
-	Created(c, dto)
+	CreatedWithWarnings(c, dto, descriptionWarnings(req.Description))
 }
 
 // Fields may follow the file, as they do in existing clients. Keep the file
@@ -182,6 +184,16 @@ func (h *KnowledgeHandler) receiveUpload(r *http.Request, limit int64) (*storage
 
 func validKnowledgeDescription(description string) bool {
 	return utf8.ValidString(description) && utf8.RuneCountInString(description) <= maxKnowledgeDescriptionRunes
+}
+
+// descriptionWarnings returns an advisory (non-blocking) nudge when the
+// description is too short to index well, so uploaders can follow the
+// standard template.
+func descriptionWarnings(description string) []string {
+	if utf8.RuneCountInString(strings.TrimSpace(description)) < descriptionMinRunes {
+		return []string{"描述信息较短，建议按规范模板补充「用途 / 关键词 / 内容摘要」，更有助检索。"}
+	}
+	return nil
 }
 
 func (h *KnowledgeHandler) DeleteItem(c *gin.Context) {
