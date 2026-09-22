@@ -22,5 +22,6 @@ type Repository interface {
 	UpdateVersionQuality(ctx context.Context, versionID int64, status, resultJSON string, checkedAt *time.Time) error
 	SaveQualityDecision(ctx context.Context, versionID int64, findingIndex int, decision, note string, decidedBy int64) error
 	UpdateReportStatus(ctx context.Context, reportID int64, status ReportStatus) error
+	UpdateReportLateSubmission(ctx context.Context, reportID int64, late bool) error
 	AttachAsset(ctx context.Context, asset *ReportAsset) error
 }

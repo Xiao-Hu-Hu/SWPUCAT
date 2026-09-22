@@ -336,6 +336,8 @@ func handleReportError(c *gin.Context, err error) {
 		Forbidden(c, "not allowed to access this report")
 	case errors.Is(err, domain.ErrNotInRoster):
 		Forbidden(c, "您不在本期的月报提交名单中")
+	case errors.Is(err, domain.ErrPeriodClosed):
+		Conflict(c, "本月报周期已截止，无法提交或修改")
 	case errors.Is(err, shared.ErrConflict), errors.Is(err, domain.ErrInvalidVersion), errors.Is(err, domain.ErrInvalidVersionState), errors.Is(err, domain.ErrDuplicateMember), errors.Is(err, domain.ErrDuplicateAsset):
 		Conflict(c, "report state conflicts with this request")
 	case errors.Is(err, shared.ErrValidation), errors.Is(err, domain.ErrInvalidPeriod), errors.Is(err, domain.ErrInvalidReport):

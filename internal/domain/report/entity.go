@@ -59,6 +59,7 @@ var (
 	ErrDuplicateMember     = errors.New("report period member already exists")
 	ErrDuplicateAsset      = errors.New("report version asset already exists")
 	ErrNotInRoster         = errors.New("user is not in the report period roster")
+	ErrPeriodClosed        = errors.New("report period is closed and no longer accepts submissions")
 )
 
 type ReportPeriod struct {
@@ -97,6 +98,7 @@ type Report struct {
 	Status         ReportStatus
 	Visibility     string
 	CurrentVersion int
+	LateSubmission bool
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
@@ -180,6 +182,30 @@ func (p *ReportPeriod) Close() error {
 	p.Status = PeriodStatusClosed
 	p.UpdatedAt = time.Now()
 	return nil
+}
+
+// Deadline is the hard submission cutoff. Legacy periods created without a
+// due_at fall back to the period end date so they still lock on schedule.
+func (p *ReportPeriod) Deadline() time.Time {
+	if p == nil {
+		return time.Time{}
+	}
+	if p.DueAt != nil {
+		return *p.DueAt
+	}
+	return p.EndsOn
+}
+
+// IsLocked reports whether the period's submission deadline has passed, after
+// which no create/save/submit is allowed and the editor is locked.
+func (p *ReportPeriod) IsLocked(now time.Time) bool {
+	return p != nil && now.After(p.Deadline())
+}
+
+// AcceptsSubmissions reports whether new work (create, save a version, submit)
+// is currently allowed: the period must be open and its deadline not passed.
+func (p *ReportPeriod) AcceptsSubmissions(now time.Time) bool {
+	return p != nil && p.Status == PeriodStatusOpen && !p.IsLocked(now)
 }
 
 func NewReport(periodID, authorID int64, reportType ReportType, authorName string) (*Report, error) {

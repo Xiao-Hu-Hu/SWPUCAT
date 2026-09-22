@@ -55,7 +55,7 @@ func (r *ReportRepo) ListPeriods(ctx context.Context) ([]*report.ReportPeriod, e
 	for i := range models {
 		period := toDomainReportPeriod(&models[i])
 		var count int64
-		if err := r.db.WithContext(ctx).Model(&database.ReportPeriodMemberModel{}).Where("period_id = ?", period.ID).Count(&count).Error; err != nil {
+		if err := r.db.WithContext(ctx).Model(&database.ReportPeriodMemberModel{}).Where("period_id = ? AND required = ? AND exempt = ?", period.ID, true, false).Count(&count).Error; err != nil {
 			return nil, err
 		}
 		period.Members = make([]report.PeriodMember, 0, count)
@@ -174,7 +174,7 @@ func (r *ReportRepo) CreateReport(ctx context.Context, item *report.Report) erro
 	model := &database.ReportModel{
 		ID: item.ID, PeriodID: item.PeriodID, ReportType: string(item.Type), AuthorID: item.AuthorID,
 		AuthorName: item.AuthorName, Status: string(item.Status), Visibility: item.Visibility,
-		CurrentVersion: item.CurrentVersion, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
+		CurrentVersion: item.CurrentVersion, LateSubmission: item.LateSubmission, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 	}
 	if err := r.db.WithContext(ctx).Create(model).Error; err != nil {
 		return err
@@ -325,6 +325,10 @@ func (r *ReportRepo) UpdateReportStatus(ctx context.Context, reportID int64, sta
 	return r.db.WithContext(ctx).Model(&database.ReportModel{}).Where("id = ?", reportID).Update("status", string(status)).Error
 }
 
+func (r *ReportRepo) UpdateReportLateSubmission(ctx context.Context, reportID int64, late bool) error {
+	return r.db.WithContext(ctx).Model(&database.ReportModel{}).Where("id = ?", reportID).Update("late_submission", late).Error
+}
+
 func (r *ReportRepo) AttachAsset(ctx context.Context, asset *report.ReportAsset) error {
 	if asset == nil || asset.ReportVersionID <= 0 || asset.KnowledgeItemID <= 0 || asset.AssetRole == "" {
 		return report.ErrInvalidVersion
@@ -350,7 +354,7 @@ func toDomainPeriodMember(model *database.ReportPeriodMemberModel) report.Period
 func toDomainReport(model *database.ReportModel) *report.Report {
 	return &report.Report{ID: model.ID, PeriodID: model.PeriodID, Type: report.ReportType(model.ReportType), AuthorID: model.AuthorID,
 		AuthorName: model.AuthorName, Status: report.ReportStatus(model.Status), Visibility: model.Visibility,
-		CurrentVersion: model.CurrentVersion, CreatedAt: model.CreatedAt, UpdatedAt: model.UpdatedAt}
+		CurrentVersion: model.CurrentVersion, LateSubmission: model.LateSubmission, CreatedAt: model.CreatedAt, UpdatedAt: model.UpdatedAt}
 }
 
 func toDomainReportVersion(model *database.ReportVersionModel) *report.ReportVersion {

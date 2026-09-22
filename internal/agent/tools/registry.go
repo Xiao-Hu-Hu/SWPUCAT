@@ -439,7 +439,7 @@ func (r *Registry) Build(ctx context.Context) ([]tool.BaseTool, error) {
 	}
 	reportPeriodsTool, err := toolutils.InferTool[reportPeriodsInput, string](
 		"list_report_periods",
-		"查询可用月报周期及其 period_id，可按 YYYY-MM 和 open、closed、archived 状态筛选；用户说仍开放、开放中或进行中时必须传 status=open，说已关闭时传 status=closed，说已归档时传 status=archived。读取月报材料前用它确定周期，不能猜测 ID。若未指定月份且返回多个候选，只列出候选并询问用户，不得继续查询成员或材料。",
+		"查询可用月报周期及其 period_id，可按 YYYY-MM 和 open、closed、archived 状态筛选；用户说仍开放、开放中或进行中时必须传 status=open，说已关闭时传 status=closed，说已归档时传 status=archived。每个周期含结束日期与提交截止时间，截止时间过后不再接受创建/保存/提审，需单独注意。读取月报材料前用它确定周期，不能猜测 ID。若未指定月份且返回多个候选，只列出候选并询问用户，不得继续查询成员或材料。",
 		func(ctx context.Context, input reportPeriodsInput) (string, error) {
 			input.PeriodKey = strings.TrimSpace(input.PeriodKey)
 			input.Status = strings.TrimSpace(input.Status)

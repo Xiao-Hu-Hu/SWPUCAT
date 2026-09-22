@@ -42,6 +42,7 @@ type ReportModel struct {
 	Status         string    `gorm:"size:16;not null;default:draft;index"`
 	Visibility     string    `gorm:"size:16;not null;default:private"`
 	CurrentVersion int       `gorm:"not null;default:0"`
+	LateSubmission bool      `gorm:"not null;default:false"`
 	CreatedAt      time.Time `gorm:"not null;default:current_timestamp"`
 	UpdatedAt      time.Time `gorm:"not null;default:current_timestamp"`
 }

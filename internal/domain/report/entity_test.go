@@ -64,3 +64,59 @@ func TestReportVersionAssetIsUniqueByRole(t *testing.T) {
 		t.Fatalf("duplicate asset was allowed: %v", err)
 	}
 }
+
+func TestReportPeriodDeadlineFallsBackToEndsOn(t *testing.T) {
+	start := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC)
+
+	withDueAt, err := NewReportPeriod("2026-08", start, end, "Asia/Shanghai", &end, 9, "队长")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !withDueAt.Deadline().Equal(end) || withDueAt.Deadline().Equal(start) {
+		t.Fatalf("Deadline() should return due_at when set: %v", withDueAt.Deadline())
+	}
+
+	withoutDueAt, err := NewReportPeriod("2026-07", start, end, "Asia/Shanghai", nil, 9, "队长")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !withoutDueAt.Deadline().Equal(end) {
+		t.Fatalf("Deadline() should fall back to ends_on when due_at is nil: %v", withoutDueAt.Deadline())
+	}
+}
+
+func TestReportPeriodAcceptanceWindows(t *testing.T) {
+	start := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC)
+	due := end.Add(24 * time.Hour)
+	period, err := NewReportPeriod("2026-08", start, end, "Asia/Shanghai", &due, 9, "队长")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// now <= ends_on: active, submittable, not late, not locked.
+	active := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
+	if !period.AcceptsSubmissions(active) || period.IsLocked(active) {
+		t.Fatalf("active window should accept submissions: accepts=%v locked=%v", period.AcceptsSubmissions(active), period.IsLocked(active))
+	}
+
+	// ends_on < now <= due_at: late window, still submittable but flagged late.
+	late := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	if !period.AcceptsSubmissions(late) || period.IsLocked(late) {
+		t.Fatalf("late window should still accept submissions: accepts=%v locked=%v", period.AcceptsSubmissions(late), period.IsLocked(late))
+	}
+
+	// now > due_at: locked, no submissions allowed.
+	locked := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
+	if period.AcceptsSubmissions(locked) || !period.IsLocked(locked) {
+		t.Fatalf("past-deadline window should be locked: accepts=%v locked=%v", period.AcceptsSubmissions(locked), period.IsLocked(locked))
+	}
+
+	// A closed period never accepts submissions, even inside the active window.
+	closed := *period
+	closed.Status = PeriodStatusClosed
+	if closed.AcceptsSubmissions(active) {
+		t.Fatalf("closed period should reject submissions: accepts=%v", closed.AcceptsSubmissions(active))
+	}
+}

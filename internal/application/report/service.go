@@ -81,6 +81,7 @@ type ReportDTO struct {
 	Status         string `json:"status"`
 	Visibility     string `json:"visibility"`
 	CurrentVersion int    `json:"current_version"`
+	LateSubmission bool   `json:"late_submission"`
 	CreatedAt      string `json:"created_at"`
 	UpdatedAt      string `json:"updated_at"`
 }
@@ -142,6 +143,14 @@ func (s *Service) CreatePeriod(ctx context.Context, actorID int64, actorName str
 	if err != nil {
 		return nil, domain.ErrInvalidPeriod
 	}
+	// A submission deadline is mandatory so every period hard-closes on time;
+	// otherwise the "已截止" state can never be derived or enforced.
+	if req.DueAt == nil {
+		return nil, domain.ErrInvalidPeriod
+	}
+	if req.DueAt.Before(end) {
+		return nil, domain.ErrInvalidPeriod
+	}
 	period, err := domain.NewReportPeriod(req.PeriodKey, start, end, req.Timezone, req.DueAt, actorID, actorName)
 	if err != nil {
 		return nil, err
@@ -199,19 +208,15 @@ func (s *Service) AddPeriodMember(ctx context.Context, periodID int64, req AddMe
 	return nil
 }
 
-// IsPeriodMember reports whether the user is on the period roster, which lets
-// the UI gate the "create report" action ahead of the backend check.
+// IsPeriodMember reports whether the user is on the period's submission roster
+// (required and not exempt), which lets the UI gate the "create report" action
+// ahead of the backend check.
 func (s *Service) IsPeriodMember(ctx context.Context, periodID, userID int64) (bool, error) {
 	period, err := s.repo.FindPeriodByID(ctx, periodID)
 	if err != nil {
 		return false, err
 	}
-	for _, member := range period.Members {
-		if member.UserID == userID {
-			return true, nil
-		}
-	}
-	return false, nil
+	return isSubmissionRosterMember(period, userID), nil
 }
 
 func (s *Service) CreateReport(ctx context.Context, authorID int64, authorName string, req CreateReportRequest) (*ReportDTO, error) {
@@ -219,15 +224,11 @@ func (s *Service) CreateReport(ctx context.Context, authorID int64, authorName s
 	if err != nil {
 		return nil, err
 	}
-	if req.ReportType == domain.ReportTypeMonthly && len(period.Members) > 0 {
-		found := false
-		for _, member := range period.Members {
-			if member.UserID == authorID {
-				found = true
-				break
-			}
+	if req.ReportType == domain.ReportTypeMonthly {
+		if !period.AcceptsSubmissions(time.Now()) {
+			return nil, domain.ErrPeriodClosed
 		}
-		if !found {
+		if hasSubmissionRoster(period) && !isSubmissionRosterMember(period, authorID) {
 			return nil, domain.ErrNotInRoster
 		}
 	}
@@ -271,6 +272,13 @@ func (s *Service) CreateVersion(ctx context.Context, reportID, actorID int64, ma
 	}
 	if !canAccess(parent, actorID, manager) {
 		return nil, shared.ErrForbidden
+	}
+	period, err := s.repo.FindPeriodByID(ctx, parent.PeriodID)
+	if err != nil {
+		return nil, err
+	}
+	if !period.AcceptsSubmissions(time.Now()) {
+		return nil, domain.ErrPeriodClosed
 	}
 	if req.ExpectedVersion < 0 || req.ExpectedVersion != parent.CurrentVersion || !utf8.ValidString(req.BodyMarkdown) || utf8.RuneCountInString(req.BodyMarkdown) > maxReportBodyRunes {
 		return nil, shared.ErrConflict
@@ -369,12 +377,25 @@ func (s *Service) SubmitVersion(ctx context.Context, reportID int64, versionNumb
 	if !canAccess(parent, actorID, manager) {
 		return nil, shared.ErrForbidden
 	}
+	period, err := s.repo.FindPeriodByID(ctx, parent.PeriodID)
+	if err != nil {
+		return nil, err
+	}
+	if !period.AcceptsSubmissions(time.Now()) {
+		return nil, domain.ErrPeriodClosed
+	}
 	version, err := s.repo.FindVersion(ctx, reportID, versionNumber)
 	if err != nil {
 		return nil, err
 	}
 	if err := version.Submit(actorID); err != nil {
 		return nil, err
+	}
+	if version.SubmittedAt != nil && version.SubmittedAt.After(period.EndsOn) {
+		parent.LateSubmission = true
+		if err := s.repo.UpdateReportLateSubmission(ctx, reportID, true); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.repo.UpdateVersion(ctx, version); err != nil {
 		return nil, err
@@ -496,6 +517,30 @@ func canAccess(item *domain.Report, viewerID int64, manager bool) bool {
 	return item != nil && (manager || item.AuthorID == viewerID)
 }
 
+func hasSubmissionRoster(period *domain.ReportPeriod) bool {
+	if period == nil {
+		return false
+	}
+	for _, member := range period.Members {
+		if member.Required && !member.Exempt {
+			return true
+		}
+	}
+	return false
+}
+
+func isSubmissionRosterMember(period *domain.ReportPeriod, userID int64) bool {
+	if period == nil {
+		return false
+	}
+	for _, member := range period.Members {
+		if member.UserID == userID && member.Required && !member.Exempt {
+			return true
+		}
+	}
+	return false
+}
+
 func toPeriodDTO(item *domain.ReportPeriod) *PeriodDTO {
 	if item == nil {
 		return nil
@@ -508,7 +553,7 @@ func toPeriodDTO(item *domain.ReportPeriod) *PeriodDTO {
 }
 
 func toReportDTO(item *domain.Report) *ReportDTO {
-	return &ReportDTO{ID: item.ID, PeriodID: item.PeriodID, ReportType: string(item.Type), AuthorID: item.AuthorID, AuthorName: item.AuthorName, Status: string(item.Status), Visibility: item.Visibility, CurrentVersion: item.CurrentVersion, CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: item.UpdatedAt.Format(time.RFC3339)}
+	return &ReportDTO{ID: item.ID, PeriodID: item.PeriodID, ReportType: string(item.Type), AuthorID: item.AuthorID, AuthorName: item.AuthorName, Status: string(item.Status), Visibility: item.Visibility, CurrentVersion: item.CurrentVersion, LateSubmission: item.LateSubmission, CreatedAt: item.CreatedAt.Format(time.RFC3339), UpdatedAt: item.UpdatedAt.Format(time.RFC3339)}
 }
 
 func toVersionDTO(item *domain.ReportVersion) *VersionDTO {
