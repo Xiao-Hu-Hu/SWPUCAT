@@ -76,9 +76,10 @@ func (r *CheckinRepo) CreateTransition(ctx context.Context, record *checkin.Chec
 			}
 		}
 
-		var latest database.CheckinRecordModel
-		latestErr := tx.Where("user_id = ? AND date = ?", record.UserID, record.Date).
-			Order("created_at DESC, id DESC").First(&latest).Error
+		// A makeup record is a standalone compensation entry and must not be
+		// treated as the latest in/out transition, otherwise a correction made
+		// while the member is clocked in would block the next clock-out.
+		latest, latestErr := latestInOutTransitionDB(tx, record.UserID, record.Date)
 		hasLatest := latestErr == nil
 		if latestErr != nil && !errors.Is(latestErr, gorm.ErrRecordNotFound) {
 			return latestErr
@@ -237,9 +238,7 @@ func (r *CheckinRepo) RunAutoClockOut(ctx context.Context, date, clockOutTime st
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&account, userID).Error; err != nil {
 				return err
 			}
-			var latest database.CheckinRecordModel
-			latestErr := tx.Where("user_id = ? AND date = ?", userID, date).
-				Order("created_at DESC, id DESC").First(&latest).Error
+			latest, latestErr := latestInOutTransitionDB(tx, userID, date)
 			if errors.Is(latestErr, gorm.ErrRecordNotFound) {
 				continue
 			}
@@ -361,11 +360,24 @@ func (r *CheckinRepo) FindByDateRange(ctx context.Context, startDate, endDate st
 }
 
 func (r *CheckinRepo) GetLastByUserAndDate(ctx context.Context, userID int64, date string) (*checkin.CheckinRecord, error) {
-	var model database.CheckinRecordModel
-	if err := r.db.WithContext(ctx).Where("user_id = ? AND date = ?", userID, date).Order("created_at DESC, id DESC").First(&model).Error; err != nil {
+	model, err := latestInOutTransitionDB(r.db.WithContext(ctx), userID, date)
+	if err != nil {
 		return nil, err
 	}
 	return toDomainCheckinRecord(&model), nil
+}
+
+// latestInOutTransitionDB returns the most recent in/out transition for a user
+// and date, deliberately excluding makeup records. A makeup is a standalone
+// compensation entry that changes the total minutes but never the open/closed
+// session state, so it must not become the basis for clock-out, online or
+// auto-clock-out decisions.
+func latestInOutTransitionDB(db *gorm.DB, userID int64, date string) (database.CheckinRecordModel, error) {
+	var latest database.CheckinRecordModel
+	err := db.Where("user_id = ? AND date = ? AND type IN ?", userID, date,
+		[]string{string(checkin.CheckinTypeIn), string(checkin.CheckinTypeOut)}).
+		Order("created_at DESC, id DESC").First(&latest).Error
+	return latest, err
 }
 
 func toDomainCheckinRecord(m *database.CheckinRecordModel) *checkin.CheckinRecord {
