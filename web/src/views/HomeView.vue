@@ -104,7 +104,7 @@ async function handleRegister() {
   <div class="home">
     <header class="hero">
       <div class="hero-content">
-        <h1 class="title">SWPUCAT</h1>
+        <h1 class="title">西柚CAT</h1>
         <p class="subtitle">软件工作室成员管理平台</p>
         <div class="actions">
           <el-button type="primary" size="large" @click="showLogin = true">
