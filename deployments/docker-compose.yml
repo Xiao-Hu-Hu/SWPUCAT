@@ -149,6 +149,10 @@ services:
   web:
     image: node:20-alpine
     container_name: swpucat-web
+    # 前端已在生产由宿主机 nginx 托管 /opt/SWPUCAT/web/dist，
+    # web 容器仅用于本地开发（Vite 热更新）。
+    # 生产 `up -d` 不会启动它；需要时用 `docker compose --profile dev up -d web`。
+    profiles: ["dev"]
     restart: unless-stopped
     working_dir: /app
     ports:
