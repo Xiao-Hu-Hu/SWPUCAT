@@ -44,6 +44,7 @@ const historyLoading = ref(false)
 const conversationsLoading = ref(false)
 const creatingConversation = ref(false)
 const conversations = ref<AgentConversation[]>([])
+const sessionsOpen = ref(false)
 const messages = ref<ChatMessage[]>([newGreetingMessage()])
 const sessionId = ref('')
 const messagesRef = ref<HTMLElement | null>(null)
@@ -141,6 +142,7 @@ async function selectConversation(item: AgentConversation) {
   if (item.session_id === sessionId.value && !historyLoading.value) return
   if (loading.value || historyLoading.value || creatingConversation.value || editingSessionId.value || renamingSessionId.value) return
   await loadConversation(item.session_id)
+  sessionsOpen.value = false
 }
 
 async function deleteConversation(item: AgentConversation) {
@@ -674,7 +676,8 @@ async function downloadSource(source: AgentKnowledgeSource) {
     </div>
 
     <div class="agent-layout">
-      <aside class="conversation-panel">
+      <div class="sessions-mask" :class="{ show: sessionsOpen }" @click="sessionsOpen = false"></div>
+      <aside class="conversation-panel" :class="{ 'drawer-open': sessionsOpen }">
         <div class="conversation-panel-header">
           <span class="conversation-panel-title">会话记录</span>
           <el-button text circle :loading="creatingConversation" :disabled="conversationsLoading || Boolean(editingSessionId) || Boolean(renamingSessionId)" aria-label="新建会话" @click="createNewConversation">
@@ -751,6 +754,9 @@ async function downloadSource(source: AgentKnowledgeSource) {
 
       <section class="chat-card" aria-label="智能助手对话">
         <div class="chat-header">
+          <button class="sessions-toggle" aria-label="会话记录" @click="sessionsOpen = true">
+            <el-icon :size="18"><ChatDotRound /></el-icon>
+          </button>
           <span class="chat-header-title">
             {{ conversations.find((item) => item.session_id === sessionId)?.title || '新会话' }}
           </span>
@@ -1550,6 +1556,9 @@ async function downloadSource(source: AgentKnowledgeSource) {
   font-size: 0.75rem;
 }
 
+.sessions-toggle { display: none; }
+.sessions-mask { display: none; }
+
 @media (max-width: 860px) {
   .agent-layout {
     grid-template-columns: 190px minmax(0, 1fr);
@@ -1561,15 +1570,45 @@ async function downloadSource(source: AgentKnowledgeSource) {
     grid-template-columns: 1fr;
   }
 
+  .sessions-toggle {
+    display: inline-flex;
+  }
+  .sessions-mask {
+    display: block;
+  }
   .conversation-panel {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(300px, 82vw);
+    z-index: 40;
+    padding: 0.5rem;
     min-height: 0;
-    max-height: 230px;
+    max-height: none;
+    transform: translateX(-100%);
+    transition: transform 0.25s cubic-bezier(.2, .8, .2, 1);
+    box-shadow: var(--shadow-md);
   }
-
+  .conversation-panel.drawer-open {
+    transform: translateX(0);
+  }
+  .sessions-mask {
+    position: fixed;
+    inset: 0;
+    background: rgba(24, 24, 27, 0.45);
+    z-index: 30;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .sessions-mask.show {
+    opacity: 1;
+    pointer-events: auto;
+  }
   .conversation-list {
-    max-height: 120px;
+    max-height: none;
   }
-
   .message-bubble,
   .message-content {
     max-width: 92%;
