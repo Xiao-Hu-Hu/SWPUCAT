@@ -788,4 +788,9 @@ async function loadOnlineMembers() {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+@media (max-width: 768px) {
+  .chart-container, .chart-stage, .chart-empty { height: 240px; min-height: 240px; }
+  .chart-section .card, .log-section .card { padding: 0.875rem; }
+  .pagination-wrap { padding-top: 0.5rem; }
+}
 </style>
