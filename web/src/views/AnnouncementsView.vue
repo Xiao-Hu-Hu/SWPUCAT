@@ -6,6 +6,7 @@ import { memberApi } from '@/api/member'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { renderMarkdown } from '@/utils/markdown'
+import { usePaginationLayout } from '@/composables/usePaginationLayout'
 
 const authStore = useAuthStore()
 const drafts = ref<AnnouncementDraft[]>([])
@@ -53,6 +54,7 @@ const gradeGroups = ref<GradeGroup[]>([])
 
 const currentPage = ref(1)
 const pageSize = ref(10)
+const { layout: paginationLayout, pagerCount, small: paginationSmall } = usePaginationLayout()
 
 const paginatedAnnouncements = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
@@ -340,7 +342,9 @@ async function handleDelete(id: number) {
           v-model:page-size="pageSize"
           :page-sizes="[5, 10, 20, 50]"
           :total="announcements.length"
-          layout="total, sizes, prev, pager, next, jumper"
+          :layout="paginationLayout"
+          :pager-count="pagerCount"
+          :small="paginationSmall"
           background
         />
       </div>

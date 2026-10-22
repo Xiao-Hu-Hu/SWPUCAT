@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { UploadFile, UploadUserFile } from 'element-plus'
 import { renderMarkdown } from '@/utils/markdown'
+import { usePaginationLayout } from '@/composables/usePaginationLayout'
 
 const DESCRIPTION_TEMPLATE = `> 用途：一句话说明什么情况下使用这份资料
 > 关键词：关键词一、关键词二、关键词三
@@ -72,6 +73,7 @@ const searchQuery = ref('')
 
 const currentPage = ref(1)
 const pageSize = ref(10)
+const { layout: paginationLayout, pagerCount, small: paginationSmall } = usePaginationLayout()
 
 const paginatedItems = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
@@ -454,7 +456,9 @@ async function handleDownloadFile(id: number, name: string) {
             v-model:page-size="pageSize"
             :page-sizes="[5, 10, 20, 50]"
             :total="items.length"
-            layout="total, sizes, prev, pager, next, jumper"
+            :layout="paginationLayout"
+            :pager-count="pagerCount"
+            :small="paginationSmall"
             background
           />
         </div>

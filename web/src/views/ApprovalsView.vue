@@ -4,6 +4,7 @@ import { knowledgeApi } from '@/api/knowledge'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
 import { renderMarkdown } from '@/utils/markdown'
+import { usePaginationLayout } from '@/composables/usePaginationLayout'
 
 const authStore = useAuthStore()
 const items = ref<Array<{
@@ -34,6 +35,7 @@ const isManager = computed(() => authStore.isCaptain || authStore.isSuperAdmin)
 
 const currentPage = ref(1)
 const pageSize = ref(10)
+const { layout: paginationLayout, pagerCount, small: paginationSmall } = usePaginationLayout()
 
 const paginatedItems = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
@@ -197,7 +199,9 @@ function openPreview(item: { name: string; description: string }) {
           v-model:page-size="pageSize"
           :page-sizes="[5, 10, 20, 50]"
           :total="items.length"
-          layout="total, sizes, prev, pager, next, jumper"
+          :layout="paginationLayout"
+          :pager-count="pagerCount"
+          :small="paginationSmall"
           background
         />
       </div>

@@ -5,6 +5,7 @@ import { checkinApi } from '@/api/checkin'
 import { userApi } from '@/api/user'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { usePaginationLayout } from '@/composables/usePaginationLayout'
 
 const authStore = useAuthStore()
 const members = ref<Array<{
@@ -21,6 +22,7 @@ const onlineMembers = ref<Array<{ user_id: number; nickname: string; online: boo
 
 const currentPage = ref(1)
 const pageSize = ref(10)
+const { layout: paginationLayout, pagerCount, small: paginationSmall } = usePaginationLayout()
 
 const paginatedMembers = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
@@ -189,7 +191,9 @@ async function handleRemoveMember(id: number) {
           v-model:page-size="pageSize"
           :page-sizes="[5, 10, 20, 50]"
           :total="members.length"
-          layout="total, sizes, prev, pager, next, jumper"
+          :layout="paginationLayout"
+          :pager-count="pagerCount"
+          :small="paginationSmall"
           background
         />
       </div>
