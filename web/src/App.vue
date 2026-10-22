@@ -115,5 +115,6 @@ body {
   .el-table .el-table__header th, .el-table .el-table__body td { padding: 0.5rem 0; }
   .el-table__body-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .el-pagination { max-width: 100%; flex-wrap: wrap; justify-content: center; row-gap: 0.5rem; }
+  .el-pagination__jump { display: none; }
 }
 </style>
