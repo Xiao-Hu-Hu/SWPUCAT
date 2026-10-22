@@ -428,4 +428,12 @@ function openPreview(item: { name: string; description: string }) {
   background: var(--bg-deep);
   font-weight: 600;
 }
+@media (max-width: 768px) {
+  .card { padding: 0.875rem; }
+  .card-header { flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+  .approval-card { flex-direction: column; align-items: stretch; gap: 0.75rem; padding: 0.875rem; }
+  .item-icon { width: 40px; height: 40px; }
+  .item-meta { flex-wrap: wrap; gap: 0.5rem; }
+  .item-actions { width: 100%; flex-wrap: wrap; }
+}
 </style>

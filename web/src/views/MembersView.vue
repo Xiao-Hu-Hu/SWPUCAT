@@ -290,4 +290,10 @@ async function handleRemoveMember(id: number) {
   padding-top: 1rem;
   border-top: 1px solid var(--border);
 }
+@media (max-width: 768px) {
+  .card { padding: 0.875rem; }
+  .card-header { flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+  .member-info { gap: 0.5rem; }
+  .pagination-wrapper { padding-top: 0.75rem; margin-top: 1rem; }
+}
 </style>

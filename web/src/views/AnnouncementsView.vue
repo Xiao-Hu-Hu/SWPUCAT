@@ -771,4 +771,12 @@ async function handleDelete(id: number) {
     justify-content: flex-end;
   }
 }
+@media (max-width: 768px) {
+  .card { padding: 0.875rem; }
+  .card-header { flex-wrap: wrap; gap: 0.5rem; }
+  .ann-header { flex-wrap: wrap; gap: 0.5rem; }
+  .ann-meta { flex-wrap: wrap; gap: 0.5rem; }
+  .ann-actions { flex-wrap: wrap; gap: 0.5rem; }
+  .section-title { flex-wrap: wrap; gap: 0.5rem; }
+}
 </style>

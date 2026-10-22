@@ -107,4 +107,10 @@ body {
   .el-form-item__content > .el-input-group,
   .el-form-item__content > .el-input__wrapper { width: 100%; }
 }
+@media (max-width: 768px) {
+  .el-table { font-size: 0.8125rem; }
+  .el-table .cell { padding: 0 0.5rem; }
+  .el-table .el-table__header th, .el-table .el-table__body td { padding: 0.5rem 0; }
+  .el-table__body-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+}
 </style>
