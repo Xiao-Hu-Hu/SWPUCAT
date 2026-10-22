@@ -1609,6 +1609,10 @@ async function downloadSource(source: AgentKnowledgeSource) {
   .conversation-list {
     max-height: none;
   }
+  .conversation-edit-button,
+  .conversation-delete-button {
+    opacity: 1;
+  }
   .message-bubble,
   .message-content {
     max-width: 92%;

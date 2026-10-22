@@ -96,6 +96,8 @@ body {
   .el-dialog { width: min(480px, calc(100vw - 24px)) !important; margin-top: 6vh !important; }
   .el-message-box { width: calc(100vw - 32px) !important; }
   .el-dialog__body { max-height: 72vh; overflow-y: auto; }
+  .el-button.is-circle { min-width: 40px; min-height: 40px; }
+  .el-button.is-text.is-circle { min-width: 36px; min-height: 36px; }
   .el-form-item { display: flex; flex-direction: column; align-items: stretch; }
   .el-form-item .el-form-item__label { display: block; width: 100% !important; flex: 0 0 100% !important; text-align: left !important; justify-content: flex-start !important; margin-bottom: 6px; line-height: 1.4; padding-right: 0; }
   .el-form-item__content { margin-left: 0 !important; width: 100%; }
