@@ -421,12 +421,10 @@ async function handleDownloadFile(id: number, name: string) {
                 <el-tag v-if="item.source_origin === 'official_catalog'" size="small" type="success">官方 · v{{ item.revision }}</el-tag>
               </div>
             </div>
-            <div class="item-actions" v-if="item.description">
-              <el-button size="small" @click="openPreview(item)">
+            <div class="item-card-actions">
+              <el-button v-if="item.description" size="small" @click="openPreview(item)">
                 查看说明
               </el-button>
-            </div>
-            <div class="item-actions">
               <el-button
                 v-if="item.type === 'file'"
                 size="small"
@@ -749,9 +747,11 @@ async function handleDownloadFile(id: number, name: string) {
   color: var(--text-muted);
 }
 
-.item-actions {
+.item-card-actions {
   display: flex;
+  align-items: center;
   gap: 0.5rem;
+  flex-shrink: 0;
 }
 
 .pagination-wrapper {
@@ -865,10 +865,16 @@ async function handleDownloadFile(id: number, name: string) {
   .category-item.active { background: var(--accent); color: #fff; }
   .category-item .count { margin-left: 0.25rem; }
   .card { padding: 0.875rem; }
-  .card-header { flex-wrap: wrap; gap: 0.5rem; }
-  .item-card { align-items: flex-start; }
-  .item-actions { flex-wrap: wrap; gap: 0.5rem; }
-  .actions { flex-wrap: wrap; gap: 0.5rem; }
+  .content .card-header { flex-direction: column; align-items: stretch; gap: 0.75rem; }
+  .actions { width: 100%; gap: 0.5rem; flex-wrap: wrap; }
+  .actions .el-input { width: 100% !important; flex: 1 1 100%; }
+  .actions .el-button { flex: 1 1 auto; }
+  .item-card { display: grid; grid-template-columns: auto 1fr; grid-template-areas: "icon info" "actions actions"; gap: 0.5rem 0.75rem; align-items: start; }
+  .item-icon { grid-area: icon; }
+  .item-info { grid-area: info; }
+  .item-card-actions { grid-area: actions; justify-content: flex-end; flex-wrap: wrap; }
+  .item-meta { flex-wrap: wrap; gap: 0.25rem 0.75rem; }
+  .item-name { max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .upload-details { flex-wrap: wrap; gap: 0.5rem; }
 }
 </style>
