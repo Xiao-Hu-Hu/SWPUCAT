@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
@@ -7,6 +7,22 @@ const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 const isCollapse = ref(false)
+const isMobile = ref(false)
+const drawerOpen = ref(false)
+
+function syncIsMobile() {
+  isMobile.value = window.matchMedia('(max-width: 768px)').matches
+  if (!isMobile.value) drawerOpen.value = false
+}
+
+onMounted(() => {
+  syncIsMobile()
+  window.addEventListener('resize', syncIsMobile)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', syncIsMobile)
+})
 
 const menuItems = [
   { path: '/app', icon: 'Clock', title: '签到打卡' },
@@ -26,11 +42,17 @@ function handleLogout() {
   authStore.logout()
   router.push({ name: 'home' })
 }
+
+function goTo(path: string) {
+  router.push(path)
+  if (isMobile.value) drawerOpen.value = false
+}
 </script>
 
 <template>
-  <div class="app-layout">
-    <aside class="sidebar" :class="{ collapsed: isCollapse }">
+  <div class="app-layout" :class="{ mobile: isMobile }">
+    <div class="sidebar-mask" v-if="isMobile" :class="{ show: drawerOpen }" @click="drawerOpen = false"></div>
+    <aside class="sidebar" :class="{ collapsed: isCollapse, 'drawer-open': drawerOpen }">
       <div class="sidebar-header">
         <span class="logo-text" v-if="!isCollapse">SWPUCAT</span>
         <span class="logo-text" v-else>S</span>
@@ -42,7 +64,7 @@ function handleLogout() {
           v-show="item.show !== false"
           class="nav-item"
           :class="{ active: route.path === item.path }"
-          @click="router.push(item.path)"
+          @click="goTo(item.path)"
         >
           <el-icon :size="18"><component :is="item.icon" /></el-icon>
           <span v-if="!isCollapse" class="nav-label">{{ item.title }}</span>
@@ -58,6 +80,9 @@ function handleLogout() {
 
     <div class="main-area">
       <header class="topbar">
+        <button class="sidebar-toggle" v-if="isMobile" aria-label="菜单" @click="drawerOpen = !drawerOpen">
+          <el-icon :size="20"><Menu /></el-icon>
+        </button>
         <h2 class="page-title">{{ menuItems.find(m => m.path === route.path)?.title || '签到打卡' }}</h2>
         <el-dropdown>
           <span class="user-info">
@@ -230,5 +255,62 @@ function handleLogout() {
   flex: 1;
   padding: 1rem 1.25rem;
   background: var(--bg-deep);
+}
+
+/* Mobile (<=768px) */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 240px;
+    max-width: 82vw;
+    z-index: 40;
+    transform: translateX(-100%);
+    transition: transform 0.25s cubic-bezier(.2, .8, .2, 1);
+    height: 100vh;
+  }
+  .sidebar.drawer-open {
+    transform: translateX(0);
+  }
+  .sidebar-mask {
+    position: fixed;
+    inset: 0;
+    background: rgba(24, 24, 27, 0.45);
+    z-index: 30;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .sidebar-mask.show {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .sidebar-toggle {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.5rem;
+    cursor: pointer;
+    margin-right: 0.25rem;
+  }
+  .username {
+    display: none;
+  }
+  .topbar {
+    padding: 0 0.875rem;
+  }
+  .page-title {
+    font-size: 0.9375rem;
+  }
+  .content {
+    padding: 0.875rem;
+  }
 }
 </style>

@@ -89,4 +89,22 @@ body {
   --el-menu-active-color: #2563eb;
   --el-menu-hover-bg-color: #f4f4f5;
 }
+
+/* Mobile global tweaks */
+@media (max-width: 768px) {
+  body { -webkit-tap-highlight-color: transparent; }
+  .el-dialog { width: min(480px, calc(100vw - 24px)) !important; margin-top: 6vh !important; }
+  .el-message-box { width: calc(100vw - 32px) !important; }
+  .el-dialog__body { max-height: 72vh; overflow-y: auto; }
+  .el-form-item { display: flex; flex-direction: column; align-items: stretch; }
+  .el-form-item__label { width: auto !important; text-align: left; justify-content: flex-start; margin-bottom: 4px; line-height: 1.4; padding-right: 0; }
+  .el-form-item__content { margin-left: 0 !important; width: 100%; }
+  .el-form-item__content > .el-input,
+  .el-form-item__content > .el-select,
+  .el-form-item__content > .el-date-editor,
+  .el-form-item__content > .el-input-number,
+  .el-form-item__content > .el-cascader { width: 100%; }
+  .el-form-item__content > .el-input-group,
+  .el-form-item__content > .el-input__wrapper { width: 100%; }
+}
 </style>
