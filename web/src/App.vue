@@ -97,7 +97,7 @@ body {
   .el-message-box { width: calc(100vw - 32px) !important; }
   .el-dialog__body { max-height: 72vh; overflow-y: auto; }
   .el-form-item { display: flex; flex-direction: column; align-items: stretch; }
-  .el-form-item__label { width: auto !important; text-align: left; justify-content: flex-start; margin-bottom: 4px; line-height: 1.4; padding-right: 0; }
+  .el-form-item .el-form-item__label { display: block; width: 100% !important; flex: 0 0 100% !important; text-align: left !important; justify-content: flex-start !important; margin-bottom: 6px; line-height: 1.4; padding-right: 0; }
   .el-form-item__content { margin-left: 0 !important; width: 100%; }
   .el-form-item__content > .el-input,
   .el-form-item__content > .el-select,

@@ -862,6 +862,7 @@ async function handleDownloadFile(id: number, name: string) {
   .card-header { flex-wrap: wrap; gap: 0.5rem; }
   .item-card { align-items: flex-start; }
   .item-actions { flex-wrap: wrap; gap: 0.5rem; }
+  .actions { flex-wrap: wrap; gap: 0.5rem; }
   .upload-details { flex-wrap: wrap; gap: 0.5rem; }
 }
 </style>
