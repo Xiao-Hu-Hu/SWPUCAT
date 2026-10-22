@@ -376,4 +376,8 @@ async function handleChangePassword() {
   font-size: 12px;
   margin-top: 4px;
 }
+@media (max-width: 768px) {
+  .card { padding: 0.875rem; }
+  .avatar-section { flex-wrap: wrap; gap: 0.75rem; }
+}
 </style>

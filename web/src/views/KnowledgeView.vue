@@ -855,4 +855,13 @@ async function handleDownloadFile(id: number, name: string) {
   background: var(--bg-deep);
   font-weight: 600;
 }
+@media (max-width: 768px) {
+  .knowledge { flex-direction: column; gap: 0.75rem; }
+  .sidebar { width: 100%; }
+  .card { padding: 0.875rem; }
+  .card-header { flex-wrap: wrap; gap: 0.5rem; }
+  .item-card { align-items: flex-start; }
+  .item-actions { flex-wrap: wrap; gap: 0.5rem; }
+  .upload-details { flex-wrap: wrap; gap: 0.5rem; }
+}
 </style>

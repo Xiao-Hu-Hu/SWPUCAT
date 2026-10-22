@@ -1575,4 +1575,8 @@ async function downloadSource(source: AgentKnowledgeSource) {
     max-width: 92%;
   }
 }
+@media (max-width: 480px) {
+  .messages { height: 52vh; min-height: 260px; }
+  .composer { padding: 0.75rem; }
+}
 </style>
