@@ -53,7 +53,7 @@ const allMembers = ref<Member[]>([])
 const gradeGroups = ref<GradeGroup[]>([])
 
 const currentPage = ref(1)
-const pageSize = ref(10)
+const pageSize = ref(3)
 const { layout: paginationLayout, pagerCount, small: paginationSmall } = usePaginationLayout()
 
 const paginatedAnnouncements = computed(() => {
@@ -340,7 +340,7 @@ async function handleDelete(id: number) {
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
-          :page-sizes="[5, 10, 20, 50]"
+          :page-sizes="[3, 5, 10, 20, 50]"
           :total="announcements.length"
           :layout="paginationLayout"
           :pager-count="pagerCount"

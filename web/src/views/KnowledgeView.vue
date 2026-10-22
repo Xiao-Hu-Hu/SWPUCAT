@@ -72,7 +72,7 @@ const selectedCategory = ref<number | undefined>(undefined)
 const searchQuery = ref('')
 
 const currentPage = ref(1)
-const pageSize = ref(10)
+const pageSize = ref(5)
 const { layout: paginationLayout, pagerCount, small: paginationSmall } = usePaginationLayout()
 
 const paginatedItems = computed(() => {
