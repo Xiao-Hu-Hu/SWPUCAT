@@ -641,21 +641,23 @@ function sourceFilename(source: AgentKnowledgeSource): string {
   return cleaned || `知识库文件-${source.id}`
 }
 
-// Render assistant answer Markdown and turn bare `/api/knowledge/download/<id>`
-// paths (including ones inside code spans) into clickable download links. The
-// protected placeholder keeps already-rendered anchors from being re-wrapped.
+// Render assistant answer Markdown and turn every `/api/knowledge/download/<id>`
+// reference (markdown links, bare paths, and ones inside code spans) into a
+// "点击下载" button. The raw path is kept only as the href and never exposed as
+// link text, so the protected endpoint stays out of the visible answer.
 function renderAgentMarkdown(value: string): string {
   const html = renderMarkdown(value)
-  const anchors: string[] = []
-  const protectedHtml = html.replace(/<a\b[^>]*>[\s\S]*?<\/a>/g, (match) => {
-    anchors.push(match)
-    return `\u0000DLINK${anchors.length - 1}\u0000`
-  })
-  const linked = protectedHtml.replace(/(\/api\/knowledge\/download\/\d+)/g, (url) => {
+  const normalized = html.replace(
+    /<a\b[^>]*\bhref="(\/api\/knowledge\/download\/\d+)"[^>]*>[\s\S]*?<\/a>/g,
+    (_match, href: string) => {
+      const id = href.split('/').pop() || ''
+      return `<a class="md-download-link" href="${href}" data-knowledge-download="${id}">点击下载</a>`
+    }
+  )
+  return normalized.replace(/(?<!href=")(\/api\/knowledge\/download\/\d+)/g, (url) => {
     const id = url.split('/').pop() || ''
-    return `<a class="md-download-link" href="${url}" data-knowledge-download="${id}">${url}</a>`
+    return `<a class="md-download-link" href="${url}" data-knowledge-download="${id}">点击下载</a>`
   })
-  return linked.replace(/\u0000DLINK(\d+)\u0000/g, (_match, idx: string) => anchors[Number(idx)] || '')
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -1348,11 +1350,28 @@ function handleMarkdownClick(event: MouseEvent, message: ChatMessage) {
 
 .markdown-body :deep(.md-download-link) {
   cursor: pointer;
-  text-decoration: underline dotted;
+  display: inline-flex;
+  align-items: center;
+  margin: 0.15rem 0;
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-hover);
+  color: var(--accent);
+  font-size: 0.85em;
+  line-height: 1.2;
+  text-decoration: none;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .markdown-body :deep(a:hover) {
   text-decoration: underline;
+}
+
+.markdown-body :deep(.md-download-link:hover) {
+  background: var(--bg-deep);
+  border-color: var(--accent);
+  text-decoration: none;
 }
 
 .markdown-body :deep(img) {
