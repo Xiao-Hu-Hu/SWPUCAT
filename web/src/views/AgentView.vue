@@ -671,6 +671,35 @@ function downloadBlob(blob: Blob, filename: string) {
   window.URL.revokeObjectURL(objectURL)
 }
 
+function downloadButtons(id: number): HTMLElement[] {
+  const root = messagesRef.value || document
+  return Array.from(root.querySelectorAll<HTMLElement>(`a.md-download-link[data-knowledge-download="${id}"]`))
+}
+
+function markDownloadButtons(id: number) {
+  for (const button of downloadButtons(id)) {
+    button.classList.add('is-downloading')
+    button.innerHTML = '<span class="md-download-fill"></span><span class="md-download-label">下载中 0%</span>'
+  }
+}
+
+function updateDownloadButtons(id: number, percent: number) {
+  const value = Math.max(0, Math.min(100, Math.round(percent)))
+  for (const button of downloadButtons(id)) {
+    const fill = button.querySelector<HTMLElement>('.md-download-fill')
+    const label = button.querySelector<HTMLElement>('.md-download-label')
+    if (fill) fill.style.width = `${value}%`
+    if (label) label.textContent = `下载中 ${value}%`
+  }
+}
+
+function resetDownloadButtons(id: number) {
+  for (const button of downloadButtons(id)) {
+    button.classList.remove('is-downloading')
+    button.textContent = '点击下载'
+  }
+}
+
 async function downloadSource(source: AgentKnowledgeSource) {
   if (!canDownloadSource(source) || downloadingSources.value[source.id]) return
   downloadingSources.value[source.id] = true
@@ -689,15 +718,12 @@ async function downloadSource(source: AgentKnowledgeSource) {
 }
 
 async function downloadSourceById(id: number, message: ChatMessage) {
-  const source = message.sources?.find((s) => s.id === id)
-  if (source && canDownloadSource(source)) {
-    await downloadSource(source)
-    return
-  }
   if (downloadingSources.value[id]) return
   downloadingSources.value[id] = true
+  markDownloadButtons(id)
+  const source = message.sources?.find((s) => s.id === id)
   try {
-    const response = await knowledgeApi.downloadFile(id)
+    const response = await knowledgeApi.downloadFile(id, (percent) => updateDownloadButtons(id, percent))
     const blob = response instanceof Blob ? response : (response as any).data
     if (!(blob instanceof Blob)) throw new Error('invalid download response')
     downloadBlob(blob, source ? sourceFilename(source) : `知识库文件-${id}`)
@@ -705,6 +731,7 @@ async function downloadSourceById(id: number, message: ChatMessage) {
     ElMessage.error('知识库文件下载失败')
   } finally {
     delete downloadingSources.value[id]
+    resetDownloadButtons(id)
   }
 }
 
@@ -1349,6 +1376,8 @@ function handleMarkdownClick(event: MouseEvent, message: ChatMessage) {
 }
 
 .markdown-body :deep(.md-download-link) {
+  position: relative;
+  overflow: hidden;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -1368,10 +1397,34 @@ function handleMarkdownClick(event: MouseEvent, message: ChatMessage) {
   text-decoration: underline;
 }
 
+.markdown-body :deep(.md-download-fill) {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0%;
+  background: var(--accent);
+  opacity: 0.16;
+  pointer-events: none;
+  transition: width 0.2s ease;
+}
+
+.markdown-body :deep(.md-download-label) {
+  position: relative;
+  z-index: 1;
+  white-space: nowrap;
+}
+
 .markdown-body :deep(.md-download-link:hover) {
   background: var(--bg-deep);
   border-color: var(--accent);
   text-decoration: none;
+}
+
+.markdown-body :deep(.md-download-link.is-downloading) {
+  pointer-events: none;
+  cursor: default;
+  border-color: var(--accent);
 }
 
 .markdown-body :deep(img) {
