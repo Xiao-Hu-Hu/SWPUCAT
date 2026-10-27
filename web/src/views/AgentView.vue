@@ -641,6 +641,34 @@ function sourceFilename(source: AgentKnowledgeSource): string {
   return cleaned || `知识库文件-${source.id}`
 }
 
+// Render assistant answer Markdown and turn bare `/api/knowledge/download/<id>`
+// paths (including ones inside code spans) into clickable download links. The
+// protected placeholder keeps already-rendered anchors from being re-wrapped.
+function renderAgentMarkdown(value: string): string {
+  const html = renderMarkdown(value)
+  const anchors: string[] = []
+  const protectedHtml = html.replace(/<a\b[^>]*>[\s\S]*?<\/a>/g, (match) => {
+    anchors.push(match)
+    return `\u0000DLINK${anchors.length - 1}\u0000`
+  })
+  const linked = protectedHtml.replace(/(\/api\/knowledge\/download\/\d+)/g, (url) => {
+    const id = url.split('/').pop() || ''
+    return `<a class="md-download-link" href="${url}" data-knowledge-download="${id}">${url}</a>`
+  })
+  return linked.replace(/\u0000DLINK(\d+)\u0000/g, (_match, idx: string) => anchors[Number(idx)] || '')
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const objectURL = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = objectURL
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(objectURL)
+}
+
 async function downloadSource(source: AgentKnowledgeSource) {
   if (!canDownloadSource(source) || downloadingSources.value[source.id]) return
   downloadingSources.value[source.id] = true
@@ -650,19 +678,45 @@ async function downloadSource(source: AgentKnowledgeSource) {
     const response = await knowledgeApi.downloadFile(source.id)
     const blob = response instanceof Blob ? response : (response as any).data
     if (!(blob instanceof Blob)) throw new Error('invalid download response')
-    const objectURL = window.URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = objectURL
-    link.download = sourceFilename(source)
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    window.URL.revokeObjectURL(objectURL)
+    downloadBlob(blob, sourceFilename(source))
   } catch {
     ElMessage.error('知识库文件下载失败')
   } finally {
     delete downloadingSources.value[source.id]
   }
+}
+
+async function downloadSourceById(id: number, message: ChatMessage) {
+  const source = message.sources?.find((s) => s.id === id)
+  if (source && canDownloadSource(source)) {
+    await downloadSource(source)
+    return
+  }
+  if (downloadingSources.value[id]) return
+  downloadingSources.value[id] = true
+  try {
+    const response = await knowledgeApi.downloadFile(id)
+    const blob = response instanceof Blob ? response : (response as any).data
+    if (!(blob instanceof Blob)) throw new Error('invalid download response')
+    downloadBlob(blob, source ? sourceFilename(source) : `知识库文件-${id}`)
+  } catch {
+    ElMessage.error('知识库文件下载失败')
+  } finally {
+    delete downloadingSources.value[id]
+  }
+}
+
+// Intercept clicks on download links rendered inside the assistant answer so
+// the protected endpoint is always called with the bearer token attached.
+function handleMarkdownClick(event: MouseEvent, message: ChatMessage) {
+  const anchor = (event.target as HTMLElement)?.closest?.('a')
+  if (!anchor) return
+  const href = anchor.getAttribute('href') || ''
+  const match = href.match(/^\/api\/knowledge\/download\/(\d+)/)
+  if (!match) return
+  event.preventDefault()
+  event.stopPropagation()
+  void downloadSourceById(Number(match[1]), message)
 }
 </script>
 
@@ -767,7 +821,12 @@ async function downloadSource(source: AgentKnowledgeSource) {
           <template v-else>
             <div v-for="(item, index) in messages" :key="`${sessionId}-${item.localId}`" class="message-row" :class="item.role">
               <div class="message-content">
-                <div v-if="item.role === 'assistant' && item.content" class="message-bubble assistant-bubble markdown-body" v-html="renderMarkdown(item.content)"></div>
+                <div
+                  v-if="item.role === 'assistant' && item.content"
+                  class="message-bubble assistant-bubble markdown-body"
+                  v-html="renderAgentMarkdown(item.content)"
+                  @click="handleMarkdownClick($event, item)"
+                ></div>
                 <div v-else-if="item.role === 'assistant'" class="message-bubble pending">
                   {{ item.status === 'pending' ? '正在思考…' : '暂未生成回答' }}
                 </div>
@@ -1285,6 +1344,11 @@ async function downloadSource(source: AgentKnowledgeSource) {
 .markdown-body :deep(a) {
   color: var(--accent);
   text-decoration: none;
+}
+
+.markdown-body :deep(.md-download-link) {
+  cursor: pointer;
+  text-decoration: underline dotted;
 }
 
 .markdown-body :deep(a:hover) {
