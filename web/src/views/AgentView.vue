@@ -1384,10 +1384,11 @@ function handleMarkdownClick(event: MouseEvent, message: ChatMessage) {
   margin: 0.15rem 0;
   padding: 0.3rem 0.75rem;
   border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-hover);
-  color: var(--accent);
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  background: rgba(37, 99, 235, 0.08);
+  color: #2563eb;
   font-size: 0.85em;
+  font-weight: 500;
   line-height: 1.2;
   text-decoration: none;
   transition: background-color 0.15s ease, border-color 0.15s ease;
@@ -1403,8 +1404,7 @@ function handleMarkdownClick(event: MouseEvent, message: ChatMessage) {
   bottom: 0;
   left: 0;
   width: 0%;
-  background: var(--accent);
-  opacity: 0.16;
+  background: rgba(37, 99, 235, 0.14);
   pointer-events: none;
   transition: width 0.2s ease;
 }
@@ -1416,15 +1416,16 @@ function handleMarkdownClick(event: MouseEvent, message: ChatMessage) {
 }
 
 .markdown-body :deep(.md-download-link:hover) {
-  background: var(--bg-deep);
-  border-color: var(--accent);
+  background: rgba(37, 99, 235, 0.14);
+  border-color: rgba(37, 99, 235, 0.32);
+  color: #1d4ed8;
   text-decoration: none;
 }
 
 .markdown-body :deep(.md-download-link.is-downloading) {
   pointer-events: none;
   cursor: default;
-  border-color: var(--accent);
+  border-color: rgba(37, 99, 235, 0.28);
 }
 
 .markdown-body :deep(img) {
