@@ -353,4 +353,14 @@ async function handleRegister() {
   align-items: center;
   gap: 0.5rem;
 }
+@media (max-width: 768px) {
+  .title { font-size: 2.25rem; }
+  .subtitle { font-size: 1.125rem; margin-bottom: 1.5rem; }
+  .hero { min-height: 45vh; padding: 2rem 1.25rem; }
+  .features { padding: 2rem 1.25rem; }
+  .feature-grid { grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .feature-card { padding: 1.25rem; }
+  .actions { flex-direction: column; width: 100%; gap: 0.75rem; }
+  .actions .el-button { width: 100%; }
+}
 </style>

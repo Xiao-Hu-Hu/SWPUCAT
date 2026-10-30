@@ -32,7 +32,10 @@ const paginatedRecords = computed(() => {
   return records.value.slice(start, start + recordPageSize)
 })
 
-const filteredStats = statsData
+// Only members with actual check-in records should appear in the work-hour
+// chart. The stats endpoint returns a row for every active member, including
+// those who never clocked in (days === 0), which would render empty bars.
+const filteredStats = computed(() => statsData.value.filter((s) => s.days > 0))
 
 function formatMinutes(totalMinutes: number): string {
   const m = Math.round(totalMinutes)
@@ -787,5 +790,10 @@ async function loadOnlineMembers() {
   .stats-row {
     grid-template-columns: repeat(2, 1fr);
   }
+}
+@media (max-width: 768px) {
+  .chart-container, .chart-stage, .chart-empty { height: 240px; min-height: 240px; }
+  .chart-section .card, .log-section .card { padding: 0.875rem; }
+  .pagination-wrap { padding-top: 0.5rem; }
 }
 </style>

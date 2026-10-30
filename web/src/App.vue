@@ -89,4 +89,32 @@ body {
   --el-menu-active-color: #2563eb;
   --el-menu-hover-bg-color: #f4f4f5;
 }
+
+/* Mobile global tweaks */
+@media (max-width: 768px) {
+  body { -webkit-tap-highlight-color: transparent; }
+  .el-dialog { width: min(480px, calc(100vw - 24px)) !important; margin-top: 6vh !important; }
+  .el-message-box { width: calc(100vw - 32px) !important; }
+  .el-dialog__body { max-height: 72vh; overflow-y: auto; }
+  .el-button.is-circle { min-width: 40px; min-height: 40px; }
+  .el-button.is-text.is-circle { min-width: 36px; min-height: 36px; }
+  .el-form-item { display: flex; flex-direction: column; align-items: stretch; }
+  .el-form-item .el-form-item__label { display: block; width: 100% !important; flex: 0 0 100% !important; text-align: left !important; justify-content: flex-start !important; margin-bottom: 6px; line-height: 1.4; padding-right: 0; }
+  .el-form-item__content { margin-left: 0 !important; width: 100%; }
+  .el-form-item__content > .el-input,
+  .el-form-item__content > .el-select,
+  .el-form-item__content > .el-date-editor,
+  .el-form-item__content > .el-input-number,
+  .el-form-item__content > .el-cascader { width: 100%; }
+  .el-form-item__content > .el-input-group,
+  .el-form-item__content > .el-input__wrapper { width: 100%; }
+}
+@media (max-width: 768px) {
+  .el-table { font-size: 0.8125rem; }
+  .el-table .cell { padding: 0 0.5rem; }
+  .el-table .el-table__header th, .el-table .el-table__body td { padding: 0.5rem 0; }
+  .el-table__body-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .el-pagination { max-width: 100%; flex-wrap: wrap; justify-content: center; row-gap: 0.5rem; }
+  .el-pagination__jump { display: none; }
+}
 </style>

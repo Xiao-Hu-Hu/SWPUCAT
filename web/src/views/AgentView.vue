@@ -44,6 +44,7 @@ const historyLoading = ref(false)
 const conversationsLoading = ref(false)
 const creatingConversation = ref(false)
 const conversations = ref<AgentConversation[]>([])
+const sessionsOpen = ref(false)
 const messages = ref<ChatMessage[]>([newGreetingMessage()])
 const sessionId = ref('')
 const messagesRef = ref<HTMLElement | null>(null)
@@ -141,6 +142,7 @@ async function selectConversation(item: AgentConversation) {
   if (item.session_id === sessionId.value && !historyLoading.value) return
   if (loading.value || historyLoading.value || creatingConversation.value || editingSessionId.value || renamingSessionId.value) return
   await loadConversation(item.session_id)
+  sessionsOpen.value = false
 }
 
 async function deleteConversation(item: AgentConversation) {
@@ -639,6 +641,65 @@ function sourceFilename(source: AgentKnowledgeSource): string {
   return cleaned || `知识库文件-${source.id}`
 }
 
+// Render assistant answer Markdown and turn every `/api/knowledge/download/<id>`
+// reference (markdown links, bare paths, and ones inside code spans) into a
+// "点击下载" button. The raw path is kept only as the href and never exposed as
+// link text, so the protected endpoint stays out of the visible answer.
+function renderAgentMarkdown(value: string): string {
+  const html = renderMarkdown(value)
+  const normalized = html.replace(
+    /<a\b[^>]*\bhref="(\/api\/knowledge\/download\/\d+)"[^>]*>[\s\S]*?<\/a>/g,
+    (_match, href: string) => {
+      const id = href.split('/').pop() || ''
+      return `<a class="md-download-link" href="${href}" data-knowledge-download="${id}">点击下载</a>`
+    }
+  )
+  return normalized.replace(/(?<!href=")(\/api\/knowledge\/download\/\d+)/g, (url) => {
+    const id = url.split('/').pop() || ''
+    return `<a class="md-download-link" href="${url}" data-knowledge-download="${id}">点击下载</a>`
+  })
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const objectURL = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = objectURL
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(objectURL)
+}
+
+function downloadButtons(id: number): HTMLElement[] {
+  const root = messagesRef.value || document
+  return Array.from(root.querySelectorAll<HTMLElement>(`a.md-download-link[data-knowledge-download="${id}"]`))
+}
+
+function markDownloadButtons(id: number) {
+  for (const button of downloadButtons(id)) {
+    button.classList.add('is-downloading')
+    button.innerHTML = '<span class="md-download-fill"></span><span class="md-download-label">下载中 0%</span>'
+  }
+}
+
+function updateDownloadButtons(id: number, percent: number) {
+  const value = Math.max(0, Math.min(100, Math.round(percent)))
+  for (const button of downloadButtons(id)) {
+    const fill = button.querySelector<HTMLElement>('.md-download-fill')
+    const label = button.querySelector<HTMLElement>('.md-download-label')
+    if (fill) fill.style.width = `${value}%`
+    if (label) label.textContent = `下载中 ${value}%`
+  }
+}
+
+function resetDownloadButtons(id: number) {
+  for (const button of downloadButtons(id)) {
+    button.classList.remove('is-downloading')
+    button.textContent = '点击下载'
+  }
+}
+
 async function downloadSource(source: AgentKnowledgeSource) {
   if (!canDownloadSource(source) || downloadingSources.value[source.id]) return
   downloadingSources.value[source.id] = true
@@ -648,19 +709,43 @@ async function downloadSource(source: AgentKnowledgeSource) {
     const response = await knowledgeApi.downloadFile(source.id)
     const blob = response instanceof Blob ? response : (response as any).data
     if (!(blob instanceof Blob)) throw new Error('invalid download response')
-    const objectURL = window.URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = objectURL
-    link.download = sourceFilename(source)
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    window.URL.revokeObjectURL(objectURL)
+    downloadBlob(blob, sourceFilename(source))
   } catch {
     ElMessage.error('知识库文件下载失败')
   } finally {
     delete downloadingSources.value[source.id]
   }
+}
+
+async function downloadSourceById(id: number, message: ChatMessage) {
+  if (downloadingSources.value[id]) return
+  downloadingSources.value[id] = true
+  markDownloadButtons(id)
+  const source = message.sources?.find((s) => s.id === id)
+  try {
+    const response = await knowledgeApi.downloadFile(id, (percent) => updateDownloadButtons(id, percent))
+    const blob = response instanceof Blob ? response : (response as any).data
+    if (!(blob instanceof Blob)) throw new Error('invalid download response')
+    downloadBlob(blob, source ? sourceFilename(source) : `知识库文件-${id}`)
+  } catch {
+    ElMessage.error('知识库文件下载失败')
+  } finally {
+    delete downloadingSources.value[id]
+    resetDownloadButtons(id)
+  }
+}
+
+// Intercept clicks on download links rendered inside the assistant answer so
+// the protected endpoint is always called with the bearer token attached.
+function handleMarkdownClick(event: MouseEvent, message: ChatMessage) {
+  const anchor = (event.target as HTMLElement)?.closest?.('a')
+  if (!anchor) return
+  const href = anchor.getAttribute('href') || ''
+  const match = href.match(/^\/api\/knowledge\/download\/(\d+)/)
+  if (!match) return
+  event.preventDefault()
+  event.stopPropagation()
+  void downloadSourceById(Number(match[1]), message)
 }
 </script>
 
@@ -674,7 +759,8 @@ async function downloadSource(source: AgentKnowledgeSource) {
     </div>
 
     <div class="agent-layout">
-      <aside class="conversation-panel">
+      <div class="sessions-mask" :class="{ show: sessionsOpen }" @click="sessionsOpen = false"></div>
+      <aside class="conversation-panel" :class="{ 'drawer-open': sessionsOpen }">
         <div class="conversation-panel-header">
           <span class="conversation-panel-title">会话记录</span>
           <el-button text circle :loading="creatingConversation" :disabled="conversationsLoading || Boolean(editingSessionId) || Boolean(renamingSessionId)" aria-label="新建会话" @click="createNewConversation">
@@ -751,6 +837,9 @@ async function downloadSource(source: AgentKnowledgeSource) {
 
       <section class="chat-card" aria-label="智能助手对话">
         <div class="chat-header">
+          <button class="sessions-toggle" aria-label="会话记录" @click="sessionsOpen = true">
+            <el-icon :size="18"><ChatDotRound /></el-icon>
+          </button>
           <span class="chat-header-title">
             {{ conversations.find((item) => item.session_id === sessionId)?.title || '新会话' }}
           </span>
@@ -761,7 +850,12 @@ async function downloadSource(source: AgentKnowledgeSource) {
           <template v-else>
             <div v-for="(item, index) in messages" :key="`${sessionId}-${item.localId}`" class="message-row" :class="item.role">
               <div class="message-content">
-                <div v-if="item.role === 'assistant' && item.content" class="message-bubble assistant-bubble markdown-body" v-html="renderMarkdown(item.content)"></div>
+                <div
+                  v-if="item.role === 'assistant' && item.content"
+                  class="message-bubble assistant-bubble markdown-body"
+                  v-html="renderAgentMarkdown(item.content)"
+                  @click="handleMarkdownClick($event, item)"
+                ></div>
                 <div v-else-if="item.role === 'assistant'" class="message-bubble pending">
                   {{ item.status === 'pending' ? '正在思考…' : '暂未生成回答' }}
                 </div>
@@ -1281,8 +1375,57 @@ async function downloadSource(source: AgentKnowledgeSource) {
   text-decoration: none;
 }
 
+.markdown-body :deep(.md-download-link) {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  margin: 0.15rem 0;
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  background: rgba(37, 99, 235, 0.08);
+  color: #2563eb;
+  font-size: 0.85em;
+  font-weight: 500;
+  line-height: 1.2;
+  text-decoration: none;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
 .markdown-body :deep(a:hover) {
   text-decoration: underline;
+}
+
+.markdown-body :deep(.md-download-fill) {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0%;
+  background: rgba(37, 99, 235, 0.14);
+  pointer-events: none;
+  transition: width 0.2s ease;
+}
+
+.markdown-body :deep(.md-download-label) {
+  position: relative;
+  z-index: 1;
+  white-space: nowrap;
+}
+
+.markdown-body :deep(.md-download-link:hover) {
+  background: rgba(37, 99, 235, 0.14);
+  border-color: rgba(37, 99, 235, 0.32);
+  color: #1d4ed8;
+  text-decoration: none;
+}
+
+.markdown-body :deep(.md-download-link.is-downloading) {
+  pointer-events: none;
+  cursor: default;
+  border-color: rgba(37, 99, 235, 0.28);
 }
 
 .markdown-body :deep(img) {
@@ -1550,6 +1693,9 @@ async function downloadSource(source: AgentKnowledgeSource) {
   font-size: 0.75rem;
 }
 
+.sessions-toggle { display: none; }
+.sessions-mask { display: none; }
+
 @media (max-width: 860px) {
   .agent-layout {
     grid-template-columns: 190px minmax(0, 1fr);
@@ -1561,18 +1707,56 @@ async function downloadSource(source: AgentKnowledgeSource) {
     grid-template-columns: 1fr;
   }
 
+  .sessions-toggle {
+    display: inline-flex;
+  }
+  .sessions-mask {
+    display: block;
+  }
   .conversation-panel {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(300px, 82vw);
+    z-index: 40;
+    padding: 0.5rem;
     min-height: 0;
-    max-height: 230px;
+    max-height: none;
+    transform: translateX(-100%);
+    transition: transform 0.25s cubic-bezier(.2, .8, .2, 1);
+    box-shadow: var(--shadow-md);
   }
-
+  .conversation-panel.drawer-open {
+    transform: translateX(0);
+  }
+  .sessions-mask {
+    position: fixed;
+    inset: 0;
+    background: rgba(24, 24, 27, 0.45);
+    z-index: 30;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .sessions-mask.show {
+    opacity: 1;
+    pointer-events: auto;
+  }
   .conversation-list {
-    max-height: 120px;
+    max-height: none;
   }
-
+  .conversation-edit-button,
+  .conversation-delete-button {
+    opacity: 1;
+  }
   .message-bubble,
   .message-content {
     max-width: 92%;
   }
+}
+@media (max-width: 480px) {
+  .messages { height: 52vh; min-height: 260px; }
+  .composer { padding: 0.75rem; }
 }
 </style>

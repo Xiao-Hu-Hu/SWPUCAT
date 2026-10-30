@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { UploadFile, UploadUserFile } from 'element-plus'
 import { renderMarkdown } from '@/utils/markdown'
+import { usePaginationLayout } from '@/composables/usePaginationLayout'
 
 const DESCRIPTION_TEMPLATE = `> 用途：一句话说明什么情况下使用这份资料
 > 关键词：关键词一、关键词二、关键词三
@@ -71,7 +72,8 @@ const selectedCategory = ref<number | undefined>(undefined)
 const searchQuery = ref('')
 
 const currentPage = ref(1)
-const pageSize = ref(10)
+const pageSize = ref(5)
+const { layout: paginationLayout, pagerCount, small: paginationSmall } = usePaginationLayout()
 
 const paginatedItems = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
@@ -421,12 +423,10 @@ async function handleDownloadFile(id: number, name: string) {
                 <el-tag v-if="item.source_origin === 'official_catalog'" size="small" type="success">官方 · v{{ item.revision }}</el-tag>
               </div>
             </div>
-            <div class="item-actions" v-if="item.description">
-              <el-button size="small" @click="openPreview(item)">
+            <div class="item-card-actions">
+              <el-button v-if="item.description" size="small" @click="openPreview(item)">
                 查看说明
               </el-button>
-            </div>
-            <div class="item-actions">
               <el-button
                 v-if="item.type === 'file'"
                 size="small"
@@ -456,7 +456,9 @@ async function handleDownloadFile(id: number, name: string) {
             v-model:page-size="pageSize"
             :page-sizes="[5, 10, 20, 50]"
             :total="items.length"
-            layout="total, sizes, prev, pager, next, jumper"
+            :layout="paginationLayout"
+            :pager-count="pagerCount"
+            :small="paginationSmall"
             background
           />
         </div>
@@ -749,9 +751,11 @@ async function handleDownloadFile(id: number, name: string) {
   color: var(--text-muted);
 }
 
-.item-actions {
+.item-card-actions {
   display: flex;
+  align-items: center;
   gap: 0.5rem;
+  flex-shrink: 0;
 }
 
 .pagination-wrapper {
@@ -854,5 +858,27 @@ async function handleDownloadFile(id: number, name: string) {
 .markdown-preview :deep(th) {
   background: var(--bg-deep);
   font-weight: 600;
+}
+@media (max-width: 768px) {
+  .knowledge { flex-direction: column; gap: 0.75rem; }
+  .sidebar { width: 100%; }
+  .sidebar .card { padding: 0.5rem 0.625rem; }
+  .sidebar .card-header { margin-bottom: 0.5rem; }
+  .category-list { display: flex; flex-direction: row; flex-wrap: nowrap; overflow-x: auto; gap: 0.375rem; padding-bottom: 0.25rem; -webkit-overflow-scrolling: touch; }
+  .category-item { flex: 0 0 auto; justify-content: flex-start; gap: 0.375rem; padding: 0.25rem 0.625rem; border-radius: 999px; background: var(--bg-deep); }
+  .category-item.active { background: var(--accent); color: #fff; }
+  .category-item .count { margin-left: 0.25rem; }
+  .card { padding: 0.875rem; }
+  .content .card-header { flex-direction: column; align-items: stretch; gap: 0.75rem; }
+  .actions { width: 100%; gap: 0.5rem; flex-wrap: wrap; }
+  .actions .el-input { width: 100% !important; flex: 1 1 100%; }
+  .actions .el-button { flex: 1 1 auto; }
+  .item-card { display: grid; grid-template-columns: auto 1fr; grid-template-areas: "icon info" "actions actions"; gap: 0.5rem 0.75rem; align-items: start; }
+  .item-icon { grid-area: icon; }
+  .item-info { grid-area: info; }
+  .item-card-actions { grid-area: actions; justify-content: flex-end; flex-wrap: wrap; }
+  .item-meta { flex-wrap: wrap; gap: 0.25rem 0.75rem; }
+  .item-name { max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .upload-details { flex-wrap: wrap; gap: 0.5rem; }
 }
 </style>

@@ -134,4 +134,8 @@ function copyCode(code: string) {
   font-weight: 600;
   margin-right: 0.5rem;
 }
+@media (max-width: 768px) {
+  .card { padding: 0.875rem; }
+  .card-header { flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+}
 </style>

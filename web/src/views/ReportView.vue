@@ -1158,4 +1158,11 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
   border-top: 1px solid var(--border);
   padding-top: 1rem;
 }
+@media (max-width: 768px) {
+  .card { padding: 0.875rem; }
+  .card-header, .editor-header { flex-wrap: wrap; gap: 0.5rem; }
+  .actions { flex-wrap: wrap; }
+  .period-meta { flex-wrap: wrap; gap: 0.5rem; }
+  .review-row, .roster-row { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+}
 </style>

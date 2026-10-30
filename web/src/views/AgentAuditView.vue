@@ -215,4 +215,9 @@ onMounted(() => void load())
 .tool-call > span { display: block; margin: 0.5rem 0 0.25rem; color: var(--text-muted); font-size: 0.75rem; }
 pre { margin: 0; padding: 0.75rem; max-height: 220px; overflow: auto; background: var(--bg-deep); border-radius: var(--radius); font-size: 0.75rem; }
 @media (max-width: 1000px) { .page-heading { align-items: stretch; flex-direction: column; } .filters { flex-wrap: wrap; } .metric-grid { grid-template-columns: repeat(2, 1fr); } .distribution-grid { grid-template-columns: 1fr; } }
+@media (max-width: 680px) {
+  .metric-grid { grid-template-columns: 1fr; }
+  .panel { padding: 0.875rem; }
+  .panel :deep(.el-pagination) { justify-content: center; }
+}
 </style>

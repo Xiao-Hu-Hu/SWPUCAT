@@ -287,4 +287,11 @@ onMounted(() => {
   align-items: flex-start;
   gap: 1rem;
 }
+@media (max-width: 768px) {
+  .manage-tabs { padding: 0.875rem; }
+  .tab-content { padding: 0.75rem 0; }
+  .makeup-form, .req-table { max-width: 100%; }
+  .unit-label { margin-left: 0; margin-top: 0.25rem; }
+  .report-tab { gap: 0.75rem; }
+}
 </style>

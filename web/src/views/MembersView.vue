@@ -5,6 +5,7 @@ import { checkinApi } from '@/api/checkin'
 import { userApi } from '@/api/user'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { usePaginationLayout } from '@/composables/usePaginationLayout'
 
 const authStore = useAuthStore()
 const members = ref<Array<{
@@ -21,6 +22,7 @@ const onlineMembers = ref<Array<{ user_id: number; nickname: string; online: boo
 
 const currentPage = ref(1)
 const pageSize = ref(10)
+const { layout: paginationLayout, pagerCount, small: paginationSmall } = usePaginationLayout()
 
 const paginatedMembers = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
@@ -189,7 +191,9 @@ async function handleRemoveMember(id: number) {
           v-model:page-size="pageSize"
           :page-sizes="[5, 10, 20, 50]"
           :total="members.length"
-          layout="total, sizes, prev, pager, next, jumper"
+          :layout="paginationLayout"
+          :pager-count="pagerCount"
+          :small="paginationSmall"
           background
         />
       </div>
@@ -289,5 +293,11 @@ async function handleRemoveMember(id: number) {
   margin-top: 1.25rem;
   padding-top: 1rem;
   border-top: 1px solid var(--border);
+}
+@media (max-width: 768px) {
+  .card { padding: 0.875rem; }
+  .card-header { flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+  .member-info { gap: 0.5rem; }
+  .pagination-wrapper { padding-top: 0.75rem; margin-top: 1rem; }
 }
 </style>
