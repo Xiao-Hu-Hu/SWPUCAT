@@ -5,19 +5,24 @@ import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import RollingNumber from '@/components/RollingNumber.vue'
+import { normalizeCheckinStats, type CheckinChartStat } from '@/utils/checkinChart.js'
 
 const authStore = useAuthStore()
 const chartRef = ref<HTMLElement | null>(null)
 let chart: echarts.ECharts | null = null
 let midnightTimer: ReturnType<typeof setTimeout> | null = null
 let tickTimer: ReturnType<typeof setInterval> | null = null
+let statsRequestId = 0
 const now = ref(new Date())
 
 const status = ref({ status: 'idle', clock_in: '', clock_out: '' })
-const records = ref<Array<{ id: number; user_id: number; type: string; date: string; time: string; nickname: string; student_id: string; avatar: string }>>([])
-const statsData = ref<Array<{ user_id: number; nickname: string; total_minutes: number; total_hours: number; days: number }>>([])
+const records = ref<Array<{ id: number; user_id: number; type: string; date: string; time: string; nickname: string; student_id: string; avatar: string; minutes?: number }>>([])
+const statsData = ref<CheckinChartStat[]>([])
 const onlineMembers = ref<Array<{ user_id: number; nickname: string; online: boolean }>>([])
-const chartFilter = ref('week')
+type ChartPeriod = 'today' | 'week' | 'month'
+const chartFilter = ref<ChartPeriod>('week')
+const statsLoading = ref(false)
+const statsError = ref('')
 const todayBaseMinutes = ref(0)
 const recordPage = ref(1)
 const recordPageSize = 10
@@ -143,13 +148,21 @@ onMounted(async () => {
 onUnmounted(() => {
   if (midnightTimer) clearTimeout(midnightTimer)
   if (tickTimer) clearInterval(tickTimer)
+  window.removeEventListener('resize', handleResize)
+  chart?.dispose()
+  chart = null
 })
+
+function handleResize() {
+  chart?.resize()
+}
 
 function initChart() {
   if (!chartRef.value) return
-  chart = echarts.init(chartRef.value)
+  chart?.dispose()
+  chart = echarts.init(chartRef.value, undefined, { renderer: 'canvas' })
   updateChart()
-  window.addEventListener('resize', () => chart?.resize())
+  window.addEventListener('resize', handleResize)
 }
 
 function updateChart() {
@@ -157,6 +170,11 @@ function updateChart() {
   const data = filteredStats.value
   const periodLabel = chartFilter.value === 'today' ? '今日' : chartFilter.value === 'month' ? '本月' : '本周'
   chart.setOption({
+    animation: true,
+    animationDuration: 700,
+    animationEasing: 'cubicOut',
+    animationDurationUpdate: 700,
+    animationEasingUpdate: 'cubicOut',
     tooltip: {
       trigger: 'axis',
       backgroundColor: '#ffffff',
@@ -209,7 +227,8 @@ function updateChart() {
   })
 }
 
-async function setChartFilter(filter: string) {
+async function setChartFilter(filter: ChartPeriod) {
+  if (filter === chartFilter.value && !statsError.value) return
   chartFilter.value = filter
   await loadStats()
 }
@@ -260,12 +279,25 @@ async function handleClockOut() {
 }
 
 async function loadStats() {
+  const requestId = ++statsRequestId
+  // Only mask the chart on first load / when it is currently empty. During a
+  // filter switch the previous bars stay visible and animate into the new data.
+  if (filteredStats.value.length === 0) statsLoading.value = true
+  statsError.value = ''
   try {
     const res = await checkinApi.getStats(chartFilter.value)
-    statsData.value = (res.data || []).filter((s: any) => s.nickname !== '超级管理员' && s.user_id > 0)
+    if (requestId !== statsRequestId) return
+    statsData.value = normalizeCheckinStats(res.data)
+    await nextTick()
     updateChart()
   } catch {
-    console.error('Failed to load stats')
+    if (requestId !== statsRequestId) return
+    statsData.value = []
+    statsError.value = '工时统计加载失败，请稍后重试'
+    await nextTick()
+    updateChart()
+  } finally {
+    if (requestId === statsRequestId) statsLoading.value = false
   }
 }
 
@@ -361,7 +393,14 @@ async function loadOnlineMembers() {
             <button class="filter-btn" :class="{ active: chartFilter === 'month' }" @click="setChartFilter('month')">本月</button>
           </div>
         </div>
-        <div ref="chartRef" class="chart-container"></div>
+        <div class="chart-stage" v-loading="statsLoading">
+          <div ref="chartRef" class="chart-container" :class="{ 'is-empty': !filteredStats.length }"></div>
+          <div v-if="!statsLoading && (statsError || !filteredStats.length)" class="chart-empty" role="status">
+            <el-icon class="chart-empty-icon"><DataAnalysis /></el-icon>
+            <span>{{ statsError || `${getPeriodLabel()}暂无成员工时数据` }}</span>
+            <el-button v-if="statsError" text type="primary" @click="loadStats">重新加载</el-button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -387,8 +426,8 @@ async function loadOnlineMembers() {
           </el-table-column>
           <el-table-column label="类型" width="100">
             <template #default="{ row }">
-              <span class="tag" :class="row.type === 'in' ? 'tag-in' : 'tag-out'">
-                {{ row.type === 'in' ? '签到' : '签退' }}
+              <span class="tag" :class="row.type === 'in' ? 'tag-in' : row.type === 'out' ? 'tag-out' : 'tag-makeup'">
+                {{ row.type === 'in' ? '签到' : row.type === 'out' ? '签退' : '补签' }}
               </span>
             </template>
           </el-table-column>
@@ -404,7 +443,7 @@ async function loadOnlineMembers() {
           </el-table-column>
           <el-table-column label="工时" width="120">
             <template #default="{ row }">
-              <span class="mono-text bold">{{ row.type === 'out' ? calcDuration(row.clock_in_time, row.time) : '--' }}</span>
+              <span class="mono-text bold">{{ row.type === 'out' ? calcDuration(row.clock_in_time, row.time) : row.type === 'makeup' ? formatMinutes(row.minutes || 0) : '--' }}</span>
             </template>
           </el-table-column>
         </el-table>
@@ -636,6 +675,35 @@ async function loadOnlineMembers() {
 .chart-container {
   width: 100%;
   height: 300px;
+  transition: opacity 0.2s ease;
+}
+
+.chart-stage {
+  position: relative;
+  min-height: 300px;
+}
+
+.chart-container.is-empty {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.chart-empty {
+  position: absolute;
+  inset: 0;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+.chart-empty-icon {
+  font-size: 2rem;
+  color: var(--border-strong, #d4d4d8);
 }
 
 /* Log Section */
@@ -687,6 +755,11 @@ async function loadOnlineMembers() {
 .tag-out {
   background: var(--danger-bg);
   color: var(--danger);
+}
+
+.tag-makeup {
+  background: var(--warning-bg);
+  color: var(--warning);
 }
 
 .mono-text {

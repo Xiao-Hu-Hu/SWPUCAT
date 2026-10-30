@@ -93,6 +93,21 @@ func TestCommitDoesNotOverwriteExistingFile(t *testing.T) {
 	}
 }
 
+func TestLocalStorageRejectsTraversalKeys(t *testing.T) {
+	s, err := NewLocalStorage(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"", "../outside.txt", `..\outside.txt`} {
+		if _, err := s.Get(key); !errors.Is(err, ErrInvalidFileKey) {
+			t.Errorf("Get(%q) returned %v", key, err)
+		}
+		if err := s.Delete(key); !errors.Is(err, ErrInvalidFileKey) {
+			t.Errorf("Delete(%q) returned %v", key, err)
+		}
+	}
+}
+
 type failingReader struct{}
 
 func (failingReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }

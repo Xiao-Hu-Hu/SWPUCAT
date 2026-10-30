@@ -17,10 +17,11 @@ func NewApprovalHandler(approvalSvc *approval.ApprovalService) *ApprovalHandler 
 
 func (h *ApprovalHandler) Submit(c *gin.Context) {
 	var req struct {
-		FileName   string `json:"file_name" binding:"required"`
-		FileSize   string `json:"file_size"`
-		FileKey    string `json:"file_key"`
-		CategoryID int64  `json:"category_id" binding:"required"`
+		FileName    string `json:"file_name" binding:"required"`
+		FileSize    string `json:"file_size"`
+		FileKey     string `json:"file_key"`
+		Description string `json:"description"`
+		CategoryID  int64  `json:"category_id" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, "invalid request body")
@@ -30,7 +31,7 @@ func (h *ApprovalHandler) Submit(c *gin.Context) {
 	uploaderID := GetUserID(c)
 	uploaderName := GetUsername(c)
 
-	dto, err := h.approvalSvc.Submit(c.Request.Context(), req.FileName, req.FileSize, req.FileKey, req.CategoryID, uploaderID, uploaderName)
+	dto, err := h.approvalSvc.Submit(c.Request.Context(), req.FileName, req.FileSize, req.FileKey, req.Description, req.CategoryID, uploaderID, uploaderName)
 	if err != nil {
 		InternalError(c, "failed to submit approval")
 		return

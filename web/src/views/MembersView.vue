@@ -162,7 +162,7 @@ async function handleRemoveMember(id: number) {
         </el-table-column>
         <el-table-column prop="joined_at" label="加入时间" width="120" />
         <el-table-column prop="checkin_count" label="签到次数" width="100" />
-        <el-table-column label="操作" width="200" v-if="authStore.isCaptain">
+        <el-table-column label="操作" width="200" v-if="authStore.isCaptain || authStore.isSuperAdmin">
           <template #default="{ row }">
             <el-button
               v-if="row.role !== 'captain'"

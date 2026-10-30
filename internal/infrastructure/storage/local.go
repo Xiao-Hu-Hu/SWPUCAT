@@ -1,22 +1,30 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
+
+var ErrInvalidFileKey = errors.New("invalid file key")
 
 type LocalStorage struct {
 	uploadDir string
 }
 
 func NewLocalStorage(uploadDir string) (*LocalStorage, error) {
-	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+	absUploadDir, err := filepath.Abs(uploadDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve upload directory: %w", err)
+	}
+	if err := os.MkdirAll(absUploadDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create upload directory: %w", err)
 	}
-	return &LocalStorage{uploadDir: uploadDir}, nil
+	return &LocalStorage{uploadDir: absUploadDir}, nil
 }
 
 func (s *LocalStorage) Save(filename string, reader io.Reader) (string, error) {
@@ -47,7 +55,10 @@ func (s *LocalStorage) Save(filename string, reader io.Reader) (string, error) {
 }
 
 func (s *LocalStorage) Get(fileKey string) (string, error) {
-	filePath := filepath.Join(s.uploadDir, fileKey)
+	filePath, err := s.safePath(fileKey)
+	if err != nil {
+		return "", err
+	}
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return "", fmt.Errorf("file not found")
 	}
@@ -55,6 +66,26 @@ func (s *LocalStorage) Get(fileKey string) (string, error) {
 }
 
 func (s *LocalStorage) Delete(fileKey string) error {
-	filePath := filepath.Join(s.uploadDir, fileKey)
+	filePath, err := s.safePath(fileKey)
+	if err != nil {
+		return err
+	}
 	return os.Remove(filePath)
+}
+
+func (s *LocalStorage) safePath(fileKey string) (string, error) {
+	normalizedKey := filepath.FromSlash(strings.ReplaceAll(fileKey, `\`, "/"))
+	if normalizedKey == "" || filepath.IsAbs(normalizedKey) {
+		return "", ErrInvalidFileKey
+	}
+	cleanKey := filepath.Clean(normalizedKey)
+	if cleanKey == "." || cleanKey == ".." || strings.HasPrefix(cleanKey, ".."+string(os.PathSeparator)) {
+		return "", ErrInvalidFileKey
+	}
+	filePath := filepath.Join(s.uploadDir, cleanKey)
+	relative, err := filepath.Rel(s.uploadDir, filePath)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
+		return "", ErrInvalidFileKey
+	}
+	return filePath, nil
 }

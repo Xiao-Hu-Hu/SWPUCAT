@@ -2,6 +2,8 @@ package http
 
 import (
 	"SWPUCAT/internal/application/knowledge"
+	"SWPUCAT/internal/application/knowledgeindex"
+	knowledgedomain "SWPUCAT/internal/domain/knowledge"
 	"SWPUCAT/internal/domain/shared"
 	"SWPUCAT/internal/infrastructure/storage"
 	"errors"
@@ -11,27 +13,44 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 )
 
-// maxUploadSize 单个文件上传大小上限（1GB）
-const maxUploadSize = 1 << 30
+const (
+	// maxUploadSize 单个文件上传大小上限（1GB）
+	maxUploadSize                 = 1 << 30
+	maxKnowledgeDescriptionRunes  = 20000
+	maxKnowledgeMetadataFieldSize = maxKnowledgeDescriptionRunes*utf8.UTFMax + 1024
+	// descriptionMinRunes 描述过短时给出模板提示的下限（仅建议，不阻断）。
+	descriptionMinRunes = 20
+)
 
 type KnowledgeHandler struct {
 	knowledgeSvc *knowledge.KnowledgeService
+	indexSvc     *knowledgeindex.Service
 	storage      *storage.LocalStorage
 }
 
-func NewKnowledgeHandler(knowledgeSvc *knowledge.KnowledgeService, storage *storage.LocalStorage) *KnowledgeHandler {
-	return &KnowledgeHandler{knowledgeSvc: knowledgeSvc, storage: storage}
+func NewKnowledgeHandler(knowledgeSvc *knowledge.KnowledgeService, storage *storage.LocalStorage, indexServices ...*knowledgeindex.Service) *KnowledgeHandler {
+	var indexSvc *knowledgeindex.Service
+	if len(indexServices) > 0 {
+		indexSvc = indexServices[0]
+	}
+	return &KnowledgeHandler{knowledgeSvc: knowledgeSvc, indexSvc: indexSvc, storage: storage}
 }
 
 func (h *KnowledgeHandler) CreateLink(c *gin.Context) {
 	var req knowledge.CreateLinkRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, "invalid request body")
+		return
+	}
+	if !validKnowledgeDescription(req.Description) {
+		BadRequest(c, "description exceeds 20000 characters")
 		return
 	}
 
@@ -45,7 +64,7 @@ func (h *KnowledgeHandler) CreateLink(c *gin.Context) {
 		return
 	}
 
-	Created(c, dto)
+	CreatedWithWarnings(c, dto, descriptionWarnings(req.Description))
 }
 
 func (h *KnowledgeHandler) UploadFile(c *gin.Context) {
@@ -87,7 +106,7 @@ func (h *KnowledgeHandler) UploadFile(c *gin.Context) {
 		return
 	}
 
-	Created(c, dto)
+	CreatedWithWarnings(c, dto, descriptionWarnings(req.Description))
 }
 
 // Fields may follow the file, as they do in existing clients. Keep the file
@@ -131,12 +150,11 @@ func (h *KnowledgeHandler) receiveUpload(r *http.Request, limit int64) (*storage
 			if _, exists := fields[name]; exists {
 				return nil, req, errors.New("duplicate upload field")
 			}
-			const maxFieldSize = 4 << 10
-			value, err := io.ReadAll(io.LimitReader(part, maxFieldSize+1))
+			value, err := io.ReadAll(io.LimitReader(part, maxKnowledgeMetadataFieldSize+1))
 			if err != nil {
 				return nil, req, err
 			}
-			if len(value) > maxFieldSize {
+			if len(value) > maxKnowledgeMetadataFieldSize {
 				return nil, req, errors.New("upload field too large")
 			}
 			fields[name] = string(value)
@@ -153,8 +171,8 @@ func (h *KnowledgeHandler) receiveUpload(r *http.Request, limit int64) (*storage
 		return nil, req, errors.New("invalid category_id")
 	}
 	req.Description = fields["description"]
-	if !utf8.ValidString(req.Description) || utf8.RuneCountInString(req.Description) > 1000 {
-		return nil, req, errors.New("description exceeds 1000 characters")
+	if !validKnowledgeDescription(req.Description) {
+		return nil, req, errors.New("description exceeds 20000 characters")
 	}
 	if err := r.Context().Err(); err != nil {
 		return nil, req, err
@@ -162,6 +180,20 @@ func (h *KnowledgeHandler) receiveUpload(r *http.Request, limit int64) (*storage
 	req.FileSize = fmt.Sprintf("%.2f MB", float64(pending.Size)/(1024*1024))
 	keep = true
 	return pending, req, nil
+}
+
+func validKnowledgeDescription(description string) bool {
+	return utf8.ValidString(description) && utf8.RuneCountInString(description) <= maxKnowledgeDescriptionRunes
+}
+
+// descriptionWarnings returns an advisory (non-blocking) nudge when the
+// description is too short to index well, so uploaders can follow the
+// standard template.
+func descriptionWarnings(description string) []string {
+	if utf8.RuneCountInString(strings.TrimSpace(description)) < descriptionMinRunes {
+		return []string{"描述信息较短，建议按规范模板补充「用途 / 关键词 / 内容摘要」，更有助检索。"}
+	}
+	return nil
 }
 
 func (h *KnowledgeHandler) DeleteItem(c *gin.Context) {
@@ -187,6 +219,59 @@ func (h *KnowledgeHandler) DeleteItem(c *gin.Context) {
 	Success(c, nil)
 }
 
+func (h *KnowledgeHandler) QuarantineItem(c *gin.Context) {
+	id, ok := parseKnowledgeID(c, "id")
+	if !ok {
+		return
+	}
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Reason) == "" {
+		BadRequest(c, "quarantine reason is required")
+		return
+	}
+	if err := h.knowledgeSvc.QuarantineItem(c.Request.Context(), id, GetUserID(c), GetUsername(c), req.Reason); err != nil {
+		handleKnowledgeLifecycleError(c, err)
+		return
+	}
+	Success(c, nil)
+}
+
+func (h *KnowledgeHandler) RestoreItem(c *gin.Context) {
+	id, ok := parseKnowledgeID(c, "id")
+	if !ok {
+		return
+	}
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Reason) == "" {
+		BadRequest(c, "restore reason is required")
+		return
+	}
+	if err := h.knowledgeSvc.RestoreItem(c.Request.Context(), id, GetUserID(c), GetUsername(c), req.Reason); err != nil {
+		handleKnowledgeLifecycleError(c, err)
+		return
+	}
+	Success(c, nil)
+}
+
+func handleKnowledgeLifecycleError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, shared.ErrValidation):
+		BadRequest(c, "invalid knowledge lifecycle request")
+	case errors.Is(err, shared.ErrForbidden):
+		Forbidden(c, "official catalog items are managed by migrations")
+	case errors.Is(err, knowledgedomain.ErrItemNotFound):
+		NotFound(c, "knowledge item not found")
+	case errors.Is(err, knowledgedomain.ErrInvalidItemState):
+		Conflict(c, "knowledge item lifecycle state changed")
+	default:
+		InternalError(c, "failed to update knowledge item lifecycle")
+	}
+}
+
 func (h *KnowledgeHandler) ListItems(c *gin.Context) {
 	var categoryID *int64
 	if catIDStr := c.Query("category_id"); catIDStr != "" {
@@ -207,6 +292,23 @@ func (h *KnowledgeHandler) ListItems(c *gin.Context) {
 	Success(c, items)
 }
 
+func (h *KnowledgeHandler) Search(c *gin.Context) {
+	if h == nil || h.indexSvc == nil {
+		Error(c, http.StatusServiceUnavailable, 503, "knowledge retrieval is not configured")
+		return
+	}
+	items, err := h.indexSvc.Search(c.Request.Context(), c.Query("q"))
+	if err != nil {
+		if errors.Is(err, knowledgeindex.ErrInvalidQuery) {
+			BadRequest(c, "q is required and must be at most 512 characters")
+			return
+		}
+		InternalError(c, "failed to search knowledge")
+		return
+	}
+	Success(c, items)
+}
+
 func (h *KnowledgeHandler) GetItem(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -215,8 +317,12 @@ func (h *KnowledgeHandler) GetItem(c *gin.Context) {
 		return
 	}
 
-	item, err := h.knowledgeSvc.GetItem(c.Request.Context(), id)
+	item, err := h.knowledgeSvc.GetItem(c.Request.Context(), id, GetUserID(c), IsCaptain(c))
 	if err != nil {
+		if errors.Is(err, shared.ErrForbidden) {
+			Forbidden(c, "not allowed to access this item")
+			return
+		}
 		NotFound(c, "item not found")
 		return
 	}
@@ -273,6 +379,15 @@ func (h *KnowledgeHandler) ListPendingItems(c *gin.Context) {
 		return
 	}
 
+	Success(c, items)
+}
+
+func (h *KnowledgeHandler) ListQuarantinedItems(c *gin.Context) {
+	items, err := h.knowledgeSvc.ListQuarantinedItems(c.Request.Context())
+	if err != nil {
+		InternalError(c, "failed to list quarantined items")
+		return
+	}
 	Success(c, items)
 }
 
@@ -335,15 +450,10 @@ func (h *KnowledgeHandler) RejectItem(c *gin.Context) {
 	reviewerID := GetUserID(c)
 	reviewerName := GetUsername(c)
 
-	fileKey, err := h.knowledgeSvc.RejectItem(c.Request.Context(), id, reviewerID, reviewerName, req.Reason)
+	_, err = h.knowledgeSvc.RejectItem(c.Request.Context(), id, reviewerID, reviewerName, req.Reason)
 	if err != nil {
 		InternalError(c, "failed to reject item")
 		return
-	}
-
-	// Delete file from storage if it exists
-	if fileKey != "" {
-		h.storage.Delete(fileKey)
 	}
 
 	Success(c, nil)
@@ -357,8 +467,12 @@ func (h *KnowledgeHandler) DownloadFile(c *gin.Context) {
 		return
 	}
 
-	item, err := h.knowledgeSvc.GetItem(c.Request.Context(), id)
+	item, err := h.knowledgeSvc.GetItem(c.Request.Context(), id, GetUserID(c), IsCaptain(c))
 	if err != nil {
+		if errors.Is(err, shared.ErrForbidden) {
+			Forbidden(c, "not allowed to download this item")
+			return
+		}
 		NotFound(c, "item not found")
 		return
 	}
@@ -376,8 +490,144 @@ func (h *KnowledgeHandler) DownloadFile(c *gin.Context) {
 	}
 
 	// 使用 RFC 5987 编码处理中文文件名
-	encodedName := url.QueryEscape(item.Name)
-	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, item.Name, encodedName))
+	safeName := safeDownloadFilename(item.Name)
+	encodedName := url.QueryEscape(safeName)
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, safeName, encodedName))
 	c.Header("Content-Type", "application/octet-stream")
 	c.File(filePath)
+}
+
+// safeDownloadFilename keeps the fallback filename inside a quoted
+// Content-Disposition value. Control characters, quotes, and path separators
+// are replaced so a stored filename cannot inject headers or alter the path.
+func safeDownloadFilename(name string) string {
+	name = strings.TrimSpace(name)
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f || r == '"' || r == '\\' || r == '/' {
+			b.WriteByte('_')
+			continue
+		}
+		b.WriteRune(r)
+	}
+	name = strings.TrimSpace(b.String())
+	if name == "" || name == "." || name == ".." {
+		return "download"
+	}
+	return name
+}
+
+func (h *KnowledgeHandler) CreateInsight(c *gin.Context) {
+	itemID, ok := parseKnowledgeID(c, "id")
+	if !ok {
+		return
+	}
+	var req knowledge.CreateInsightRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid knowledge insight request")
+		return
+	}
+	item, err := h.knowledgeSvc.CreateInsight(c.Request.Context(), GetUserID(c), itemID, req)
+	if err != nil {
+		handleKnowledgeInsightError(c, err)
+		return
+	}
+	Created(c, item)
+}
+
+func (h *KnowledgeHandler) GetInsight(c *gin.Context) {
+	itemID, ok := parseKnowledgeID(c, "id")
+	if !ok {
+		return
+	}
+	item, err := h.knowledgeSvc.GetInsight(c.Request.Context(), itemID, GetUserID(c), IsCaptain(c))
+	if err != nil {
+		handleKnowledgeInsightError(c, err)
+		return
+	}
+	Success(c, item)
+}
+
+func (h *KnowledgeHandler) PublishInsight(c *gin.Context) {
+	insightID, ok := parseKnowledgeID(c, "id")
+	if !ok {
+		return
+	}
+	item, err := h.knowledgeSvc.PublishInsight(c.Request.Context(), GetUserID(c), insightID)
+	if err != nil {
+		handleKnowledgeInsightError(c, err)
+		return
+	}
+	Success(c, item)
+}
+
+func (h *KnowledgeHandler) InvalidateInsight(c *gin.Context) {
+	insightID, ok := parseKnowledgeID(c, "id")
+	if !ok {
+		return
+	}
+	if err := h.knowledgeSvc.InvalidateInsight(c.Request.Context(), insightID); err != nil {
+		handleKnowledgeInsightError(c, err)
+		return
+	}
+	Success(c, nil)
+}
+
+func (h *KnowledgeHandler) ListDueInsights(c *gin.Context) {
+	items, err := h.knowledgeSvc.ListDueInsights(c.Request.Context(), time.Now(), positiveQueryInt(c, "page", 1), positiveQueryInt(c, "page_size", 20))
+	if err != nil {
+		handleKnowledgeInsightError(c, err)
+		return
+	}
+	Success(c, items)
+}
+
+func (h *KnowledgeHandler) Recommend(c *gin.Context) {
+	query := c.Query("q")
+	items, err := h.knowledgeSvc.Recommend(c.Request.Context(), GetUserID(c), query)
+	if err != nil {
+		handleKnowledgeInsightError(c, err)
+		return
+	}
+	Success(c, items)
+}
+
+func (h *KnowledgeHandler) RecommendationFeedback(c *gin.Context) {
+	itemID, ok := parseKnowledgeID(c, "id")
+	if !ok {
+		return
+	}
+	var req knowledge.RecommendationFeedbackRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid recommendation feedback")
+		return
+	}
+	if err := h.knowledgeSvc.SaveRecommendationFeedback(c.Request.Context(), GetUserID(c), itemID, req); err != nil {
+		handleKnowledgeInsightError(c, err)
+		return
+	}
+	Success(c, nil)
+}
+
+func parseKnowledgeID(c *gin.Context, name string) (int64, bool) {
+	id, err := strconv.ParseInt(c.Param(name), 10, 64)
+	if err != nil || id <= 0 {
+		BadRequest(c, "invalid knowledge id")
+		return 0, false
+	}
+	return id, true
+}
+
+func handleKnowledgeInsightError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, shared.ErrForbidden):
+		Forbidden(c, "not allowed to access this knowledge insight")
+	case errors.Is(err, shared.ErrConflict):
+		Conflict(c, "knowledge source changed or insight state conflicts")
+	case errors.Is(err, shared.ErrValidation), errors.Is(err, knowledgedomain.ErrInvalidInsight):
+		BadRequest(c, "invalid knowledge insight request")
+	default:
+		NotFound(c, "knowledge insight not found")
+	}
 }

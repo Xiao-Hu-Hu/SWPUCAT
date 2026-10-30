@@ -37,6 +37,15 @@ import { RouterView } from 'vue-router'
   box-sizing: border-box;
 }
 
+/* Reserve the vertical scrollbar gutter at the document level so its width
+   never toggles. Otherwise a page that overflows the viewport shows a
+   page-level scrollbar that steals ~15px of width and pushes the whole UI
+   left, and switching between tall and short pages causes a horizontal jump.
+   `stable` keeps the same reserved gutter even when the page fits. */
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif;
   background: var(--bg-deep);

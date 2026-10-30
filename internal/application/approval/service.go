@@ -1,16 +1,17 @@
 package approval
 
 import (
-	"context"
 	"SWPUCAT/internal/domain/approval"
 	"SWPUCAT/internal/domain/knowledge"
 	"SWPUCAT/internal/domain/shared"
+	"context"
 )
 
 type ApprovalDTO struct {
 	ID           int64  `json:"id"`
 	FileName     string `json:"file_name"`
 	FileSize     string `json:"file_size"`
+	Description  string `json:"description,omitempty"`
 	CategoryID   int64  `json:"category_id"`
 	UploaderID   int64  `json:"uploader_id"`
 	UploaderName string `json:"uploader_name"`
@@ -36,8 +37,8 @@ func NewApprovalService(
 	}
 }
 
-func (s *ApprovalService) Submit(ctx context.Context, fileName, fileSize, fileKey string, categoryID, uploaderID int64, uploaderName string) (*ApprovalDTO, error) {
-	a := approval.NewApproval(fileName, fileSize, fileKey, categoryID, uploaderID, uploaderName)
+func (s *ApprovalService) Submit(ctx context.Context, fileName, fileSize, fileKey, description string, categoryID, uploaderID int64, uploaderName string) (*ApprovalDTO, error) {
+	a := approval.NewApproval(fileName, fileSize, fileKey, description, categoryID, uploaderID, uploaderName)
 	if err := s.approvalRepo.Create(ctx, a); err != nil {
 		return nil, err
 	}
@@ -54,10 +55,13 @@ func (s *ApprovalService) Approve(ctx context.Context, approvalID, reviewerID in
 		return err
 	}
 
-	item, _ := knowledge.NewFile(
-		a.FileName, "", a.FileSize, a.FileKey,
+	item, err := knowledge.NewFile(
+		a.FileName, a.Description, a.FileSize, a.FileKey,
 		a.CategoryID, a.UploaderID, a.UploaderName, true,
 	)
+	if err != nil {
+		return err
+	}
 	if err := s.knowledgeRepo.CreateItem(ctx, item); err != nil {
 		return err
 	}
@@ -101,6 +105,7 @@ func toDTO(a *approval.Approval) *ApprovalDTO {
 		ID:           a.ID,
 		FileName:     a.FileName,
 		FileSize:     a.FileSize,
+		Description:  a.Description,
 		CategoryID:   a.CategoryID,
 		UploaderID:   a.UploaderID,
 		UploaderName: a.UploaderName,

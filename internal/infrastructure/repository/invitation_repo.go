@@ -26,7 +26,12 @@ func (r *InvitationRepo) Create(ctx context.Context, code *invitation.Invitation
 		Used:      code.Used,
 		ExpiresAt: code.ExpiresAt,
 	}
-	return r.db.WithContext(ctx).Create(model).Error
+	if err := r.db.WithContext(ctx).Create(model).Error; err != nil {
+		return err
+	}
+	code.ID = model.ID
+	code.CreatedAt = model.CreatedAt
+	return nil
 }
 
 func (r *InvitationRepo) FindByCode(ctx context.Context, code string) (*invitation.InvitationCode, error) {
@@ -51,8 +56,8 @@ func (r *InvitationRepo) FindByCreatorID(ctx context.Context, creatorID int64) (
 
 func (r *InvitationRepo) Update(ctx context.Context, code *invitation.InvitationCode) error {
 	return r.db.WithContext(ctx).Model(&database.InvitationCodeModel{}).Where("id = ?", code.ID).Updates(map[string]interface{}{
-		"used":     code.Used,
-		"used_by":  code.UsedBy,
+		"used":    code.Used,
+		"used_by": code.UsedBy,
 	}).Error
 }
 

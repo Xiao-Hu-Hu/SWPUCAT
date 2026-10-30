@@ -2,6 +2,8 @@ package http
 
 import (
 	"SWPUCAT/internal/application/announcement"
+	"SWPUCAT/internal/domain/shared"
+	"errors"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -48,7 +50,11 @@ func (h *AnnouncementHandler) Update(c *gin.Context) {
 		return
 	}
 
-	if err := h.annSvc.Update(c.Request.Context(), id, req); err != nil {
+	if err := h.annSvc.Update(c.Request.Context(), GetUserID(c), id, req); err != nil {
+		if errors.Is(err, shared.ErrForbidden) {
+			Forbidden(c, "insufficient permissions")
+			return
+		}
 		InternalError(c, "failed to update announcement")
 		return
 	}
@@ -64,7 +70,11 @@ func (h *AnnouncementHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := h.annSvc.Delete(c.Request.Context(), id); err != nil {
+	if err := h.annSvc.Delete(c.Request.Context(), GetUserID(c), id); err != nil {
+		if errors.Is(err, shared.ErrForbidden) {
+			Forbidden(c, "insufficient permissions")
+			return
+		}
 		InternalError(c, "failed to delete announcement")
 		return
 	}
@@ -103,8 +113,12 @@ func (h *AnnouncementHandler) Notify(c *gin.Context) {
 		return
 	}
 
-	result, err := h.annSvc.NotifyMembers(c.Request.Context(), id, req.UserIDs)
+	result, err := h.annSvc.NotifyMembers(c.Request.Context(), GetUserID(c), id, req.UserIDs)
 	if err != nil {
+		if errors.Is(err, shared.ErrForbidden) {
+			Forbidden(c, "insufficient permissions")
+			return
+		}
 		InternalError(c, err.Error())
 		return
 	}

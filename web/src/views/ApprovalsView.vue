@@ -3,7 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { knowledgeApi } from '@/api/knowledge'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
-import { marked } from 'marked'
+import { renderMarkdown } from '@/utils/markdown'
 
 const authStore = useAuthStore()
 const items = ref<Array<{
@@ -96,7 +96,8 @@ async function handleDownloadFile(id: number, name: string) {
     const res = await knowledgeApi.downloadFile(id, (percent) => {
       downloading.value[id] = percent
     })
-    const url = window.URL.createObjectURL(new Blob([res]))
+    const blob = res instanceof Blob ? res : (res as any).data
+    const url = window.URL.createObjectURL(blob instanceof Blob ? blob : new Blob([blob]))
     const link = document.createElement('a')
     link.href = url
     link.setAttribute('download', name)
@@ -125,9 +126,6 @@ function openPreview(item: { name: string; description: string }) {
   showPreviewDialog.value = true
 }
 
-function renderMarkdown(md: string): string {
-  return marked.parse(md) as string
-}
 </script>
 
 <template>

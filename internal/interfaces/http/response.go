@@ -7,9 +7,10 @@ import (
 )
 
 type Response struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data,omitempty"`
+	Code     int         `json:"code"`
+	Message  string      `json:"message"`
+	Data     interface{} `json:"data,omitempty"`
+	Warnings []string    `json:"warnings,omitempty"`
 }
 
 func Success(c *gin.Context, data interface{}) {
@@ -25,6 +26,18 @@ func Created(c *gin.Context, data interface{}) {
 		Code:    0,
 		Message: "created",
 		Data:    data,
+	})
+}
+
+// CreatedWithWarnings mirrors Created but attaches non-blocking advisory
+// warnings (e.g. a description that is too short to index well). The request
+// still succeeded; warnings are informational only.
+func CreatedWithWarnings(c *gin.Context, data interface{}, warnings []string) {
+	c.JSON(http.StatusCreated, Response{
+		Code:     0,
+		Message:  "created",
+		Data:     data,
+		Warnings: warnings,
 	})
 }
 

@@ -25,7 +25,13 @@ func (r *AnnouncementRepo) Create(ctx context.Context, a *announcement.Announcem
 		AuthorName: a.AuthorName,
 		Pinned:     a.Pinned,
 	}
-	return r.db.WithContext(ctx).Create(model).Error
+	if err := r.db.WithContext(ctx).Create(model).Error; err != nil {
+		return err
+	}
+	a.ID = model.ID
+	a.CreatedAt = model.CreatedAt
+	a.UpdatedAt = model.UpdatedAt
+	return nil
 }
 
 func (r *AnnouncementRepo) FindByID(ctx context.Context, id int64) (*announcement.Announcement, error) {

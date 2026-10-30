@@ -1,4 +1,9 @@
-web/node_modules
-web/dist
 .git
 .env
+.gocache
+.tmp-go-cache
+backups
+web
+*.dump
+*.tar
+*.tar.gz

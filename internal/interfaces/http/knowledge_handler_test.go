@@ -27,6 +27,14 @@ type uploadRepository struct {
 	err  error
 }
 
+type lifecycleNotFoundRepository struct {
+	domain.Repository
+}
+
+func (*lifecycleNotFoundRepository) FindItemByID(context.Context, int64) (*domain.KnowledgeItem, error) {
+	return nil, domain.ErrItemNotFound
+}
+
 func (r *uploadRepository) CreateItem(_ context.Context, item *domain.KnowledgeItem) error {
 	if r.err != nil {
 		return r.err
@@ -50,6 +58,34 @@ func uploadFixture(t *testing.T) (*KnowledgeHandler, *uploadRepository, string) 
 	repo := &uploadRepository{}
 	h := NewKnowledgeHandler(app.NewKnowledgeService(repo, event.NewNoOpPublisher()), store)
 	return h, repo, dir
+}
+
+func TestKnowledgeLifecycleHandlersReturnNotFound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewKnowledgeHandler(
+		app.NewKnowledgeService(&lifecycleNotFoundRepository{}, event.NewNoOpPublisher()),
+		nil,
+	)
+	router := gin.New()
+	withActor := func(next gin.HandlerFunc) gin.HandlerFunc {
+		return func(c *gin.Context) {
+			c.Set(ContextUserID, int64(1))
+			c.Set(ContextUsername, "测试队长")
+			next(c)
+		}
+	}
+	router.POST("/items/:id/quarantine", withActor(handler.QuarantineItem))
+	router.POST("/items/:id/restore", withActor(handler.RestoreItem))
+
+	for _, path := range []string{"/items/999/quarantine", "/items/999/restore"} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"reason":"复核不存在的条目"}`))
+		request.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want %d: %s", path, recorder.Code, http.StatusNotFound, recorder.Body.String())
+		}
+	}
 }
 
 func multipartRequest(t *testing.T, fieldsFirst bool, category, description string, files int) *http.Request {
@@ -141,6 +177,48 @@ func TestUploadAndDownloadWithEitherFieldOrder(t *testing.T) {
 	}
 }
 
+func TestSafeDownloadFilename(t *testing.T) {
+	for _, tc := range []struct {
+		name, input, want string
+	}{
+		{name: "normal", input: "资料.pdf", want: "资料.pdf"},
+		{name: "header controls and quote", input: "恶意\"\r\nX-Injected: yes.pdf", want: "恶意___X-Injected: yes.pdf"},
+		{name: "path separators", input: `..\\secret/file.pdf`, want: "..__secret_file.pdf"},
+		{name: "empty", input: " \r\n ", want: "download"},
+		{name: "dot names", input: ".", want: "download"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := safeDownloadFilename(tc.input); got != tc.want {
+				t.Fatalf("safeDownloadFilename(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDownloadFilenameHeaderIsSanitized(t *testing.T) {
+	h, repo, _ := uploadFixture(t)
+	r := uploadRouter(h)
+	res := httptest.NewRecorder()
+	r.ServeHTTP(res, multipartRequest(t, true, "2", "", 1))
+	if res.Code != http.StatusCreated {
+		t.Fatalf("upload: %d %s", res.Code, res.Body.String())
+	}
+	repo.item.Name = "恶意\"\r\nX-Injected: yes.pdf"
+
+	res = httptest.NewRecorder()
+	r.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/download/1", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("download: %d %s", res.Code, res.Body.String())
+	}
+	header := res.Header().Get("Content-Disposition")
+	if strings.ContainsAny(header, "\r\n") {
+		t.Fatalf("content-disposition contains a control line break: %q", header)
+	}
+	if !strings.Contains(header, `filename="恶意___X-Injected: yes.pdf"`) {
+		t.Fatalf("sanitized fallback filename missing from header: %q", header)
+	}
+}
+
 func TestInvalidUploadsLeaveNoFilesOrRecords(t *testing.T) {
 	for _, tc := range []struct {
 		name, category, description string
@@ -148,8 +226,8 @@ func TestInvalidUploadsLeaveNoFilesOrRecords(t *testing.T) {
 	}{
 		{"invalid-late-category", "invalid", "", 1},
 		{"missing-category", "", "", 1},
-		{"oversized-late-field", "2", strings.Repeat("x", 4097), 1},
-		{"description-too-long", "2", strings.Repeat("中", 1001), 1},
+		{"oversized-late-field", "2", strings.Repeat("x", maxKnowledgeMetadataFieldSize+1), 1},
+		{"description-too-long", "2", strings.Repeat("中", maxKnowledgeDescriptionRunes+1), 1},
 		{"duplicate-file", "2", "", 2},
 		{"missing-file", "2", "", 0},
 	} {

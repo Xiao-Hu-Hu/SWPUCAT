@@ -4,6 +4,15 @@ import "context"
 
 type Repository interface {
 	Create(ctx context.Context, record *CheckinRecord) error
+	// CreateTransition atomically validates the user's latest attendance state and
+	// persists the requested transition. The boolean is false when an
+	// idempotency key replays an existing result. Implementations must serialize
+	// transitions for the same user to prevent concurrent duplicate records.
+	CreateTransition(ctx context.Context, record *CheckinRecord, idempotencyKey string) (created bool, err error)
+	// CreateMakeup persists a single makeup record that adds a fixed amount of
+	// work minutes instead of fabricating a live in/out pair.
+	CreateMakeup(ctx context.Context, record *CheckinRecord) error
+	RunAutoClockOut(ctx context.Context, date, clockOutTime string) (processed int, skipped bool, err error)
 	FindByUserID(ctx context.Context, userID int64) ([]*CheckinRecord, error)
 	FindByUserIDAndDate(ctx context.Context, userID int64, date string) ([]*CheckinRecord, error)
 	FindByUserIDAndDateRange(ctx context.Context, userID int64, startDate, endDate string) ([]*CheckinRecord, error)

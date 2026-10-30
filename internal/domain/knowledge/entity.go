@@ -1,6 +1,9 @@
 package knowledge
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type Category struct {
 	ID        int64
@@ -10,23 +13,39 @@ type Category struct {
 }
 
 type KnowledgeItem struct {
-	ID           int64
-	Type         ItemType
-	Name         string
-	Description  string
-	URL          string
-	FileKey      string
-	FileSize     string
-	CategoryID   int64
-	UploaderID   int64
-	UploaderName string
-	Approved     bool
-	Rejected     bool
-	RejectReason string
-	ReviewerID   int64
-	ReviewerName string
-	CreatedAt    time.Time
+	ID                   int64
+	Type                 ItemType
+	Name                 string
+	Description          string
+	URL                  string
+	FileKey              string
+	FileSize             string
+	CategoryID           int64
+	CategoryName         string
+	UploaderID           int64
+	UploaderName         string
+	Status               ItemStatus
+	Approved             bool
+	Rejected             bool
+	RejectReason         string
+	ReviewerID           int64
+	ReviewerName         string
+	SourceOrigin         string
+	SourceKey            string
+	Revision             int
+	QuarantinedAt        *time.Time
+	QuarantinedBy        int64
+	QuarantineReasonCode string
+	QuarantineReason     string
+	DeletedAt            *time.Time
+	DeletedBy            int64
+	CreatedAt            time.Time
 }
+
+const (
+	SourceOriginUser            = "user"
+	SourceOriginOfficialCatalog = "official_catalog"
+)
 
 func NewLink(name, url, description string, categoryID, uploaderID int64, uploaderName string) (*KnowledgeItem, error) {
 	if name == "" {
@@ -43,7 +62,10 @@ func NewLink(name, url, description string, categoryID, uploaderID int64, upload
 		CategoryID:   categoryID,
 		UploaderID:   uploaderID,
 		UploaderName: uploaderName,
+		Status:       ItemStatusApproved,
 		Approved:     true,
+		SourceOrigin: SourceOriginUser,
+		Revision:     1,
 		CreatedAt:    time.Now(),
 	}, nil
 }
@@ -51,6 +73,10 @@ func NewLink(name, url, description string, categoryID, uploaderID int64, upload
 func NewFile(name, description, fileSize, fileKey string, categoryID, uploaderID int64, uploaderName string, approved bool) (*KnowledgeItem, error) {
 	if name == "" {
 		return nil, ErrEmptyItemName
+	}
+	status := ItemStatusPending
+	if approved {
+		status = ItemStatusApproved
 	}
 	return &KnowledgeItem{
 		Type:         ItemTypeFile,
@@ -61,15 +87,107 @@ func NewFile(name, description, fileSize, fileKey string, categoryID, uploaderID
 		CategoryID:   categoryID,
 		UploaderID:   uploaderID,
 		UploaderName: uploaderName,
+		Status:       status,
 		Approved:     approved,
+		SourceOrigin: SourceOriginUser,
+		Revision:     1,
 		CreatedAt:    time.Now(),
 	}, nil
 }
 
 func (k *KnowledgeItem) Approve() {
-	k.Approved = true
+	k.RejectReason = ""
+	k.SetStatus(ItemStatusApproved)
+}
+
+func (k *KnowledgeItem) Reject(reason string) {
+	k.RejectReason = reason
+	k.SetStatus(ItemStatusRejected)
+}
+
+func (k *KnowledgeItem) MarkDeleted(deletedBy int64) {
+	now := time.Now()
+	k.DeletedAt = &now
+	k.DeletedBy = deletedBy
+	k.SetStatus(ItemStatusDeleted)
+}
+
+func (k *KnowledgeItem) Quarantine(actorID int64, reasonCode, reason string) error {
+	reasonCode = strings.TrimSpace(reasonCode)
+	reason = strings.TrimSpace(reason)
+	if k == nil || k.EffectiveStatus() != ItemStatusApproved || actorID <= 0 || reasonCode == "" || reason == "" {
+		return ErrInvalidItemState
+	}
+	now := time.Now()
+	k.QuarantinedAt = &now
+	k.QuarantinedBy = actorID
+	k.QuarantineReasonCode = reasonCode
+	k.QuarantineReason = reason
+	k.SetStatus(ItemStatusQuarantined)
+	return nil
+}
+
+func (k *KnowledgeItem) RestoreFromQuarantine(actorID int64, reason string) error {
+	if k == nil || k.EffectiveStatus() != ItemStatusQuarantined || actorID <= 0 || strings.TrimSpace(reason) == "" {
+		return ErrInvalidItemState
+	}
+	k.QuarantinedAt = nil
+	k.QuarantinedBy = 0
+	k.QuarantineReasonCode = ""
+	k.QuarantineReason = ""
+	k.SetStatus(ItemStatusApproved)
+	return nil
+}
+
+func (k *KnowledgeItem) SetStatus(status ItemStatus) {
+	k.Status = status
+	switch status {
+	case ItemStatusApproved:
+		k.Approved = true
+		k.Rejected = false
+	case ItemStatusRejected:
+		k.Approved = false
+		k.Rejected = true
+	case ItemStatusPending, ItemStatusQuarantined, ItemStatusDeleted:
+		k.Approved = false
+		k.Rejected = false
+	}
+}
+
+func (k *KnowledgeItem) EffectiveStatus() ItemStatus {
+	if k.Status.IsValid() {
+		return k.Status
+	}
+	if k.Rejected {
+		return ItemStatusRejected
+	}
+	if k.Approved {
+		return ItemStatusApproved
+	}
+	return ItemStatusPending
+}
+
+func (k *KnowledgeItem) IsDeleted() bool {
+	return k.EffectiveStatus() == ItemStatusDeleted
 }
 
 func (k *KnowledgeItem) IsOwnedBy(userID int64) bool {
 	return k.UploaderID == userID
+}
+
+func (k *KnowledgeItem) IsOfficial() bool {
+	return k.SourceOrigin == SourceOriginOfficialCatalog && k.SourceKey != ""
+}
+
+func (k *KnowledgeItem) IsVisibleTo(viewerID int64, canReview bool) bool {
+	if k.IsDeleted() {
+		return false
+	}
+	if k.EffectiveStatus() == ItemStatusQuarantined {
+		return canReview
+	}
+	if canReview || k.IsOwnedBy(viewerID) {
+		return true
+	}
+	return k.EffectiveStatus() == ItemStatusApproved
 }

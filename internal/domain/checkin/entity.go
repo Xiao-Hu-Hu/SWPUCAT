@@ -5,11 +5,14 @@ import (
 )
 
 type CheckinRecord struct {
-	ID        int64
-	UserID    int64
-	Type      CheckinType
-	Date      string
-	Time      string
+	ID     int64
+	UserID int64
+	Type   CheckinType
+	Date   string
+	Time   string
+	// Minutes carries the compensated duration for a makeup record; it is 0 for
+	// live in/out records, whose duration is derived from the paired times.
+	Minutes   int
 	CreatedAt time.Time
 }
 

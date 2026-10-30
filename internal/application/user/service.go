@@ -22,9 +22,9 @@ type PasswordHasher interface {
 }
 
 type JWTService interface {
-	GenerateAccessToken(userID int64, username, role, studentID string) (string, int64, error)
-	GenerateRefreshToken(userID int64) (string, error)
-	ParseRefreshToken(tokenString string) (int64, error)
+	GenerateAccessToken(userID int64, username, role, studentID string, authVersion int64) (string, int64, error)
+	GenerateRefreshToken(userID, authVersion int64) (string, error)
+	ParseRefreshToken(tokenString string) (int64, int64, error)
 }
 
 type EmailService interface {
@@ -41,14 +41,19 @@ type InvitationCodeRepository interface {
 	Update(ctx context.Context, code *invitation.InvitationCode) error
 }
 
+type RegistrationRepository interface {
+	CreateUserAndUseInvitation(ctx context.Context, u *user.User, invitationID int64) error
+}
+
 type UserApplicationService struct {
-	userRepo     user.Repository
-	hasher       PasswordHasher
-	jwtSvc       JWTService
-	publisher    shared.EventPublisher
-	emailSvc     EmailService
-	codeRepo     VerificationCodeRepository
-	invitationRepo InvitationCodeRepository
+	userRepo         user.Repository
+	hasher           PasswordHasher
+	jwtSvc           JWTService
+	publisher        shared.EventPublisher
+	emailSvc         EmailService
+	codeRepo         VerificationCodeRepository
+	invitationRepo   InvitationCodeRepository
+	registrationRepo RegistrationRepository
 }
 
 func NewUserApplicationService(
@@ -59,15 +64,17 @@ func NewUserApplicationService(
 	emailSvc EmailService,
 	codeRepo VerificationCodeRepository,
 	invitationRepo InvitationCodeRepository,
+	registrationRepo RegistrationRepository,
 ) *UserApplicationService {
 	return &UserApplicationService{
-		userRepo:       userRepo,
-		hasher:         hasher,
-		jwtSvc:         jwtSvc,
-		publisher:      publisher,
-		emailSvc:       emailSvc,
-		codeRepo:       codeRepo,
-		invitationRepo: invitationRepo,
+		userRepo:         userRepo,
+		hasher:           hasher,
+		jwtSvc:           jwtSvc,
+		publisher:        publisher,
+		emailSvc:         emailSvc,
+		codeRepo:         codeRepo,
+		invitationRepo:   invitationRepo,
+		registrationRepo: registrationRepo,
 	}
 }
 
@@ -158,15 +165,10 @@ func (s *UserApplicationService) Register(ctx context.Context, req RegisterReque
 	u := user.NewUserWithStudentID(studentID, req.Email, nickname, user.PasswordHash(hashedPassword))
 	u.Role = role
 
-	if err := s.userRepo.Create(ctx, u); err != nil {
-		return nil, err
+	if s.registrationRepo == nil {
+		return nil, fmt.Errorf("registration transaction is not configured")
 	}
-
-	// Mark invitation code as used
-	if err := invCode.Use(u.ID); err != nil {
-		return nil, err
-	}
-	if err := s.invitationRepo.Update(ctx, invCode); err != nil {
+	if err := s.registrationRepo.CreateUserAndUseInvitation(ctx, u, invCode.ID); err != nil {
 		return nil, err
 	}
 
@@ -189,6 +191,9 @@ func (s *UserApplicationService) Login(ctx context.Context, req LoginRequest) (*
 	if err != nil {
 		return nil, user.ErrInvalidCredentials
 	}
+	if !u.IsActive() {
+		return nil, user.ErrInvalidCredentials
+	}
 
 	if err := s.hasher.Verify(string(u.PasswordHash), req.Password); err != nil {
 		return nil, user.ErrInvalidCredentials
@@ -198,7 +203,7 @@ func (s *UserApplicationService) Login(ctx context.Context, req LoginRequest) (*
 }
 
 func (s *UserApplicationService) RefreshToken(ctx context.Context, refreshToken string) (*LoginResponse, error) {
-	userID, err := s.jwtSvc.ParseRefreshToken(refreshToken)
+	userID, authVersion, err := s.jwtSvc.ParseRefreshToken(refreshToken)
 	if err != nil {
 		return nil, err
 	}
@@ -206,6 +211,9 @@ func (s *UserApplicationService) RefreshToken(ctx context.Context, refreshToken 
 	u, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
 		return nil, err
+	}
+	if !u.IsActive() || u.AuthVersion != authVersion {
+		return nil, shared.ErrUnauthorized
 	}
 
 	return s.generateTokens(u)
@@ -216,9 +224,15 @@ func (s *UserApplicationService) TransferCaptain(ctx context.Context, operatorID
 	if err != nil {
 		return err
 	}
+	if !operator.IsActive() || !operator.Role.IsCaptain() {
+		return shared.ErrForbidden
+	}
 	target, err := s.userRepo.FindByID(ctx, targetID)
 	if err != nil {
 		return err
+	}
+	if !target.IsActive() {
+		return shared.ErrForbidden
 	}
 
 	if err := s.verifyCode(ctx, operator.Email, verificationCode); err != nil {
@@ -241,11 +255,18 @@ func (s *UserApplicationService) TransferCaptain(ctx context.Context, operatorID
 }
 
 func (s *UserApplicationService) RemoveMember(ctx context.Context, operatorID, userID int64) error {
+	operator, err := s.userRepo.FindByID(ctx, operatorID)
+	if err != nil {
+		return err
+	}
+	if !operator.IsActive() || (!operator.Role.IsCaptain() && !operator.Role.IsSuperAdmin()) || operatorID == userID {
+		return shared.ErrForbidden
+	}
 	target, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
 		return err
 	}
-	if target.IsCaptain() {
+	if !target.IsActive() || target.IsCaptain() || target.Role.IsSuperAdmin() {
 		return user.ErrCannotRemoveCaptain
 	}
 
@@ -346,11 +367,11 @@ func (s *UserApplicationService) ListMembers(ctx context.Context) ([]MemberDTO, 
 }
 
 func (s *UserApplicationService) generateTokens(u *user.User) (*LoginResponse, error) {
-	accessToken, expiresIn, err := s.jwtSvc.GenerateAccessToken(u.ID, string(u.Nickname), string(u.Role), string(u.StudentID))
+	accessToken, expiresIn, err := s.jwtSvc.GenerateAccessToken(u.ID, string(u.Nickname), string(u.Role), string(u.StudentID), u.AuthVersion)
 	if err != nil {
 		return nil, err
 	}
-	refreshToken, err := s.jwtSvc.GenerateRefreshToken(u.ID)
+	refreshToken, err := s.jwtSvc.GenerateRefreshToken(u.ID, u.AuthVersion)
 	if err != nil {
 		return nil, err
 	}

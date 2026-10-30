@@ -56,6 +56,15 @@ export const knowledgeApi = {
   listPendingItems() {
     return api.get('/knowledge/items/pending')
   },
+  listQuarantinedItems() {
+    return api.get('/knowledge/items/quarantined')
+  },
+  quarantineItem(id: number, reason: string) {
+    return api.post(`/knowledge/items/${id}/quarantine`, { reason })
+  },
+  restoreItem(id: number, reason: string) {
+    return api.post(`/knowledge/items/${id}/restore`, { reason })
+  },
   approveItem(id: number) {
     return api.put(`/knowledge/items/${id}/approve`)
   },

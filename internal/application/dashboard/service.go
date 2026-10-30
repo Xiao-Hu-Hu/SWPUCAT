@@ -1,11 +1,11 @@
 package dashboard
 
 import (
-	"context"
 	"SWPUCAT/internal/domain/announcement"
 	"SWPUCAT/internal/domain/checkin"
 	"SWPUCAT/internal/domain/knowledge"
 	"SWPUCAT/internal/domain/user"
+	"context"
 	"time"
 )
 
@@ -76,9 +76,10 @@ func (s *DashboardService) GetDashboard(ctx context.Context) (*DashboardDTO, err
 	checkedIn := make(map[int64]bool)
 	checkedOut := make(map[int64]bool)
 	for _, r := range todayRecords {
-		if r.Type == checkin.CheckinTypeIn {
+		switch r.Type {
+		case checkin.CheckinTypeIn:
 			checkedIn[r.UserID] = true
-		} else {
+		case checkin.CheckinTypeOut:
 			checkedOut[r.UserID] = true
 		}
 	}

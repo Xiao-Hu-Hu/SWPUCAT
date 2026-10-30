@@ -1,23 +1,48 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:0.8.6-pg16-bookworm
     container_name: swpucat-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: csa
-      POSTGRES_PASSWORD: csa_password
-      POSTGRES_DB: csa_db
-      TZ: Asia/Shanghai
+      POSTGRES_USER: ${CSA_DATABASE_USER:?set CSA_DATABASE_USER in .env}
+      POSTGRES_PASSWORD: ${CSA_DATABASE_PASSWORD:?set CSA_DATABASE_PASSWORD in .env}
+      POSTGRES_DB: ${CSA_DATABASE_DBNAME:?set CSA_DATABASE_DBNAME in .env}
+      TZ: ${TZ:-Asia/Shanghai}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ../migrations:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U csa -d csa_db"]
+      test:
+        [
+          "CMD-SHELL",
+          "PGPASSWORD=\"$${POSTGRES_PASSWORD}\" psql -h 127.0.0.1 -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\" -tAc 'SELECT 1' >/dev/null",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  migrate:
+    image: swpucat-server
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+    container_name: swpucat-migrate
+    restart: "no"
+    environment:
+      CSA_DATABASE_HOST: postgres
+      CSA_DATABASE_PORT: 5432
+      CSA_DATABASE_USER: ${CSA_DATABASE_USER:?set CSA_DATABASE_USER in .env}
+      CSA_DATABASE_PASSWORD: ${CSA_DATABASE_PASSWORD:?set CSA_DATABASE_PASSWORD in .env}
+      CSA_DATABASE_DBNAME: ${CSA_DATABASE_DBNAME:?set CSA_DATABASE_DBNAME in .env}
+      CSA_DATABASE_SSLMODE: ${CSA_DATABASE_SSLMODE:-disable}
+      CSA_MIGRATIONS_DIR: /app/migrations
+      CSA_MIGRATION_BASELINE: ${CSA_MIGRATION_BASELINE:-false}
+      TZ: ${TZ:-Asia/Shanghai}
+    command: ["./migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   server:
     image: swpucat-server
@@ -26,42 +51,133 @@ services:
       dockerfile: deployments/Dockerfile
     container_name: swpucat-server
     restart: unless-stopped
-    env_file:
-      - ../.env
     environment:
       CSA_DATABASE_HOST: postgres
       CSA_DATABASE_PORT: 5432
-      CSA_DATABASE_USER: csa
-      CSA_DATABASE_PASSWORD: csa_password
-      CSA_DATABASE_DBNAME: csa_db
+      CSA_DATABASE_USER: ${CSA_DATABASE_USER:?set CSA_DATABASE_USER in .env}
+      CSA_DATABASE_PASSWORD: ${CSA_DATABASE_PASSWORD:?set CSA_DATABASE_PASSWORD in .env}
+      CSA_DATABASE_DBNAME: ${CSA_DATABASE_DBNAME:?set CSA_DATABASE_DBNAME in .env}
+      CSA_DATABASE_SSLMODE: ${CSA_DATABASE_SSLMODE:-disable}
+      CSA_DATABASE_MAX_OPEN_CONNS: ${CSA_DATABASE_MAX_OPEN_CONNS:-15}
+      CSA_DATABASE_MAX_IDLE_CONNS: ${CSA_DATABASE_MAX_IDLE_CONNS:-3}
+      CSA_JWT_ACCESS_SECRET: ${CSA_JWT_ACCESS_SECRET:?set CSA_JWT_ACCESS_SECRET in .env}
+      CSA_JWT_REFRESH_SECRET: ${CSA_JWT_REFRESH_SECRET:?set CSA_JWT_REFRESH_SECRET in .env}
       CSA_STORAGE_UPLOAD_DIR: /app/uploads
-      TZ: Asia/Shanghai
+      CSA_SERVER_MODE: ${CSA_SERVER_MODE:-release}
+      CSA_LOG_LEVEL: ${CSA_LOG_LEVEL:-info}
+      CSA_AGENT_ENABLED: ${CSA_AGENT_ENABLED:-false}
+      CSA_AGENT_WRITE_ENABLED: ${CSA_AGENT_WRITE_ENABLED:-false}
+      CSA_AGENT_BASE_URL: http://agent:8090
+      CSA_AGENT_INTERNAL_SECRET: ${CSA_AGENT_INTERNAL_SECRET:-}
+      CSA_AGENT_CONVERSATION_RETENTION_DAYS: ${CSA_AGENT_CONVERSATION_RETENTION_DAYS:-0}
+      CSA_EMAIL_SMTP_HOST: ${CSA_EMAIL_SMTP_HOST:-}
+      CSA_EMAIL_SMTP_PORT: ${CSA_EMAIL_SMTP_PORT:-587}
+      CSA_EMAIL_USERNAME: ${CSA_EMAIL_USERNAME:-}
+      CSA_EMAIL_PASSWORD: ${CSA_EMAIL_PASSWORD:-}
+      CSA_EMAIL_FROM: ${CSA_EMAIL_FROM:-}
+      CSA_EMBEDDING_ENABLED: ${CSA_EMBEDDING_ENABLED:-false}
+      CSA_EMBEDDING_PROVIDER: ${CSA_EMBEDDING_PROVIDER:-openai_compatible}
+      CSA_EMBEDDING_MODEL: ${CSA_EMBEDDING_MODEL:-}
+      CSA_EMBEDDING_API_KEY: ${CSA_EMBEDDING_API_KEY:-}
+      CSA_EMBEDDING_BASE_URL: ${CSA_EMBEDDING_BASE_URL:-}
+      CSA_EMBEDDING_DIMENSIONS: ${CSA_EMBEDDING_DIMENSIONS:-1024}
+      CSA_EMBEDDING_BATCH_SIZE: ${CSA_EMBEDDING_BATCH_SIZE:-16}
+      CSA_EMBEDDING_TIMEOUT: ${CSA_EMBEDDING_TIMEOUT:-30s}
+      CSA_RETRIEVAL_MODE: ${CSA_RETRIEVAL_MODE:-keyword}
+      CSA_RETRIEVAL_CANDIDATE_LIMIT: ${CSA_RETRIEVAL_CANDIDATE_LIMIT:-20}
+      CSA_RETRIEVAL_FINAL_LIMIT: ${CSA_RETRIEVAL_FINAL_LIMIT:-8}
+      CSA_RETRIEVAL_MIN_VECTOR_SCORE: ${CSA_RETRIEVAL_MIN_VECTOR_SCORE:-0.3}
+      CSA_RETRIEVAL_CHUNK_RUNES: ${CSA_RETRIEVAL_CHUNK_RUNES:-600}
+      CSA_RETRIEVAL_CHUNK_OVERLAP_RUNES: ${CSA_RETRIEVAL_CHUNK_OVERLAP_RUNES:-80}
+      CSA_RETRIEVAL_MAX_CHUNKS: ${CSA_RETRIEVAL_MAX_CHUNKS:-10000}
+      CSA_RETRIEVAL_MAX_EXTRACTED_RUNES: ${CSA_RETRIEVAL_MAX_EXTRACTED_RUNES:-500000}
+      CSA_RETRIEVAL_WORKER_INTERVAL: ${CSA_RETRIEVAL_WORKER_INTERVAL:-5s}
+      TZ: ${TZ:-Asia/Shanghai}
     ports:
       - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
     volumes:
       - uploads_data:/app/uploads
     depends_on:
-      postgres:
+      migrate:
+        condition: service_completed_successfully
+      agent:
         condition: service_healthy
+
+  agent:
+    image: swpucat-server
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+    container_name: swpucat-agent
+    restart: unless-stopped
+    environment:
+      CSA_AGENT_ENABLED: ${CSA_AGENT_ENABLED:-false}
+      CSA_AGENT_WRITE_ENABLED: ${CSA_AGENT_WRITE_ENABLED:-false}
+      CSA_AGENT_PORT: 8090
+      CSA_SERVER_INTERNAL_URL: http://server:8080
+      CSA_AGENT_INTERNAL_SECRET: ${CSA_AGENT_INTERNAL_SECRET:-}
+      CSA_LLM_PROVIDER: ${CSA_LLM_PROVIDER:-openai_compatible}
+      CSA_LLM_MODEL: ${CSA_LLM_MODEL:-}
+      CSA_LLM_API_KEY: ${CSA_LLM_API_KEY:-}
+      CSA_LLM_BASE_URL: ${CSA_LLM_BASE_URL:-}
+      CSA_LLM_TIMEOUT: ${CSA_LLM_TIMEOUT:-60s}
+      CSA_AGENT_MAX_ITERATIONS: ${CSA_AGENT_MAX_ITERATIONS:-4}
+      CSA_AGENT_MAX_TOOL_CALLS: ${CSA_AGENT_MAX_TOOL_CALLS:-8}
+      CSA_AGENT_WORKER_CONCURRENCY: ${CSA_AGENT_WORKER_CONCURRENCY:-4}
+      CSA_AGENT_QUEUE_WAIT_TIMEOUT: ${CSA_AGENT_QUEUE_WAIT_TIMEOUT:-5s}
+      CSA_AGENT_EXECUTION_TIMEOUT: ${CSA_AGENT_EXECUTION_TIMEOUT:-180s}
+      CSA_SERVER_MODE: ${CSA_SERVER_MODE:-release}
+      TZ: ${TZ:-Asia/Shanghai}
+    # Agent is an internal service. The server reaches it over the Compose
+    # network; do not expose the model/tool endpoint on the host interface.
+    expose:
+      - "8090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8090/healthz >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    command: ["./agent"]
 
   web:
     image: node:20-alpine
     container_name: swpucat-web
+    # 前端已在生产由宿主机 nginx 托管 /opt/SWPUCAT/web/dist，
+    # web 容器仅用于本地开发（Vite 热更新）。
+    # 生产 `up -d` 不会启动它；需要时用 `docker compose --profile dev up -d web`。
+    profiles: ["dev"]
     restart: unless-stopped
     working_dir: /app
-    volumes:
-      - ../web:/app
     ports:
       - "3000:3000"
-    command: sh -c "npm install && npm run dev"
+    command: sh -c "npm ci && npm run dev"
     environment:
-      - NODE_ENV=development
+      NODE_ENV: development
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      - ../web:/app
+      - web_node_modules:/app/node_modules
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3000/ >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
 
 volumes:
   postgres_data:
     name: swpucat_postgres_data
   uploads_data:
     name: swpucat_uploads_data
+  web_node_modules:
+    name: swpucat_web_node_modules
 
 networks:
   default:

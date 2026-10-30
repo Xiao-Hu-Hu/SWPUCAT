@@ -1,6 +1,6 @@
 server:
   port: 8080
-  mode: debug
+  mode: release
   read_timeout: 10s
   write_timeout: 10s
 
@@ -8,9 +8,11 @@ database:
   host: localhost
   port: 5432
   user: csa
-  password: csa_password
+  password: ""
   dbname: csa_db
   sslmode: disable
+  max_open_conns: 15
+  max_idle_conns: 3
 
 redis:
   addr: localhost:6379
@@ -18,11 +20,58 @@ redis:
   db: 0
 
 jwt:
-  access_secret: dev-access-secret-change-in-production
-  refresh_secret: dev-refresh-secret-change-in-production
+  access_secret: ""
+  refresh_secret: ""
   access_expiry: 24h
   refresh_expiry: 720h
 
 log:
-  level: debug
+  level: info
   format: console
+
+agent:
+  enabled: false
+  write_enabled: false
+  port: 8090
+  base_url: http://localhost:8090
+  server_url: http://localhost:8080
+  internal_secret: ""
+  llm_provider: openai_compatible
+  llm_model: ""
+  llm_api_key: ""
+  llm_base_url: ""
+  llm_timeout: 60s
+  max_iterations: 4
+  max_tool_calls: 8
+  worker_concurrency: 4
+  queue_wait_timeout: 5s
+  execution_timeout: 180s
+  # 0 disables destructive cleanup. Use cmd/conversation_cleanup to preview or execute.
+  conversation_retention_days: 0
+  cost_estimation_enabled: false
+  input_usd_per_million: 0
+  cached_input_usd_per_million: 0
+  output_usd_per_million: 0
+
+embedding:
+  enabled: false
+  provider: openai_compatible
+  model: ""
+  api_key: ""
+  base_url: ""
+  dimensions: 1024
+  batch_size: 16
+  timeout: 30s
+
+retrieval:
+  mode: keyword
+  candidate_limit: 20
+  final_limit: 8
+  min_vector_score: 0.3
+  chunk_runes: 600
+  chunk_overlap_runes: 80
+  description_chunk_runes: 1000
+  description_chunk_overlap_runes: 0
+  max_chunks: 10000
+  max_extracted_runes: 500000
+  worker_interval: 5s

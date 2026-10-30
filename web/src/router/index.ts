@@ -20,6 +20,16 @@ const router = createRouter({
           component: () => import('@/views/CheckinView.vue')
         },
         {
+          path: 'agent',
+          name: 'agent',
+          component: () => import('@/views/AgentView.vue')
+        },
+        {
+          path: 'agent-audits',
+          name: 'agent-audits',
+          component: () => import('@/views/AgentAuditView.vue')
+        },
+        {
           path: 'announcements',
           name: 'announcements',
           component: () => import('@/views/AnnouncementsView.vue')
@@ -28,6 +38,11 @@ const router = createRouter({
           path: 'knowledge',
           name: 'knowledge',
           component: () => import('@/views/KnowledgeView.vue')
+        },
+        {
+          path: 'reports',
+          name: 'reports',
+          component: () => import('@/views/ReportView.vue')
         },
         {
           path: 'members',

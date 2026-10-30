@@ -3,8 +3,12 @@ package http
 import (
 	"SWPUCAT/internal/application/announcement"
 	"SWPUCAT/internal/application/checkin"
+	domaincheckin "SWPUCAT/internal/domain/checkin"
 	"SWPUCAT/internal/domain/shared"
+	"SWPUCAT/internal/domain/user"
+	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -21,10 +25,18 @@ func NewCheckinHandler(checkinSvc *checkin.CheckinService, annSvc *announcement.
 func (h *CheckinHandler) ClockIn(c *gin.Context) {
 	userID := GetUserID(c)
 
-	dto, err := h.checkinSvc.ClockIn(c.Request.Context(), userID)
+	idempotencyKey, ok := checkinIdempotencyKey(c)
+	if !ok {
+		return
+	}
+	dto, err := h.checkinSvc.ClockIn(c.Request.Context(), userID, idempotencyKey)
 	if err != nil {
-		if err == shared.ErrConflict {
+		if errors.Is(err, domaincheckin.ErrAlreadyClockedIn) {
 			Conflict(c, "already clocked in today")
+			return
+		}
+		if errors.Is(err, shared.ErrForbidden) {
+			Forbidden(c, "account is disabled")
 			return
 		}
 		InternalError(c, "clock in failed")
@@ -37,10 +49,18 @@ func (h *CheckinHandler) ClockIn(c *gin.Context) {
 func (h *CheckinHandler) ClockOut(c *gin.Context) {
 	userID := GetUserID(c)
 
-	dto, err := h.checkinSvc.ClockOut(c.Request.Context(), userID)
+	idempotencyKey, ok := checkinIdempotencyKey(c)
+	if !ok {
+		return
+	}
+	dto, err := h.checkinSvc.ClockOut(c.Request.Context(), userID, idempotencyKey)
 	if err != nil {
-		if err == shared.ErrConflict {
+		if errors.Is(err, domaincheckin.ErrNotClockedIn) {
 			Conflict(c, "not clocked in")
+			return
+		}
+		if errors.Is(err, shared.ErrForbidden) {
+			Forbidden(c, "account is disabled")
 			return
 		}
 		InternalError(c, "clock out failed")
@@ -50,11 +70,27 @@ func (h *CheckinHandler) ClockOut(c *gin.Context) {
 	Success(c, dto)
 }
 
+func checkinIdempotencyKey(c *gin.Context) (string, bool) {
+	key := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if len(key) > 128 {
+		BadRequest(c, "Idempotency-Key must be at most 128 characters")
+		return "", false
+	}
+	return key, true
+}
+
 func (h *CheckinHandler) GetRecords(c *gin.Context) {
 	userID := GetUserID(c)
 
 	limitStr := c.DefaultQuery("limit", "10")
-	limit, _ := strconv.Atoi(limitStr)
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit < 1 {
+		BadRequest(c, "limit must be a positive integer")
+		return
+	}
+	if limit > 100 {
+		limit = 100
+	}
 
 	records, err := h.checkinSvc.GetRecords(c.Request.Context(), userID, limit)
 	if err != nil {
@@ -88,6 +124,15 @@ func (h *CheckinHandler) GetStats(c *gin.Context) {
 	Success(c, stats)
 }
 
+func (h *CheckinHandler) GetPersonalWorkHours(c *gin.Context) {
+	result, err := h.checkinSvc.GetPersonalWorkHours(c.Request.Context(), GetUserID(c))
+	if err != nil {
+		InternalError(c, "failed to get personal work hours")
+		return
+	}
+	Success(c, result)
+}
+
 func (h *CheckinHandler) GetOnlineMembers(c *gin.Context) {
 	members, err := h.checkinSvc.GetOnlineMembers(c.Request.Context())
 	if err != nil {
@@ -96,6 +141,15 @@ func (h *CheckinHandler) GetOnlineMembers(c *gin.Context) {
 	}
 
 	Success(c, members)
+}
+
+func (h *CheckinHandler) GetAgentOnlineSummary(c *gin.Context) {
+	summary, err := h.checkinSvc.GetOnlineSummary(c.Request.Context(), GetUserID(c), IsCaptain(c))
+	if err != nil {
+		InternalError(c, "failed to get online summary")
+		return
+	}
+	Success(c, summary)
 }
 
 func (h *CheckinHandler) GetAllTodayRecords(c *gin.Context) {
@@ -122,6 +176,22 @@ func (h *CheckinHandler) Makeup(c *gin.Context) {
 	}
 
 	if err := h.checkinSvc.Makeup(c.Request.Context(), req); err != nil {
+		if errors.Is(err, shared.ErrValidation) {
+			BadRequest(c, err.Error())
+			return
+		}
+		if errors.Is(err, shared.ErrConflict) {
+			Conflict(c, "checkin records already exist for this date")
+			return
+		}
+		if errors.Is(err, shared.ErrForbidden) {
+			Forbidden(c, "account is disabled")
+			return
+		}
+		if errors.Is(err, user.ErrUserNotFound) {
+			NotFound(c, "user not found")
+			return
+		}
 		InternalError(c, err.Error())
 		return
 	}
