@@ -127,7 +127,8 @@ body {
 .app-layout .el-empty { padding:24px 0; }
 .app-layout .el-empty__description { margin-top:12px; }
 .app-layout :is(.card-header,.page-header,.header) h2 { font-size:20px; }
-:is(.app-layout,.login-page) :is(button,a,input):focus-visible { outline:2px solid #096da9; outline-offset:3px; }
+/* Element Plus inputs draw their focus ring on the wrapper, not the inner input. */
+:is(.app-layout,.login-page) :is(button,a):focus-visible { outline:2px solid #096da9; outline-offset:3px; }
 :is(.app-layout,.login-page) .el-button { transition:background-color .18s,border-color .18s,box-shadow .18s; }
 .app-layout .el-button:active:not(:disabled) { transform:translateY(1px); }
 @media(max-width:768px) { .app-layout > .main-area > .content { padding:16px 12px; } .app-layout .topbar .page-title { font-size:16px; } }
