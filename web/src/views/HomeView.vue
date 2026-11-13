@@ -1,366 +1,156 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { useRouter } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
-import { authApi } from '@/api/auth'
-import { ElMessage } from 'element-plus'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { details } from '@/content/association'
 
-const router = useRouter()
-const authStore = useAuthStore()
-
-const showLogin = ref(false)
-const showRegister = ref(false)
-
-const loginForm = ref({ username: '', password: '' })
-const registerForm = ref({ username: '', password: '', nickname: '', email: '', verificationCode: '', invitationCode: '' })
-
-// Captcha state
-const captchaPassed = ref(false)
-const captchaSliderValue = ref(0)
-const captchaTarget = ref(Math.floor(Math.random() * 200) + 50)
-
-// Verification code countdown
-const codeCountdown = ref(0)
-const canSendCode = computed(() => codeCountdown.value === 0 && registerForm.value.email)
-
-let countdownTimer: number | null = null
-
-function startCountdown() {
-  codeCountdown.value = 60
-  countdownTimer = window.setInterval(() => {
-    codeCountdown.value--
-    if (codeCountdown.value <= 0) {
-      codeCountdown.value = 0
-      if (countdownTimer) {
-        clearInterval(countdownTimer)
-        countdownTimer = null
-      }
+const root = ref<HTMLElement>()
+const controller = new AbortController()
+let observer: IntersectionObserver | undefined
+let frame = 0
+let previousOverflow = ''
+onMounted(() => {
+  const page = root.value!
+  const select = <T extends HTMLElement = HTMLElement>(selector: string) => page.querySelector<T>(selector)!
+  const nav = select('.nav')
+  const links = [...nav.querySelectorAll<HTMLAnchorElement>('a[href^="#"]')]
+  const menu = select<HTMLButtonElement>('.menu-toggle')
+  const dialog = select<HTMLDialogElement>('dialog')
+  let returnFocus: HTMLElement | null = null
+  previousOverflow = document.body.style.overflow
+  document.documentElement.classList.add('association-page')
+  const closeMenu = () => {
+    nav.classList.remove('open')
+    menu.setAttribute('aria-expanded', 'false')
+    menu.setAttribute('aria-label', '打开导航')
+  }
+  const update = () => {
+    frame = 0
+    select('.header').classList.toggle('scrolled', scrollY > 20)
+    const max = document.documentElement.scrollHeight - innerHeight
+    select('.scroll-progress').style.transform = `scaleX(${max > 0 ? scrollY / max : 0})`
+    let active = links[0]
+    links.forEach(link => { if (select(link.hash).getBoundingClientRect().top < 180) active = link })
+    links.forEach(link => {
+      link.classList.toggle('active', link === active)
+      if (link === active) link.setAttribute('aria-current', 'location')
+      else link.removeAttribute('aria-current')
+    })
+    const indicator = select('.nav-indicator')
+    indicator.style.width = `${active.offsetWidth}px`
+    indicator.style.transform = `translateX(${active.offsetLeft}px)`
+  }
+  const schedule = () => { if (!frame) frame = requestAnimationFrame(update) }
+  const signal = controller.signal
+  window.addEventListener('scroll', schedule, { passive: true, signal })
+  window.addEventListener('resize', () => { schedule(); if (innerWidth > 800) closeMenu() }, { signal })
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') closeMenu() }, { signal })
+  document.addEventListener('click', event => { if (!select('.header').contains(event.target as Node)) closeMenu() }, { signal })
+  page.addEventListener('click', event => {
+    const target = (event.target as Element).closest<HTMLElement>('button, a')
+    if (!target) return
+    if (target === menu) {
+      const open = nav.classList.toggle('open')
+      menu.setAttribute('aria-expanded', String(open))
+      menu.setAttribute('aria-label', open ? '关闭导航' : '打开导航')
     }
-  }, 1000)
-}
-
-async function handleSendCode() {
-  if (!registerForm.value.email) {
-    ElMessage.warning('请输入邮箱')
-    return
+    if (nav.contains(target)) closeMenu()
+    if (target.dataset.filter) {
+      page.querySelectorAll<HTMLElement>('[data-filter]').forEach(button => {
+        button.classList.toggle('selected', button === target)
+        button.setAttribute('aria-pressed', String(button === target))
+      })
+      page.querySelectorAll<HTMLElement>('.event-row').forEach(row => {
+        row.hidden = target.dataset.filter !== 'all' && row.dataset.category !== target.dataset.filter
+      })
+      schedule()
+    }
+    const key = target.classList.contains('join-btn') ? 'join' : target.dataset.detail
+    if (key && details[key]) {
+      const detail = details[key]
+      returnFocus = target
+      select('#dialog-kicker').textContent = detail.kicker
+      select('#dialog-title').textContent = detail.title
+      // Content is a fixed local editorial record, never user-supplied HTML.
+      select('#dialog-content').innerHTML = detail.body
+      dialog.showModal()
+      document.body.style.overflow = 'hidden'
+    }
+    if (target.matches('.dialog-close, .dialog-done')) dialog.close()
+  }, { signal })
+  dialog.setAttribute('aria-labelledby', 'dialog-title')
+  dialog.addEventListener('click', event => {
+    const rect = dialog.getBoundingClientRect()
+    if (event.target === dialog && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom)) dialog.close()
+  }, { signal })
+  dialog.addEventListener('close', () => { document.body.style.overflow = previousOverflow; returnFocus?.focus({ preventScroll: true }) }, { signal })
+  if ('IntersectionObserver' in window) {
+    page.classList.add('js-ready')
+    observer = new IntersectionObserver(entries => entries.forEach(entry => {
+      if (entry.isIntersecting) { entry.target.classList.add('visible'); observer!.unobserve(entry.target) }
+    }), { threshold: 0.08 })
+    page.querySelectorAll('.reveal').forEach(section => observer!.observe(section))
   }
-  try {
-    await authApi.sendVerificationCode(registerForm.value.email)
-    ElMessage.success('验证码已发送')
-    startCountdown()
-  } catch {
-    ElMessage.error('发送验证码失败')
-  }
-}
-
-function handleCaptchaChange(value: number) {
-  if (Math.abs(value - captchaTarget.value) < 10) {
-    captchaPassed.value = true
-    ElMessage.success('验证通过')
-  }
-}
-
-function resetCaptcha() {
-  captchaPassed.value = false
-  captchaSliderValue.value = 0
-  captchaTarget.value = Math.floor(Math.random() * 200) + 50
-}
-
-async function handleLogin() {
-  try {
-    await authStore.login(loginForm.value.username, loginForm.value.password)
-    showLogin.value = false
-    ElMessage.success('登录成功')
-    router.push('/app')
-  } catch {
-    ElMessage.error('登录失败，请检查用户名和密码')
-  }
-}
-
-async function handleRegister() {
-  if (!captchaPassed.value) {
-    ElMessage.warning('请先完成滑块验证')
-    return
-  }
-  try {
-    await authStore.register(
-      registerForm.value.username,
-      registerForm.value.password,
-      registerForm.value.nickname,
-      registerForm.value.email,
-      registerForm.value.verificationCode,
-      registerForm.value.invitationCode
-    )
-    showRegister.value = false
-    ElMessage.success('注册成功')
-    router.push('/app')
-  } catch {
-    ElMessage.error('注册失败，请检查输入信息')
-  }
-}
+  update()
+})
+onBeforeUnmount(() => {
+  controller.abort()
+  observer?.disconnect()
+  cancelAnimationFrame(frame)
+  document.documentElement.classList.remove('association-page')
+  document.body.style.overflow = previousOverflow
+})
 </script>
 
 <template>
-  <div class="home">
-    <header class="hero">
-      <div class="hero-content">
-        <h1 class="title">西柚CAT</h1>
-        <p class="subtitle">软件工作室成员管理平台</p>
-        <div class="actions">
-          <el-button type="primary" size="large" @click="showLogin = true">
-            登录
-          </el-button>
-          <el-button size="large" @click="showRegister = true">
-            注册
-          </el-button>
-        </div>
-      </div>
-    </header>
+<div ref="root" class="association-home">
 
-    <section class="features">
-      <div class="feature-grid">
-        <div class="feature-card">
-          <el-icon :size="48" color="var(--accent)"><Clock /></el-icon>
-          <h3>签到打卡</h3>
-          <p>便捷的签到打卡功能，记录每日出勤</p>
-        </div>
-        <div class="feature-card">
-          <el-icon :size="48" color="var(--violet)"><Bell /></el-icon>
-          <h3>公告管理</h3>
-          <p>及时发布和查看工作室公告</p>
-        </div>
-        <div class="feature-card">
-          <el-icon :size="48" color="var(--success)"><Folder /></el-icon>
-          <h3>知识库</h3>
-          <p>共享学习资料和项目文档</p>
-        </div>
-        <div class="feature-card">
-          <el-icon :size="48" color="var(--warning)"><User /></el-icon>
-          <h3>成员管理</h3>
-          <p>管理工作室成员信息</p>
-        </div>
-      </div>
-    </section>
+<a class="skip" href="#main">跳至主要内容</a>
+<header class="header"><a class="brand" href="#home" aria-label="ASC 首页"><img class="brand-logo" src="/association-logo.png" alt="计算机协会 Logo" width="52" height="52"><span class="brand-name">西柚计算机协会<small>ASSOCIATION OF SWPU COMPUTER</small></span></a><nav class="nav" aria-label="主导航"><span class="nav-indicator"></span><a class="active" href="#home">首页</a><a href="#about">关于我们</a><a href="#explore">探索协会</a><a href="#events">活动足迹</a><a href="#honors">荣誉时刻</a></nav><div class="header-actions"><button class="button small join-btn">加入我们 <span>↗</span></button></div><button class="menu-toggle" aria-label="打开导航" aria-expanded="false"><span></span><span></span></button><div class="scroll-progress"></div></header>
+<main id="main">
+<section class="hero section" id="home"><div class="hero-copy"><div class="eyebrow"><span class="live-dot"></span> HELLO, WORLD. HELLO, ASC.</div><h1>让热爱，<br>不止于<span class="accent-word">代码<svg viewBox="0 0 240 16" aria-hidden="true"><path d="M4 11Q105 -3 233 9M20 15Q120 4 210 13"/></svg></span><span class="period">。</span></h1><p class="hero-description">在西柚，和一群同样好奇的人，<br>探索技术的可能，也让技术成为温暖的力量。</p><div class="hero-buttons"><button class="button join-btn">找到你的同路人 <span>↗</span></button><a class="text-link" href="#explore">探索我们的日常 <span>↓</span></a></div><div class="hero-caption"><span class="mini-star">✳</span> 始于 2005 <i></i> 西南石油大学计算机协会</div></div>
+<div class="hero-art" aria-label="以代码连接校园的终端主题插画"><div class="art-grid"></div><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><span class="orb orb-one"></span><span class="orb orb-two"></span><span class="art-plus">+</span><span class="art-coordinate">30°49′ N / 104°11′ E<br>SWPU · CHENGDU</span><div class="floating-tag top-tag"><span>✦</span> 好奇心，永远在线</div><div class="terminal"><div class="terminal-top"><span class="window-dots"><i></i><i></i><i></i></span><span>asc@swpu: ~</span><span>⌘</span></div><div class="terminal-body"><p><span class="code-green">➜</span> <span class="code-muted">~</span> ./hello_asc.sh</p><div class="ascii-logo">&lt; ASC /&gt;</div><p class="terminal-welcome">A place for curious minds.</p><div class="code-block"><span class="code-muted">const</span> association = {<br>&nbsp; since: <span class="code-peach">2005</span>,<br>&nbsp; passion: <span class="code-green">"无限探索"</span>,<br>&nbsp; mission: <span class="code-green">"用技术，连接你我"</span><br>};</div><p class="terminal-last"><span class="code-green">➜</span> build something together<span class="cursor"></span></p></div><div class="terminal-bottom"><span><span class="live-dot"></span> curiosity: online</span><span>UTF-8 &nbsp; ↗</span></div></div><div class="floating-tag bottom-tag"><span class="tag-symbol">⌁</span><span>技术有深度，服务有温度<small>CODE · CONNECT · CONTRIBUTE</small></span></div><span class="art-asterisk">✳</span><span class="art-note">// your next chapter starts here</span></div>
+</section>
+<div class="facts section"><div><strong>2005<span>年</span></strong><p>从第一份热爱开始</p></div><div><strong>学术 <span>＋</span> 社团</strong><p>两种身份，同一种热爱</p></div><div><strong>五星级<span>品牌社团</span></strong><p>校园认可，与热爱同行</p></div><a href="#explore"><span class="fact-icon">↗</span><span>扎根校园，连接你我<small>认识 ASC 的另一面</small></span></a></div>
+<section class="about section reveal" id="about"><div><div class="eyebrow">01 / WHO WE ARE</div><h2>在赛场上突破，<br>在校园里<span class="serif-accent">同行。</span></h2></div><div class="about-description"><p>我们是<strong>西南石油大学计算机协会（ASC）</strong>，成立于 2005 年，隶属于计算机与软件学院，是学院 12 个特色学生科技团队之一。</p><p>ASC 将学术团队与学生协会融为一体：以团队的专注投入编程、软件测试、人工智能与创新实践，以协会的温度组织技术交流、开展电脑义诊。我们一起走向竞赛的舞台，也把所学带回校园，服务身边的师生。</p><div class="chips"><span>学术团队 + 学生协会</span><span>竞赛实践</span><span>服务校园</span></div></div></section>
+<section class="explore section reveal" id="explore"><div class="section-heading"><div><div class="eyebrow">02 / LIFE AT ASC</div><h2>把兴趣，变成<span class="serif-accent">日常。</span></h2></div><p>从修好一台电脑，到打开一个新世界。<br>在这里，每一份热爱都有回响。</p></div><div class="activity-grid"><article class="clinic-card"><div class="card-top"><span class="pill">我们的招牌活动</span><span class="card-number">01 / SERVICE</span></div><div class="clinic-content"><div><h3>电脑义诊</h3><p>你的电脑烦恼，<br>我们一起搞定。</p><button class="outline-button" data-detail="clinic">看看我们能帮什么 <span>↗</span></button></div><div class="computer-art" aria-hidden="true"><div class="monitor"><span>＋</span><small>SYSTEM HAPPY :)</small></div><div class="monitor-neck"></div><div class="monitor-base"></div><div class="tool-badge">✳</div></div></div><div class="clinic-footer"><span><i class="live-dot"></i> 每月义务服务全校师生</span><span>技术 × 善意</span></div></article><article class="activity-card"><div class="card-top"><span class="line-icon">&lt;/&gt;</span><span class="card-number">02</span></div><h3>技术交流</h3><p>分享一个新发现，<br>碰撞下一次灵感。</p><button class="card-link" data-detail="tech">让知识流动起来 <span>↗</span></button></article><article class="activity-card lavender"><div class="card-top"><span class="line-icon">⌘</span><span class="card-number">03</span></div><h3>竞赛与实践</h3><p>从日常钻研走向赛场，<br>让热爱成为真实的实力。</p><a class="card-link" href="#honors">看看我们的成绩 <span>↗</span></a></article><article class="member-card"><span class="line-icon">☺</span><div><h3>会员服务</h3><p>在交流中相识，在陪伴中成长。每一位成员，都是 ASC 的一部分。</p></div><button class="round-button" data-detail="member" aria-label="了解会员服务">↗</button></article></div></section>
+<section class="events section reveal" id="events"><div class="section-heading"><div><div class="eyebrow">03 / OUR FOOTPRINTS</div><h2>一起走过的<span class="serif-accent">日子。</span></h2></div><div class="filter-group" role="group" aria-label="活动分类"><button class="selected" data-filter="all" aria-pressed="true">全部足迹</button><button data-filter="service" aria-pressed="false">电脑义诊</button><button data-filter="community" aria-pressed="false">协会日常</button></div></div><div class="event-list"><a class="event-row" data-category="community" href="https://www.swpu.edu.cn/scs/info/1175/7371.htm" target="_blank" rel="noopener noreferrer"><span class="event-time">JUN<small>六月 · 会员相聚</small></span><span class="event-main"><span class="event-label">协会日常</span><h3>六月会员大会：让热爱，再次相聚</h3><p>分享成长，交流收获，开启下一段同行。</p></span><span class="event-action">查看官网报道 <b>↗</b></span></a><a class="event-row" data-category="service" href="https://www.swpu.edu.cn/scs/info/1175/7318.htm" target="_blank" rel="noopener noreferrer"><span class="event-time">SPR<small>春日 · 温暖同行</small></span><span class="event-main"><span class="event-label">电脑义诊</span><h3>电脑义诊春日行，把技术带到你身边</h3><p>以所学回应所需，让校园里的小问题得到解决。</p></span><span class="event-action">查看官网报道 <b>↗</b></span></a><a class="event-row" data-category="service" href="https://www.swpu.edu.cn/scs/info/1175/6464.htm" target="_blank" rel="noopener noreferrer"><span class="event-time">MAR<small>三月 · 义诊足迹</small></span><span class="event-main"><span class="event-label">电脑义诊</span><h3>三月电脑义诊，用心守护每一份信任</h3><p>系统、软件与日常维护，都是我们关心的事。</p></span><span class="event-action">查看官网报道 <b>↗</b></span></a></div><p class="source-note">历史活动展示 · 标题为主页编辑文案，年份及活动详情以官网原文为准，部分正文需校园网访问。</p></section>
+<section class="honors section reveal" id="honors">
+<div class="section-heading"><div><div class="eyebrow">04 / BUILT WITH PASSION, PROVEN IN PRACTICE</div><h2>热爱有回响，<br>实力有<span class="serif-accent">答案。</span></h2></div><p>从校园服务到全国赛场，<br>团队与协会，共同写下 ASC 的成长。</p></div>
+<div class="honor-section-label"><span>团队竞赛成果</span><span>SELECTED ACHIEVEMENTS</span></div>
+<div class="competition-grid">
+<article class="competition-feature"><div class="competition-meta"><span>软件测试</span></div><div class="medal-art" aria-hidden="true"><span>1</span></div><div class="feature-copy"><p class="award-tier">国家级一等奖</p><h3>全国大学生软件测试大赛</h3><p>总决赛 · Web 应用测试个人赛</p><span class="feature-caption">以扎实的技术，回应真实的挑战。</span></div><button class="award-detail" data-detail="award-testing">了解获奖成果 <span>↗</span></button></article>
+<article class="competition-award"><div class="competition-meta"><span>程序设计 / 人工智能</span></div><p class="award-tier">国家级二等奖</p><h3>蓝桥杯全国软件和信息技术<br>专业人才大赛</h3><p class="competition-description">全国总决赛 · Java 软件开发大学 B 组<br>项目实战赛 · 人工智能大学组</p><button class="award-detail" data-detail="award-lanqiao">从算法到应用 <span>↗</span></button></article>
+<article class="competition-award"><div class="competition-meta"><span>编程技能</span></div><p class="award-tier">国家级三等奖</p><h3>睿抗机器人开发者大赛<br><span class="award-english">RAICOM</span></h3><p class="competition-description">全国总决赛 · 编程技能竞赛项目</p><button class="award-detail" data-detail="award-raicom">在赛场检验所学 <span>↗</span></button></article>
+<article class="competition-award"><div class="competition-meta"><span>网络技术</span></div><p class="award-tier">国家级三等奖</p><h3>中国高校计算机大赛<br>网络技术挑战赛</h3><p class="competition-description">A 组</p><button class="award-detail" data-detail="award-network">探索网络的可能 <span>↗</span></button></article>
+<article class="competition-award"><div class="competition-meta"><span>数据挖掘</span></div><p class="award-tier">国家级二等奖</p><h3>“泰迪杯”数据挖掘挑战赛</h3><p class="competition-description">让数据成为解题的线索</p><button class="award-detail" data-detail="award-teddy">从数据发现价值 <span>↗</span></button></article>
+<article class="competition-award modeling-award"><div class="competition-meta"><span>数学建模</span></div><p class="award-tier">省级一等奖</p><h3>全国大学生数学建模竞赛</h3><p class="competition-description">B 题 · 用数学与计算连接实际问题</p><button class="award-detail" data-detail="award-modeling">以协作寻找答案 <span>↗</span></button></article>
+</div>
+<p class="source-note">以上为团队及成员代表性成果，依据协会获奖记录整理；仅展示部分奖项。</p>
+<div class="brand-honors"><div class="honor-intro"><div class="eyebrow">GROWING TOGETHER</div><h3>赛场之外，<br>还有校园的<span class="serif-accent">认可。</span></h3><p>学术团队的实力，学生协会的温度。</p></div><div class="award-main"><div class="award-stars">★ ★ ★ ★ ★</div><span class="award-label">ASSOCIATION HONORS</span><h3>五星级品牌社团</h3><div class="award-seal">ASC · HONOR</div></div><div class="past-awards"><div><span>✧</span><h3>三星级品牌社团</h3></div><div><span>✧</span><h3>最佳人气社团</h3></div></div></div>
+</section>
+<section class="join-section section reveal"><span class="join-star" aria-hidden="true">✳</span><div class="eyebrow">YOUR NEXT CHAPTER</div><h2>下一行故事，<br>想和你<span>一起写。</span></h2><p>带上你的好奇心，剩下的，我们一起探索。</p><button class="button light join-btn">加入 ASC，开启新篇章 <span>↗</span></button><span class="join-code" aria-hidden="true">&lt;hello future="you" /&gt;</span></section>
+</main><footer class="footer section"><div class="footer-top"><a class="brand" href="#home"><img class="brand-logo" src="/association-logo.png" alt="计算机协会 Logo" width="52" height="52"><span class="brand-name">西南石油大学计算机协会<small>Association of SWPU Computer</small></span></a><a href="#home" class="back-top">回到顶部 ↑</a></div><div class="footer-bottom"><span>始于 2005 · 以技术服务校园，以热爱连接彼此。</span><span>Association of SWPU Computer</span></div></footer>
+<dialog id="detail-dialog"><div class="dialog-inner"><button class="dialog-close" aria-label="关闭弹窗">×</button><div class="eyebrow" id="dialog-kicker"></div><h2 id="dialog-title"></h2><div id="dialog-content"></div><button class="button dialog-done">知道了 <span>✓</span></button></div></dialog>
 
-    <!-- Login Dialog -->
-    <el-dialog v-model="showLogin" title="登录" width="400px">
-      <el-form :model="loginForm" label-width="80px">
-        <el-form-item label="学号">
-          <el-input
-            v-model="loginForm.username"
-            placeholder="请输入12位学号"
-            maxlength="12"
-            @keyup.enter="handleLogin"
-          />
-        </el-form-item>
-        <el-form-item label="密码">
-          <el-input
-            v-model="loginForm.password"
-            type="password"
-            placeholder="请输入密码"
-            show-password
-            @keyup.enter="handleLogin"
-          />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showLogin = false">取消</el-button>
-        <el-button type="primary" @click="handleLogin">登录</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- Register Dialog -->
-    <el-dialog v-model="showRegister" title="注册" width="400px">
-      <el-form :model="registerForm" label-width="80px">
-        <el-form-item label="邀请码">
-          <el-input v-model="registerForm.invitationCode" placeholder="请输入6位邀请码" maxlength="6" />
-        </el-form-item>
-        <el-form-item label="学号">
-          <el-input v-model="registerForm.username" placeholder="请输入12位学号 (如: 202431060420)" maxlength="12" />
-        </el-form-item>
-        <el-form-item label="昵称">
-          <el-input v-model="registerForm.nickname" placeholder="请输入昵称" />
-        </el-form-item>
-        <el-form-item label="密码">
-          <el-input v-model="registerForm.password" type="password" placeholder="请输入密码" show-password />
-        </el-form-item>
-        <el-form-item label="邮箱">
-          <el-input v-model="registerForm.email" placeholder="请输入邮箱" />
-        </el-form-item>
-        <el-form-item label="验证码">
-          <div class="code-input">
-            <el-input v-model="registerForm.verificationCode" placeholder="请输入6位验证码" maxlength="6" />
-            <el-button
-              type="primary"
-              :disabled="!canSendCode"
-              @click="handleSendCode"
-            >
-              {{ codeCountdown > 0 ? `${codeCountdown}秒后重发` : '发送验证码' }}
-            </el-button>
-          </div>
-        </el-form-item>
-        <el-form-item label="验证">
-          <div class="captcha-container" v-if="!captchaPassed">
-            <div class="captcha-track">
-              <div class="captcha-slider" :style="{ left: captchaSliderValue + 'px' }"></div>
-              <div class="captcha-target" :style="{ left: captchaTarget + 'px' }"></div>
-            </div>
-            <el-slider
-              v-model="captchaSliderValue"
-              :max="300"
-              :show-tooltip="false"
-              @change="handleCaptchaChange"
-            />
-            <p class="captcha-hint">拖动滑块到目标位置完成验证</p>
-          </div>
-          <div v-else class="captcha-success">
-            <el-tag type="success">验证通过</el-tag>
-          </div>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showRegister = false; resetCaptcha()">取消</el-button>
-        <el-button type="primary" @click="handleRegister">注册</el-button>
-      </template>
-    </el-dialog>
-  </div>
+</div>
 </template>
-
 <style scoped>
-.home {
-  min-height: 100vh;
-}
+.association-home{line-height:normal}.association-home :where(p,ul){margin:1em 0}.association-home ul{padding-left:40px}
 
-.hero {
-  min-height: 60vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-card);
-}
+.association-home{--paper:#f7f8f2;--ink:#203a2d;--green:#286247;--muted:#747c71;--line:#dfe3d8;--lime:#daedb4;--ease:cubic-bezier(.2,.7,.2,1)}*{box-sizing:border-box}:global(html.association-page){scroll-behavior:smooth;scroll-padding-top:110px}.association-home{margin:0;background:var(--paper);color:var(--ink);font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;font-size:14px;-webkit-font-smoothing:antialiased}button,a{-webkit-tap-highlight-color:transparent}button,input{font:inherit}button,a{touch-action:manipulation}button{cursor:pointer}a{color:inherit;text-decoration:none}button{color:inherit}button:focus-visible,a:focus-visible{outline:3px solid #82a950;outline-offset:5px}::selection{background:var(--lime)}.section{max-width:1240px;margin:auto;padding-left:40px;padding-right:40px}.header{height:94px;position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;padding:0 max(40px,calc((100vw - 1160px)/2));gap:25px;background:rgb(247 248 242 / 90%);backdrop-filter:blur(18px);border-bottom:1px solid transparent;transition:height .35s,box-shadow .35s,border-color .35s}.header.scrolled{height:76px;border-color:var(--line);box-shadow:0 4px 24px #203a2d05}.brand{display:flex;align-items:center;gap:14px;white-space:nowrap}.brand-mark{font:900 43px/1 Arial,sans-serif;letter-spacing:-4px}.brand-dot{color:#6f9651}.brand-name{font-size:12px;font-weight:700;letter-spacing:1px}.brand-name small{display:block;font-size:7px;letter-spacing:.65px;margin-top:7px;font-weight:500}.nav{display:flex;align-items:center;gap:3px;position:relative}.nav a{font-size:12px;padding:11px 14px;position:relative;z-index:1;white-space:nowrap;transition:color .25s}.nav a:hover{color:var(--green)}.nav-indicator{position:absolute;inset:3px auto 3px 0;background:#e9eddf;border-radius:6px;transition:transform .4s var(--ease),width .4s var(--ease);width:52px}.button{border:1px solid var(--green);border-radius:6px;background:var(--green);color:white;padding:17px 25px;display:inline-flex;align-items:center;justify-content:center;gap:28px;font-size:13px;transition:transform .25s var(--ease),background .25s,box-shadow .25s}.button:hover{background:#1a4a33;transform:translateY(-3px);box-shadow:0 8px 20px #28624720}.button:active{transform:translateY(0) scale(.98)}.button span{font-size:19px}.button.small{padding:10px 17px;gap:22px;font-size:12px}.scroll-progress{position:absolute;bottom:-1px;left:0;width:100%;height:2px;background:#80a25b;transform:scaleX(0);transform-origin:left}.menu-toggle{display:none}.hero{min-height:640px;display:grid;grid-template-columns:1fr 1fr;align-items:center;gap:35px;padding-top:65px;padding-bottom:65px}.eyebrow{font-family:Consolas,"Courier New",monospace;letter-spacing:1.9px;font-size:11px;font-weight:600;color:var(--green);display:flex;align-items:center;gap:10px}.live-dot{display:inline-block;width:6px;height:6px;border-radius:100%;background:#79a551;box-shadow:0 0 0 4px #86a85112}.hero h1{font-size:clamp(46px,4.8vw,67px);font-weight:650;line-height:1.32;letter-spacing:-2px;margin:29px 0 24px}.accent-word{position:relative;color:var(--green)}.accent-word svg{position:absolute;width:100%;left:0;bottom:-12px;fill:none;stroke:#a4bd73;stroke-width:3}.period{color:var(--green)}.hero-description{font-size:15px;line-height:2;color:#737b71;letter-spacing:.8px}.hero-buttons{display:flex;align-items:center;gap:28px;margin-top:29px}.text-link{font-size:12px;display:flex;gap:20px;align-items:center;border-bottom:1px solid transparent;padding:14px 0;transition:border-color .25s}.text-link:hover{border-color:var(--green)}.hero-caption{display:flex;align-items:center;gap:12px;margin-top:43px;font-size:10px;letter-spacing:.5px;color:var(--muted)}.hero-caption i{height:10px;width:1px;background:#bcc4b4}.mini-star{color:var(--green);font-size:21px}.hero-art{height:490px;position:relative;display:flex;align-items:center;justify-content:center}.art-grid{position:absolute;inset:0;background-image:radial-gradient(#78917755 .8px,transparent .8px);background-size:18px 18px;mask-image:radial-gradient(ellipse,black,transparent 70%)}.orbit{position:absolute;width:440px;height:440px;border:1px solid #bccab775;border-radius:50%}.orbit-two{width:510px;height:290px;transform:rotate(-35deg);border-style:dashed}.orb{position:absolute;border-radius:100%;z-index:2}.orb-one{width:16px;height:16px;background:#9dbf7c;top:48px;right:130px}.orb-two{width:9px;height:9px;background:#335d41;bottom:64px;left:118px}.art-plus{position:absolute;right:14px;top:80px;font-size:26px;color:#93a188}.art-coordinate{position:absolute;top:20px;left:30px;font:8px/1.8 Consolas,monospace;color:#8a9784;letter-spacing:1px}.terminal{position:relative;width:402px;background:#203e31;color:#e7ebdc;border-radius:11px;transform:rotate(-5deg);box-shadow:12px 23px 0 #dfe5d3,0 25px 50px #25472f18;border:1px solid #345143;transition:transform .6s var(--ease)}.hero-art:hover .terminal{transform:rotate(-2deg) translateY(-5px)}.terminal-top{display:flex;align-items:center;justify-content:space-between;padding:15px 17px;border-bottom:1px solid #ffffff15;font:9px Consolas,monospace;color:#a9b9a9}.window-dots{display:flex;gap:5px}.window-dots i{width:6px;height:6px;border-radius:50%;background:#e7ac89}.window-dots i:nth-child(2){background:#dbcd91}.window-dots i:nth-child(3){background:#a8c883}.terminal-body{padding:10px 25px 21px;font:11px/1.85 Consolas,"Microsoft YaHei",monospace}.code-green{color:#c4df9e}.code-muted{color:#90ac98}.code-peach{color:#e8bf96}.ascii-logo{font:700 47px/1.4 Consolas,monospace;letter-spacing:1px;color:#d6eabc;margin:12px 0 0;text-shadow:2px 2px #ffffff18}.terminal-welcome{font-size:10px;color:#9cb39e;margin-top:0}.code-block{margin:20px 0}.terminal-last{font-size:10px;margin-bottom:0}.cursor{display:inline-block;width:6px;height:12px;background:#c5df9d;margin-left:7px;vertical-align:middle;animation:blink 1.2s steps(2) infinite}.terminal-bottom{border-top:1px solid #ffffff15;display:flex;justify-content:space-between;padding:10px 17px;font:8px Consolas,monospace;color:#a9b9a9}.terminal-bottom .live-dot{width:4px;height:4px;margin-right:5px}.floating-tag{position:absolute;z-index:3;background:#fffef7;border:1px solid #dce1d1;border-radius:6px;box-shadow:0 8px 20px #243d2d08;display:flex;align-items:center;gap:10px}.top-tag{right:5px;top:38px;padding:13px 18px;transform:rotate(6deg);font-size:11px}.top-tag>span{font-size:20px;color:#678749}.bottom-tag{left:8px;bottom:37px;padding:15px 20px;transform:rotate(3deg);font-size:11px}.bottom-tag small{display:block;font:7px Consolas,monospace;letter-spacing:1px;color:#8b9580;margin-top:6px}.tag-symbol{font-size:31px;color:#628149}.art-asterisk{position:absolute;font-size:76px;color:#a9bf7e;right:0;bottom:45px;line-height:1}.art-note{position:absolute;bottom:0;right:55px;font:8px Consolas,monospace;color:#8c9984}.facts{display:grid;grid-template-columns:1fr 1.15fr 1.15fr 1.3fr;padding-top:30px;padding-bottom:30px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.facts>div{border-right:1px solid var(--line);padding-left:30px}.facts>div:first-child{padding-left:0}.facts strong{font-size:24px;font-weight:600}.facts strong span{font-size:12px;margin-left:7px;font-weight:400}.facts p{font-size:10px;color:var(--muted);margin:10px 0 0}.facts>a{display:flex;align-items:center;justify-content:center;gap:15px;font-size:12px}.facts small{display:block;font-size:9px;color:var(--muted);margin-top:9px}.fact-icon{background:#e8edde;border-radius:50%;width:40px;height:40px;display:grid;place-items:center;font-size:23px;transition:transform .3s}.facts a:hover .fact-icon{transform:rotate(45deg)}h2{font-size:36px;line-height:1.5;font-weight:600;letter-spacing:-1px;margin:20px 0 0}.serif-accent{color:#62804e}.about{display:grid;grid-template-columns:1fr 1fr;gap:80px;padding-top:100px;padding-bottom:100px}.about-description{padding-top:15px;font-size:13px;line-height:2.2;color:#7a8176}.about-description p{margin:0 0 15px}.about-description strong{font-weight:500;color:#354d3d}.chips{display:flex;gap:9px;flex-wrap:wrap;margin-top:22px}.chips span{border:1px solid #dbe2d0;border-radius:4px;font-size:10px;padding:3px 10px;color:#617154}.section-heading{display:flex;align-items:end;justify-content:space-between;gap:25px;margin-bottom:32px}.section-heading p{font-size:12px;line-height:2;color:var(--muted);margin:0 0 5px}.activity-grid{display:grid;grid-template-columns:2fr 1fr 1fr;gap:16px}.clinic-card{background:#e9efdf;border:1px solid #dde5d1;border-radius:10px;overflow:hidden;padding:24px 26px 0}.card-top{display:flex;justify-content:space-between;align-items:center}.pill{font-size:9px;background:#f7faef;border-radius:4px;padding:6px 10px;color:#4d6d3c}.card-number{font:9px Consolas,monospace;color:#8a987e}.clinic-content{display:flex;justify-content:space-between;align-items:center;padding:25px 0 23px;gap:8px}h3{font-size:21px;font-weight:600;margin:0}.clinic-content p{font-size:13px;line-height:1.9;color:#6c7c60;margin:12px 0 20px}.outline-button{border:1px solid #9aaa8e;border-radius:5px;font-size:10px;background:transparent;padding:10px 12px;display:flex;gap:14px;transition:background .25s}.outline-button:hover{background:#dbe7ca}.clinic-footer{border-top:1px solid #d2ddc6;display:flex;justify-content:space-between;padding:14px 0;font-size:9px;color:#79866d}.clinic-footer .live-dot{width:4px;height:4px;margin-right:7px}.computer-art{position:relative;width:155px;transform:rotate(-7deg);padding-top:10px}.monitor{height:105px;background:#f5f7eb;border:7px solid #576d47;border-radius:9px;box-shadow:5px 5px 0 #b3c39b;display:flex;flex-direction:column;align-items:center;justify-content:center}.monitor>span{font-size:41px;line-height:1;color:#668152}.monitor small{font:7px Consolas,monospace;color:#78935d;margin-top:9px}.monitor-neck{width:14px;height:23px;background:#576d47;margin:auto}.monitor-base{width:75px;height:7px;background:#576d47;border-radius:5px;margin:auto}.tool-badge{position:absolute;right:-9px;bottom:5px;background:#d3e3b6;border:4px solid #e9efdf;border-radius:50%;width:48px;height:48px;display:grid;place-items:center;font-size:34px;color:#5e7846}.activity-card{background:#eeeee6;border:1px solid #e3e4d9;padding:25px 22px;border-radius:10px;display:flex;flex-direction:column;transition:transform .3s,box-shadow .3s}.activity-card:hover{transform:translateY(-5px);box-shadow:0 12px 20px #203a2d08}.lavender{background:#ededf0;border-color:#e0e0e6}.line-icon{font:25px Consolas,monospace;color:#5d7154}.activity-card h3{margin-top:38px}.activity-card p{font-size:12px;line-height:1.9;color:var(--muted)}.card-link{margin-top:auto;padding:20px 0 0;border:0;background:transparent;display:flex;justify-content:space-between;gap:10px;font-size:10px;text-align:left}.card-link span{font-size:18px;transition:transform .2s}.card-link:hover span{transform:translate(3px,-3px)}.member-card{grid-column:1/-1;display:flex;align-items:center;gap:23px;padding:23px 28px;background:#f0f1e9;border:1px solid #e5e7dd;border-radius:9px}.member-card h3{font-size:14px}.member-card p{color:var(--muted);font-size:11px;margin:8px 0 0}.round-button{margin-left:auto;border-radius:50%;border:1px solid #cbd2c2;background:transparent;width:37px;height:37px;font-size:20px;flex-shrink:0;transition:background .3s,transform .3s}.round-button:hover{background:#dfe8d2;transform:rotate(45deg)}.events{padding-top:100px;padding-bottom:80px}.filter-group{display:flex;gap:4px;background:#edefe6;border:1px solid #e4e7dc;border-radius:7px;padding:4px}.filter-group button{border:0;padding:10px 15px;background:transparent;border-radius:5px;font-size:11px;color:#7e8578;transition:background .25s,color .25s,box-shadow .25s}.filter-group .selected{background:#fffef8;color:#315239;box-shadow:0 2px 5px #243d2d08}.event-list{border-top:1px solid var(--line)}.event-row{padding:27px 12px;display:flex;align-items:center;border-bottom:1px solid var(--line);gap:42px;transition:background .25s,padding .25s;animation:row-in .35s var(--ease)}.event-row:hover{background:#eff2e7;padding-left:22px}.event-row[hidden]{display:none}.event-time{font:25px Consolas,monospace;width:135px;flex-shrink:0;color:#657958}.event-time small{display:block;font:9px "Microsoft YaHei",sans-serif;color:#919787;margin-top:10px}.event-label{font-size:8px;color:#6d8459;background:#e9edde;padding:3px 7px;border-radius:3px}.event-main h3{font-size:15px;margin-top:10px;font-weight:500}.event-main p{font-size:10px;color:#93988c;margin:9px 0 0}.event-action{margin-left:auto;font-size:10px;color:#7e8873;white-space:nowrap;display:flex;gap:30px;align-items:center}.event-action b{font-size:23px;font-weight:400}.source-note{font-size:9px;color:#959b8d;margin-top:17px;line-height:1.8}.honors{display:grid;grid-template-columns:1.35fr 1fr .8fr;gap:36px;align-items:center;padding-top:25px;padding-bottom:100px}.honor-intro h2{font-size:31px}.honor-intro p{font-size:11px;color:var(--muted);margin-top:20px}.award-main{text-align:center;border:1px solid #dbdfce;background:linear-gradient(135deg,#f0f1e3,#f8f7e9);border-radius:8px;position:relative;padding:36px 20px;overflow:hidden}.award-main:before,.award-main:after{position:absolute;content:'❧';font-size:110px;color:#acb78650;left:-25px;top:40px;transform:rotate(-25deg)}.award-main:after{left:auto;right:-25px;transform:scaleX(-1) rotate(-25deg)}.award-stars{font-size:20px;letter-spacing:5px;color:#83925c}.award-label{display:block;font:9px Consolas,monospace;letter-spacing:2px;color:#969d7c;margin:20px 0 12px}.award-main h3{font-size:20px}.award-main p{font-size:9px;color:#91967e}.award-seal{font:8px Consolas,monospace;letter-spacing:2px;margin-top:26px;color:#a1a68d}.past-awards>div{position:relative;padding:21px 0 21px 40px}.past-awards>div:first-child{border-bottom:1px solid var(--line)}.past-awards span{position:absolute;left:0;top:21px;font-size:27px;color:#8d9b74}.past-awards h3{font-size:14px}.past-awards p{font-size:10px;color:#969d8d}.join-section{background:#244e39;max-width:1160px;border-radius:12px;padding:58px 60px;position:relative;overflow:hidden}.join-section .eyebrow{color:#adc996;font-size:10px}.join-section h2{font-size:43px;color:#f1f2df;line-height:1.45;margin:24px 0 18px}.join-section h2 span{color:#c6dea3}.join-section p{font-size:12px;color:#b1c2ab;margin-bottom:27px}.button.light{background:#dcebbb;border-color:#dcebbb;color:#304a2c;font-size:11px;padding:14px 20px}.button.light:hover{background:#edfacf}.join-star{position:absolute;right:100px;top:-40px;font:420px/1.2 Arial,sans-serif;color:#b6d18b18;transform:rotate(10deg);pointer-events:none}.join-code{position:absolute;right:60px;bottom:40px;font:12px Consolas,monospace;color:#a6bf9477}.footer{padding-top:50px;padding-bottom:25px}.footer-top{display:flex;align-items:center;justify-content:space-between;padding-bottom:30px}.footer .brand-mark{font-size:35px}.footer .brand-name{font-size:10px}.back-top{font-size:11px;color:#7d8973}.footer-bottom{border-top:1px solid var(--line);padding-top:20px;display:flex;justify-content:space-between;font-size:9px;color:#959b8c}.skip{position:fixed;left:20px;top:-80px;background:var(--green);color:white;padding:12px;z-index:100}.skip:focus{top:10px}.reveal{opacity:1;transform:none}.association-home.js-ready .reveal{opacity:0;transform:translateY(24px);transition:opacity .7s var(--ease),transform .7s var(--ease)}.association-home.js-ready .reveal.visible{opacity:1;transform:none}dialog{position:fixed;inset:0;margin:auto;padding:0;border:1px solid #dce2d1;border-radius:14px;background:var(--paper);color:var(--ink);width:min(500px,calc(100% - 32px));max-height:85dvh;box-shadow:0 30px 100px #10201840}dialog[open]{animation:dialog-in .3s var(--ease)}dialog::backdrop{background:#172c2466;backdrop-filter:blur(5px)}.dialog-inner{padding:42px 34px}.dialog-close{position:absolute;right:15px;top:10px;background:none;border:0;font-size:27px;color:#77846e;width:36px;height:36px}.dialog-inner h2{font-size:28px;margin:18px 0}.dialog-inner :deep(p),.dialog-inner :deep(li){font-size:13px;line-height:1.9;color:#77816d}.dialog-inner :deep(ul){padding-left:20px}.dialog-inner :deep(.dialog-note){border:1px solid #dfe5d5;background:#edf1e4;padding:15px;border-radius:6px;font-size:12px;margin:20px 0}.dialog-done{margin-top:14px;padding:12px 20px;font-size:12px}@keyframes blink{50%{opacity:0}}@keyframes row-in{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}@keyframes dialog-in{from{opacity:0;transform:translateY(15px) scale(.97)}to{opacity:1;transform:none}}
+@media(min-width:1500px){.hero{min-height:700px}.hero-art{transform:scale(1.06)}}
+@media(max-width:1100px){.header{padding:0 28px;gap:12px}.brand-name{font-size:10px}.nav a{padding:10px;font-size:11px}.section{padding-left:30px;padding-right:30px}.hero{gap:10px}.hero-art{transform:scale(.9);transform-origin:center;min-width:0}.hero h1{font-size:53px}.hero-buttons{gap:18px}.terminal{min-width:360px}.orbit{width:370px;height:370px}.orbit-two{width:420px;height:250px}.top-tag{right:-10px}.join-section{margin:0 30px;padding:50px}.activity-grid{grid-template-columns:1.8fr 1fr 1fr;gap:12px}.clinic-card{padding-left:20px;padding-right:20px}.computer-art{width:125px}.activity-card{padding:22px 18px}.about{gap:40px}.honors{gap:25px}.facts strong{font-size:21px}.facts>div{padding-left:20px}}
+@media(max-width:800px){:global(html.association-page){scroll-padding-top:90px}.header,.header.scrolled{height:74px;padding:0 24px}.brand-name{font-size:11px}.header>.button{margin-left:auto}.nav{position:absolute;top:73px;left:0;right:0;display:flex;flex-direction:column;align-items:stretch;background:var(--paper);padding:10px 24px 24px;border-bottom:1px solid var(--line);box-shadow:0 15px 20px #203a2d08;visibility:hidden;opacity:0;transform:translateY(-10px);transition:opacity .25s,transform .25s,visibility .25s}.nav.open{visibility:visible;opacity:1;transform:none}.nav a{padding:14px;font-size:13px;border-radius:5px}.nav a.active{background:#e9eddf}.nav-indicator{display:none}.menu-toggle{display:flex;flex-direction:column;gap:6px;padding:10px;background:none;border:0;justify-content:center;width:36px;height:36px}.menu-toggle span{display:block;width:19px;height:1px;background:var(--ink);transition:transform .3s}.menu-toggle[aria-expanded=true] span:first-child{transform:translateY(3.5px) rotate(45deg)}.menu-toggle[aria-expanded=true] span:last-child{transform:translateY(-3.5px) rotate(-45deg)}.hero{grid-template-columns:1fr 1fr;padding-top:45px;padding-bottom:30px;min-height:540px}.hero h1{font-size:44px}.hero-description{font-size:12px}.hero-art{transform:scale(.78);height:440px}.hero-buttons{align-items:start;flex-direction:column;gap:8px}.hero-caption{font-size:8px;margin-top:20px;gap:8px}.hero .button{padding:14px 20px}.hero .eyebrow{font-size:9px;letter-spacing:1px}.facts{grid-template-columns:1fr 1fr;row-gap:30px}.facts>div:nth-child(2){border:0}.facts>div:nth-child(3){padding-left:0}.facts>a{justify-content:start;padding-left:20px}.about{padding-top:65px;padding-bottom:65px;gap:30px}h2{font-size:28px}.about-description{font-size:11px;padding-top:0}.activity-grid{grid-template-columns:1fr 1fr}.clinic-card{grid-column:1/-1}.clinic-content{padding-top:20px}.computer-art{width:165px;margin-right:50px}.activity-card{min-height:240px}.activity-card h3{margin-top:25px}.section-heading p{font-size:10px}.events{padding-top:65px;padding-bottom:55px}.event-row{gap:20px}.event-time{width:90px;font-size:23px}.event-main h3{font-size:13px}.event-action{font-size:0;gap:0}.honors{grid-template-columns:1fr 1fr;padding-bottom:65px}.honor-intro{grid-column:1/-1}.honor-intro h2 br{display:none}.join-section h2{font-size:36px}.join-star{right:0;font-size:330px;top:0}.join-code{font-size:9px;right:30px}.filter-group button{padding:9px 10px;font-size:10px}}
+@media(max-width:700px){.section{padding-left:23px;padding-right:23px}.header,.header.scrolled{padding:0 20px;height:68px;gap:11px}.brand-mark{font-size:37px}.brand{gap:10px}.brand-name{font-size:10px;letter-spacing:.5px}.brand-name small{font-size:5px;letter-spacing:.2px;margin-top:5px}.header>.button{font-size:10px;padding:8px 10px;gap:8px}.header>.button span{font-size:14px}.menu-toggle{width:27px;padding:4px}.nav{top:67px}.hero{display:flex;flex-direction:column;gap:0;padding-top:40px;padding-bottom:20px;overflow:hidden}.hero-copy{width:100%}.hero .eyebrow{font-size:9px;letter-spacing:1.6px}.hero h1{font-size:51px;line-height:1.3;margin:23px 0 23px;letter-spacing:-1.5px}.hero-description{font-size:13px;line-height:1.95}.hero-buttons{flex-direction:row;align-items:center;gap:22px;margin-top:24px}.hero .button{font-size:11px;padding:14px 16px;gap:15px}.hero .text-link{font-size:10px;gap:10px}.hero-caption{font-size:9px;margin-top:24px}.hero-art{width:100%;height:365px;transform:scale(.84);margin-top:5px;margin-bottom:-20px}.terminal{width:350px;min-width:350px}.terminal-top{padding:12px 17px}.terminal-body{padding:5px 22px 15px}.ascii-logo{font-size:41px;margin-top:8px}.code-block{margin:13px 0}.orbit{width:350px;height:350px}.orbit-two{width:410px;height:220px}.top-tag{right:-13px;top:-3px;font-size:10px;padding:9px 13px}.bottom-tag{left:-16px;bottom:0;padding:12px 14px;font-size:10px}.art-asterisk{right:-19px;bottom:1px;font-size:62px}.art-coordinate{left:-5px;top:-5px;font-size:7px}.orb-one{top:10px;right:105px}.orb-two{bottom:10px;left:100px}.art-note{bottom:-25px;right:20px;font-size:7px}.facts{padding-top:25px;padding-bottom:25px;row-gap:26px;margin-top:15px}.facts strong{font-size:20px}.facts strong span{font-size:10px;margin-left:5px}.facts p{font-size:9px}.facts>div{padding-left:19px}.facts>a{padding-left:19px;gap:8px;font-size:10px}.facts small{font-size:8px}.fact-icon{width:29px;height:29px;font-size:18px;flex-shrink:0}.about{grid-template-columns:1fr;gap:24px;padding-top:58px;padding-bottom:58px}h2{font-size:29px;line-height:1.45;margin-top:16px}.eyebrow{font-size:9px}.about-description{font-size:12px;line-height:2.1}.chips span{font-size:9px}.section-heading{align-items:start;flex-direction:column;gap:18px;margin-bottom:25px}.section-heading p{font-size:11px}.activity-grid{gap:12px}.clinic-card{padding:20px 20px 0}.clinic-content{gap:14px;padding:24px 0}.clinic-content h3{font-size:24px}.clinic-content p{font-size:12px}.computer-art{width:122px;margin-right:4px;flex-shrink:0}.monitor{height:88px;border-width:6px}.monitor small{font-size:6px}.monitor>span{font-size:32px}.outline-button{font-size:9px;gap:6px;padding:10px}.clinic-footer{font-size:8px}.card-number{font-size:8px}.activity-card{padding:20px 16px;min-height:242px}.activity-card h3{font-size:19px}.activity-card p{font-size:11px}.card-link{font-size:9px}.member-card{padding:20px 16px;gap:13px}.member-card p{font-size:10px;line-height:1.8}.member-card>.line-icon{font-size:23px}.round-button{width:30px;height:30px;font-size:18px}.events{padding-top:58px;padding-bottom:45px}.filter-group{width:100%;padding:4px}.filter-group button{flex:1;padding:10px;font-size:11px}.event-row{gap:16px;padding:22px 0}.event-row:hover{padding-left:7px}.event-time{width:53px;font-size:21px}.event-time small{font-size:8px;line-height:1.7;width:50px}.event-main h3{font-size:12px;line-height:1.8}.event-main p{font-size:9px;line-height:1.8;margin-top:5px}.event-action b{font-size:20px}.event-main{flex:1}.source-note{font-size:8px}.honors{gap:18px;padding-bottom:50px}.honor-intro h2{font-size:28px}.honor-intro h2 br{display:block}.award-main{padding:25px 8px}.award-stars{font-size:13px;letter-spacing:2px}.award-main h3{font-size:15px}.award-label{font-size:8px;letter-spacing:1px;margin-top:17px}.award-main p{font-size:8px}.past-awards>div{padding-left:26px}.past-awards span{font-size:23px}.past-awards h3{font-size:12px}.past-awards p{font-size:9px}.join-section{margin:0 18px;padding:35px 25px;border-radius:10px}.join-section h2{font-size:33px}.join-section p{font-size:11px;position:relative}.join-section .button{position:relative}.join-star{font-size:250px;top:55px;right:-90px}.join-code{display:none}.footer{padding-top:34px;padding-bottom:22px}.footer-top{padding-bottom:24px;gap:15px}.footer .brand-name{font-size:9px}.footer .brand-name small{font-size:6px}.footer .brand-mark{font-size:30px}.back-top{font-size:9px;white-space:nowrap}.footer-bottom{flex-direction:column;gap:10px;font-size:8px}.dialog-inner{padding:35px 25px}.dialog-inner h2{font-size:25px}}
+.honors{display:block;padding-top:25px}.honors>.section-heading{margin-bottom:36px}.honor-section-label{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:0 0 16px;border-bottom:1px solid var(--line);margin-bottom:20px;font-size:12px;color:#536b47}.honor-section-label>span:last-child{font:9px Consolas,monospace;letter-spacing:1px;color:#88947e}.competition-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.competition-feature,.competition-award{position:relative;border:1px solid #dce2d2;border-radius:9px;padding:25px;min-height:280px;display:flex;flex-direction:column;overflow:hidden;transition:transform .3s var(--ease),box-shadow .3s var(--ease)}.competition-award{background:#f0f2e8}.competition-feature{background:#244e39;color:#eef4e2;border-color:#244e39}.competition-award:hover,.competition-feature:hover{transform:translateY(-4px);box-shadow:0 10px 24px #203a2d0c}.competition-meta{display:flex;justify-content:space-between;gap:10px;font-size:10px;color:#7c8a70;position:relative;z-index:1}.competition-meta>span:nth-child(2){font-family:Consolas,monospace;white-space:nowrap}.competition-feature .competition-meta{color:#b6cc9f}.competition-grid .award-tier{font-size:26px;letter-spacing:-.5px;color:#466239;margin:31px 0 15px;font-weight:600;position:relative;z-index:1}.competition-feature .award-tier{color:#dae9b8;font-size:29px}.competition-grid h3{font-size:15px;line-height:1.7;font-weight:500;position:relative;z-index:1}.competition-description,.feature-copy>p:not(.award-tier){font-size:10px;line-height:1.95;color:#849178;margin:12px 0 22px;position:relative;z-index:1}.feature-copy>p:not(.award-tier){color:#bed0ae;margin-bottom:13px}.feature-caption{font-size:10px;color:#a8c099;position:relative;z-index:1}.award-detail{display:flex;align-items:center;justify-content:space-between;margin-top:auto;padding:17px 0 0;border:0;background:none;border-top:1px solid #dce2d2;font-size:10px;text-align:left;gap:12px}.award-detail span{font-size:18px;transition:transform .25s}.award-detail:hover span{transform:translate(3px,-3px)}.competition-feature .award-detail{border-color:#5c765455;color:#c7d9b4;margin-top:24px}.award-english{font:12px Consolas,monospace;letter-spacing:1px;color:#7d8b70}.modeling-award{background:#eeeee4}.medal-art{position:absolute;right:-10px;top:38px;width:140px;height:140px;border:1px solid #acc78c25;border-radius:50%;display:grid;place-items:center;color:#cfe2a91c;font:80px Georgia,serif;transform:rotate(15deg)}.medal-art:before{content:'';position:absolute;inset:10px;border:1px dashed #acc78c30;border-radius:50%}.medal-art:after{content:'';position:absolute;top:128px;width:54px;height:80px;background:#acc78c10;clip-path:polygon(0 0,100% 0,100% 100%,50% 70%,0 100%)}.brand-honors{display:grid;grid-template-columns:1.35fr 1fr .8fr;gap:36px;align-items:center;margin-top:44px;padding-top:36px;border-top:1px solid var(--line)}.brand-honors .honor-intro h3{font-size:27px;line-height:1.6;margin-top:20px}.brand-honors .award-main{padding:24px 18px}.brand-honors .award-stars{font-size:16px}.brand-honors .award-label{margin-top:14px}.brand-honors .award-seal{margin-top:18px}
+@media(max-width:1000px){.competition-feature,.competition-award{padding:21px}.competition-grid .award-tier{font-size:23px}.competition-feature .award-tier{font-size:25px}.competition-grid h3{font-size:14px}}
+@media(max-width:800px){.competition-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.competition-feature,.competition-award{min-height:280px}.brand-honors{grid-template-columns:1fr 1fr;gap:25px}.brand-honors .honor-intro{grid-column:1/-1}.brand-honors .honor-intro h3 br{display:none}}
+@media(max-width:700px){.honors>.section-heading{margin-bottom:25px}.honor-section-label{align-items:start;flex-direction:column;gap:9px;font-size:11px}.honor-section-label>span:last-child{font-size:8px}.competition-grid{grid-template-columns:1fr;gap:12px}.competition-feature,.competition-award{min-height:0;padding:24px}.competition-grid .award-tier{margin:23px 0 12px;font-size:27px}.competition-feature .award-tier{font-size:32px}.competition-grid h3{font-size:16px}.competition-description,.feature-copy>p:not(.award-tier){font-size:11px}.competition-meta{font-size:10px}.award-detail{font-size:11px}.competition-feature .award-detail{margin-top:25px}.medal-art{right:12px;top:38px;width:160px;height:160px;font-size:95px}.medal-art:after{top:148px}.brand-honors{gap:18px;margin-top:30px;padding-top:28px}.brand-honors .honor-intro h3{font-size:25px}.brand-honors .honor-intro h3 br{display:block}.brand-honors .award-main{padding:24px 8px}.brand-honors .award-stars{font-size:13px}}
+@media(prefers-reduced-motion:reduce){:global(html.association-page){scroll-behavior:auto}*,*::before,*::after{animation:none!important;transition:none!important}.association-home.js-ready .reveal{opacity:1;transform:none}}
 
-.hero-content {
-  text-align: center;
-}
+/* Official association logo supplied by the association. */
+.brand-logo{display:block;width:52px;height:52px;object-fit:contain;flex-shrink:0;border-radius:50%}.footer .brand-logo{width:46px;height:46px}@media(max-width:800px){.brand-logo{width:44px;height:44px}}@media(max-width:700px){.brand-logo{width:38px;height:38px}.footer .brand-logo{width:36px;height:36px}}
 
-.title {
-  font-size: 3.5rem;
-  font-weight: 700;
-  color: var(--accent);
-  margin-bottom: 1rem;
-}
+.header-actions{display:flex;align-items:center;gap:18px}@media(max-width:800px){.header-actions{margin-left:auto;gap:12px}}@media(max-width:700px){.header-actions{gap:9px}.header-actions .button.small{font-size:10px;padding:8px 10px;gap:8px}.header-actions .button.small span{font-size:14px}}
 
-.subtitle {
-  font-size: 1.5rem;
-  color: var(--text-secondary);
-  margin-bottom: 2rem;
-}
 
-.actions {
-  display: flex;
-  gap: 1rem;
-  justify-content: center;
-}
-
-.features {
-  padding: 4rem 2rem;
-  background: var(--bg-card);
-}
-
-.feature-grid {
-  max-width: 1200px;
-  margin: 0 auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 2rem;
-}
-
-.feature-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 2rem;
-  text-align: center;
-  box-shadow: var(--shadow-sm);
-  transition: border-color 0.2s;
-}
-
-.feature-card:hover {
-  border-color: var(--accent);
-}
-
-.feature-card h3 {
-  margin: 1rem 0 0.5rem;
-  font-size: 1rem;
-  color: var(--text);
-}
-
-.feature-card p {
-  color: var(--text-muted);
-}
-
-.code-input {
-  display: flex;
-  gap: 0.5rem;
-  width: 100%;
-}
-
-.code-input .el-input {
-  flex: 1;
-}
-
-.captcha-container {
-  width: 100%;
-}
-
-.captcha-track {
-  position: relative;
-  height: 30px;
-  background: var(--bg-deep);
-  border-radius: 4px;
-  margin-bottom: 0.5rem;
-  overflow: hidden;
-}
-
-.captcha-slider {
-  position: absolute;
-  top: 0;
-  width: 30px;
-  height: 100%;
-  background: var(--accent);
-  border-radius: 4px;
-  transition: left 0.1s;
-}
-
-.captcha-target {
-  position: absolute;
-  top: 0;
-  width: 30px;
-  height: 100%;
-  background: var(--success);
-  border-radius: 4px;
-  opacity: 0.5;
-}
-
-.captcha-hint {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  margin-top: 0.25rem;
-}
-
-.captcha-success {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-@media (max-width: 768px) {
-  .title { font-size: 2.25rem; }
-  .subtitle { font-size: 1.125rem; margin-bottom: 1.5rem; }
-  .hero { min-height: 45vh; padding: 2rem 1.25rem; }
-  .features { padding: 2rem 1.25rem; }
-  .feature-grid { grid-template-columns: 1fr 1fr; gap: 1rem; }
-  .feature-card { padding: 1.25rem; }
-  .actions { flex-direction: column; width: 100%; gap: 0.75rem; }
-  .actions .el-button { width: 100%; }
-}
 </style>

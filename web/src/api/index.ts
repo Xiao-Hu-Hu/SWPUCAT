@@ -46,7 +46,7 @@ export async function streamPost(path: string, body: unknown, signal?: AbortSign
       return streamPost(path, body, signal, false)
     } catch {
       await authStore.logout()
-      await router.push({ name: 'home' })
+      await router.push({ name: 'login' })
       throw new StreamHTTPError(401, '登录状态已失效，请重新登录', 401)
     }
   }
@@ -86,7 +86,7 @@ api.interceptors.response.use(
         return axios(originalRequest)
       } catch {
         authStore.logout()
-        router.push({ name: 'home' })
+        router.push({ name: 'login' })
       }
     }
     return Promise.reject(error)

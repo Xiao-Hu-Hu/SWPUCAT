@@ -40,7 +40,7 @@ const menuItems = [
 
 function handleLogout() {
   authStore.logout()
-  router.push({ name: 'home' })
+  router.push({ name: 'login' })
 }
 
 function goTo(path: string) {
