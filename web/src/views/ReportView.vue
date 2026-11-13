@@ -6,6 +6,11 @@ import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
 import { renderMarkdown } from '@/utils/markdown'
 
+function formatDeadline(value: string) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '未设置' : date.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
 const authStore = useAuthStore()
 const isManager = computed(() => authStore.isCaptain || authStore.isSuperAdmin)
 
@@ -581,7 +586,7 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
   <div class="report">
     <div class="card">
       <div class="card-header">
-        <h3>月报</h3>
+        <h3>月报周期</h3>
         <div class="actions">
           <el-select v-model="selectedPeriodId" placeholder="选择月份" @change="handlePeriodChange" style="width: 240px">
             <el-option v-for="p in periods" :key="p.id" :value="p.id" :label="`${p.period_key} · ${periodStatusLabel(periodEffectiveStatus(p))}`" />
@@ -592,7 +597,7 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
       <div v-if="selectedPeriod" class="period-meta">
         <span>{{ selectedPeriod.starts_on }} ~ {{ selectedPeriod.ends_on }}</span>
         <el-tag size="small" :type="periodStatusTag(periodEffectiveStatus(selectedPeriod))">{{ periodStatusLabel(periodEffectiveStatus(selectedPeriod)) }}</el-tag>
-        <span v-if="selectedPeriod.due_at">截止 {{ selectedPeriod.due_at }}</span>
+        <span v-if="selectedPeriod.due_at">截止 {{ formatDeadline(selectedPeriod.due_at) }}</span>
         <span v-if="selectedPeriod.member_count">应提交 {{ selectedPeriod.member_count }} 人</span>
       </div>
     </div>

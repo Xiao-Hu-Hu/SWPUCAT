@@ -8,7 +8,8 @@ import { ElMessage } from 'element-plus'
 const router = useRouter()
 const authStore = useAuthStore()
 
-const showLogin = ref(true)
+const loginLoading = ref(false)
+const loginError = ref('')
 const showRegister = ref(false)
 
 const loginForm = ref({ username: '', password: '' })
@@ -67,13 +68,25 @@ function resetCaptcha() {
 }
 
 async function handleLogin() {
+  if (loginLoading.value) return
+  loginError.value = ''
+  if (!/^\d{12}$/.test(loginForm.value.username.trim())) {
+    loginError.value = '请输入12位数字学号'
+    return
+  }
+  if (!loginForm.value.password) {
+    loginError.value = '请输入密码'
+    return
+  }
+  loginLoading.value = true
   try {
     await authStore.login(loginForm.value.username, loginForm.value.password)
-    showLogin.value = false
     ElMessage.success('登录成功')
     router.push('/app')
   } catch {
-    ElMessage.error('登录失败，请检查用户名和密码')
+    loginError.value = '登录失败，请检查学号和密码后重试'
+  } finally {
+    loginLoading.value = false
   }
 }
 
@@ -102,74 +115,30 @@ onUnmounted(() => { if (countdownTimer) clearInterval(countdownTimer) })
 </script>
 
 <template>
-  <div class="home">
-    <header class="hero">
-      <div class="hero-content">
-        <h1 class="title">西柚CAT</h1>
-        <p class="subtitle">计算机协会成员管理平台</p>
-        <div class="actions">
-          <el-button type="primary" size="large" @click="showLogin = true">
-            登录
-          </el-button>
-          <el-button size="large" @click="showRegister = true">
-            注册
-          </el-button>
-        </div>
-      </div>
-    </header>
-
-    <section class="features">
-      <div class="feature-grid">
-        <div class="feature-card">
-          <el-icon :size="48" color="var(--accent)"><Clock /></el-icon>
-          <h3>签到打卡</h3>
-          <p>便捷的签到打卡功能，记录每日出勤</p>
-        </div>
-        <div class="feature-card">
-          <el-icon :size="48" color="var(--violet)"><Bell /></el-icon>
-          <h3>公告管理</h3>
-          <p>及时发布和查看工作室公告</p>
-        </div>
-        <div class="feature-card">
-          <el-icon :size="48" color="var(--success)"><Folder /></el-icon>
-          <h3>知识库</h3>
-          <p>共享学习资料和项目文档</p>
-        </div>
-        <div class="feature-card">
-          <el-icon :size="48" color="var(--warning)"><User /></el-icon>
-          <h3>成员管理</h3>
-          <p>管理工作室成员信息</p>
-        </div>
-      </div>
+  <main class="login-page">
+    <section class="login-intro">
+      <img src="/association-logo.png" alt="西南石油大学计算机协会徽标" class="association-logo" />
+      <p class="brand-name">西南石油大学计算机协会</p>
+      <h1>把热爱，<br />写进每一天。</h1>
+      <p>签到、协作、分享。让每一次投入都有记录，<br />让每一份经验都能传递。</p>
+      <span class="intro-note">SWPUCAT · 成员协作平台</span>
     </section>
-
-    <!-- Login Dialog -->
-    <el-dialog v-model="showLogin" title="登录" width="400px">
-      <el-form :model="loginForm" label-width="80px">
+    <section class="login-card" aria-labelledby="login-title">
+      <p class="login-eyebrow">MEMBER WORKSPACE</p>
+      <h2 id="login-title">登录成员平台</h2>
+      <p class="login-description">使用你的学号与密码继续</p>
+      <el-form :model="loginForm" label-position="top" @submit.prevent="handleLogin">
         <el-form-item label="学号">
-          <el-input
-            v-model="loginForm.username"
-            placeholder="请输入12位学号"
-            maxlength="12"
-            @keyup.enter="handleLogin"
-          />
+          <el-input v-model="loginForm.username" aria-label="学号" placeholder="请输入12位学号" maxlength="12" autocomplete="username" inputmode="numeric" size="large" />
         </el-form-item>
         <el-form-item label="密码">
-          <el-input
-            v-model="loginForm.password"
-            type="password"
-            placeholder="请输入密码"
-            show-password
-            @keyup.enter="handleLogin"
-          />
+          <el-input v-model="loginForm.password" aria-label="密码" type="password" placeholder="请输入密码" show-password autocomplete="current-password" size="large" />
         </el-form-item>
+        <p v-if="loginError" class="login-error" role="alert">{{ loginError }}</p>
+        <el-button class="login-submit" type="primary" size="large" native-type="submit" :loading="loginLoading">{{ loginLoading ? '正在登录' : '登录' }}</el-button>
       </el-form>
-      <template #footer>
-        <el-button @click="showLogin = false">取消</el-button>
-        <el-button type="primary" @click="handleLogin">登录</el-button>
-      </template>
-    </el-dialog>
-
+      <div class="register-entry">还没有账号？<el-button link type="primary" @click="showRegister = true">使用邀请码注册</el-button></div>
+    </section>
     <!-- Register Dialog -->
     <el-dialog v-model="showRegister" title="注册" width="400px">
       <el-form :model="registerForm" label-width="80px">
@@ -224,82 +193,24 @@ onUnmounted(() => { if (countdownTimer) clearInterval(countdownTimer) })
         <el-button type="primary" @click="handleRegister">注册</el-button>
       </template>
     </el-dialog>
-  </div>
+  </main>
 </template>
 
 <style scoped>
-.home {
-  min-height: 100vh;
-}
-
-.hero {
-  min-height: 60vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-card);
-}
-
-.hero-content {
-  text-align: center;
-}
-
-.title {
-  font-size: 3.5rem;
-  font-weight: 700;
-  color: var(--accent);
-  margin-bottom: 1rem;
-}
-
-.subtitle {
-  font-size: 1.5rem;
-  color: var(--text-secondary);
-  margin-bottom: 2rem;
-}
-
-.actions {
-  display: flex;
-  gap: 1rem;
-  justify-content: center;
-}
-
-.features {
-  padding: 4rem 2rem;
-  background: var(--bg-card);
-}
-
-.feature-grid {
-  max-width: 1200px;
-  margin: 0 auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 2rem;
-}
-
-.feature-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 2rem;
-  text-align: center;
-  box-shadow: var(--shadow-sm);
-  transition: border-color 0.2s;
-}
-
-.feature-card:hover {
-  border-color: var(--accent);
-}
-
-.feature-card h3 {
-  margin: 1rem 0 0.5rem;
-  font-size: 1rem;
-  color: var(--text);
-}
-
-.feature-card p {
-  color: var(--text-muted);
-}
-
+ .login-page { min-height:100dvh; display:grid; grid-template-columns:1.1fr 1fr; align-items:center; gap:clamp(40px,8vw,120px); max-width:1160px; margin:auto; padding:64px 40px; }
+.login-intro { color:var(--text-secondary); }
+.association-logo { width:64px; height:64px; object-fit:contain; margin-bottom:20px; }
+.brand-name { font-weight:600; color:var(--text); }
+.login-intro h1 { font-size:clamp(36px,4vw,54px); line-height:1.35; letter-spacing:-.04em; margin:28px 0 20px; color:#183b56; }
+.login-intro > p { line-height:1.9; }
+.intro-note { display:block; margin-top:48px; font-size:12px; letter-spacing:.08em; color:var(--text-muted); }
+.login-card { padding:40px; background:white; border:1px solid var(--border); border-radius:20px; box-shadow:0 16px 48px #1645690a; }
+.login-eyebrow { font-size:11px; color:var(--accent); letter-spacing:.16em; font-weight:600; }
+.login-card h2 { font-size:26px; margin:12px 0 6px; }
+.login-description { color:var(--text-muted); margin-bottom:28px; }
+.login-submit { width:100%; margin-top:8px; }
+.login-error { color:var(--danger); margin-bottom:16px; }
+.register-entry { text-align:center; color:var(--text-muted); margin-top:24px; font-size:13px; }
 .code-input {
   display: flex;
   gap: 0.5rem;
@@ -354,14 +265,11 @@ onUnmounted(() => { if (countdownTimer) clearInterval(countdownTimer) })
   align-items: center;
   gap: 0.5rem;
 }
-@media (max-width: 768px) {
-  .title { font-size: 2.25rem; }
-  .subtitle { font-size: 1.125rem; margin-bottom: 1.5rem; }
-  .hero { min-height: 45vh; padding: 2rem 1.25rem; }
-  .features { padding: 2rem 1.25rem; }
-  .feature-grid { grid-template-columns: 1fr 1fr; gap: 1rem; }
-  .feature-card { padding: 1.25rem; }
-  .actions { flex-direction: column; width: 100%; gap: 0.75rem; }
-  .actions .el-button { width: 100%; }
+@media (max-width:768px) {
+ .login-page { grid-template-columns:1fr; gap:24px; padding:32px 20px; max-width:500px; }
+ .login-intro { text-align:center; }
+ .association-logo { width:48px; height:48px; margin-bottom:8px; }
+ .login-intro h1,.login-intro > p:not(.brand-name),.intro-note { display:none; }
+ .login-card { padding:28px 24px; }
 }
 </style>

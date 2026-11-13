@@ -117,4 +117,19 @@ body {
   .el-pagination { max-width: 100%; flex-wrap: wrap; justify-content: center; row-gap: 0.5rem; }
   .el-pagination__jump { display: none; }
 }
+
+/* Platform UI: scoped away from the public association homepage. */
+.app-layout { --accent:#096da9; --accent-bg:#eaf4fb; --bg-deep:#f3f6f9; --border:#e1e8ef; --text:#203446; --text-muted:#677b8d; }
+.app-layout .content { max-width:1680px; width:100%; margin-inline:auto; padding:24px; }
+.app-layout .topbar .page-title { font-size:20px; }
+.app-layout .el-card,.app-layout .card { box-shadow:none; }
+.app-layout .el-table { --el-table-header-bg-color:#f6f8fb; font-variant-numeric:tabular-nums; }
+.app-layout .el-empty { padding:24px 0; }
+.app-layout .el-empty__description { margin-top:12px; }
+.app-layout :is(.card-header,.page-header,.header) h2 { font-size:20px; }
+:is(.app-layout,.login-page) :is(button,a,input):focus-visible { outline:2px solid #096da9; outline-offset:3px; }
+:is(.app-layout,.login-page) .el-button { transition:background-color .18s,border-color .18s,box-shadow .18s; }
+.app-layout .el-button:active:not(:disabled) { transform:translateY(1px); }
+@media(max-width:768px) { .app-layout .content { padding:16px 12px; } .app-layout .topbar .page-title { font-size:16px; } }
+@media(prefers-reduced-motion:reduce) { *,*::before,*::after { animation-duration:.01ms !important; transition-duration:.01ms !important; } }
 </style>
