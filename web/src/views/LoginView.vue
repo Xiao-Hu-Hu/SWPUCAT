@@ -266,7 +266,7 @@ onUnmounted(() => { if (countdownTimer) clearInterval(countdownTimer) })
   gap: 0.5rem;
 }
 @media (max-width:768px) {
- .login-page { grid-template-columns:1fr; gap:24px; padding:32px 20px; max-width:500px; }
+ .login-page { grid-template-columns:1fr; grid-template-rows:auto auto; align-content:center; gap:28px; padding:32px 20px; max-width:500px; }
  .login-intro { text-align:center; }
  .association-logo { width:48px; height:48px; margin-bottom:8px; }
  .login-intro h1,.login-intro > p:not(.brand-name),.intro-note { display:none; }
