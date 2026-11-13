@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch, onUnmounted } from 'vue'
 import { memberApi } from '@/api/member'
 import { checkinApi } from '@/api/checkin'
 import { userApi } from '@/api/user'
@@ -14,6 +14,7 @@ const members = ref<Array<{
   username: string
   student_id: string
   avatar: string
+  tech_direction?: string
   role: string
   joined_at: string
   checkin_count: number
@@ -24,9 +25,23 @@ const currentPage = ref(1)
 const pageSize = ref(10)
 const { layout: paginationLayout, pagerCount, small: paginationSmall } = usePaginationLayout()
 
+const search = ref('')
+const roleFilter = ref('')
+const directionFilter = ref('')
+const loading = ref(false)
+const loadError = ref('')
+const directions = computed(() => [...new Set(members.value.map(m => m.tech_direction).filter(Boolean))])
+const filteredMembers = computed(() => members.value.filter(m =>
+  (!search.value.trim() || `${m.nickname} ${m.student_id || m.username}`.toLowerCase().includes(search.value.trim().toLowerCase())) &&
+  (!roleFilter.value || m.role === roleFilter.value) &&
+  (!directionFilter.value || m.tech_direction === directionFilter.value)
+))
+watch([search, roleFilter, directionFilter, pageSize], () => { currentPage.value = 1 })
+function roleLabel(role: string) { return role === 'super_admin' ? '超级管理员' : role === 'captain' ? '队长' : '成员' }
+onUnmounted(() => { if (transferTimer) clearInterval(transferTimer) })
 const paginatedMembers = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
-  return members.value.slice(start, start + pageSize.value)
+  return filteredMembers.value.slice(start, start + pageSize.value)
 })
 
 const showTransferDialog = ref(false)
@@ -42,11 +57,15 @@ onMounted(async () => {
 })
 
 async function loadMembers() {
+  loading.value = true
+  loadError.value = ''
   try {
     const res = await memberApi.list()
     members.value = res.data
   } catch {
-    console.error('Failed to load members')
+    loadError.value = '成员列表加载失败，请重试'
+  } finally {
+    loading.value = false
   }
 }
 
@@ -112,7 +131,7 @@ async function handleConfirmTransfer() {
       type: 'success'
     })
     await authStore.logout()
-    window.location.href = '/'
+    window.location.href = '/app/login'
   } catch (err: any) {
     ElMessage.error(err.response?.data?.message || '转让失败')
   }
@@ -134,22 +153,40 @@ async function handleRemoveMember(id: number) {
   <div class="members">
     <div class="card">
       <div class="card-header">
-        <h3>成员管理</h3>
+        <h3>团队成员</h3>
         <span class="member-count">共 {{ members.length }} 人</span>
       </div>
 
-      <el-table :data="paginatedMembers" style="width: 100%">
-        <el-table-column prop="nickname" label="昵称" width="150">
+      <div class="member-filters">
+        <el-input v-model="search" placeholder="搜索昵称或学号" aria-label="搜索成员" clearable prefix-icon="Search" />
+        <el-select v-model="roleFilter" placeholder="全部角色" aria-label="角色筛选" clearable><el-option label="超级管理员" value="super_admin" /><el-option label="队长" value="captain" /><el-option label="成员" value="member" /></el-select>
+        <el-select v-model="directionFilter" placeholder="全部技术方向" aria-label="技术方向筛选" clearable><el-option v-for="d in directions" :key="d" :label="d" :value="d" /></el-select>
+      </div>
+      <el-alert v-if="loadError" :title="loadError" type="error" :closable="false"><el-button link @click="loadMembers">重新加载</el-button></el-alert>
+      <div class="mobile-members" v-loading="loading">
+        <article v-for="row in paginatedMembers" :key="row.id" class="member-summary">
+          <div class="summary-heading"><strong>{{ row.nickname }}</strong><el-tag size="small" type="info">{{ roleLabel(row.role) }}</el-tag></div>
+          <p>{{ row.student_id || row.username }}</p>
+          <dl><dt>技术方向</dt><dd>{{ row.tech_direction || '未设置' }}</dd><dt>加入时间</dt><dd>{{ row.joined_at }}</dd><dt>签到次数</dt><dd>{{ row.checkin_count }}</dd></dl>
+          <el-dropdown v-if="(authStore.isCaptain || authStore.isSuperAdmin) && row.role !== 'captain'" trigger="click">
+            <el-button size="small">成员操作<el-icon><ArrowDown /></el-icon></el-button>
+            <template #dropdown><el-dropdown-menu><el-dropdown-item @click="openTransferDialog(row.id,row.nickname)">转让队长</el-dropdown-item><el-dropdown-item @click="handleRemoveMember(row.id)">移除成员</el-dropdown-item></el-dropdown-menu></template>
+          </el-dropdown>
+        </article>
+        <el-empty v-if="!loading && !loadError && !filteredMembers.length" description="没有符合条件的成员" :image-size="48" />
+      </div>
+      <el-table class="desktop-members" v-loading="loading" :data="paginatedMembers" style="width: 100%">
+        <el-table-column prop="nickname" label="昵称" min-width="190">
           <template #default="{ row }">
             <div class="member-info">
               <span class="online-dot" :class="{ online: isOnline(row.id) }"></span>
               <el-avatar :size="32" :src="row.avatar ? `/api/avatar/${row.avatar}` : undefined">{{ row.nickname[0] }}</el-avatar>
-              <span>{{ row.nickname }}</span>
+              <span class="member-name">{{ row.nickname }}</span>
             </div>
           </template>
         </el-table-column>
         <el-table-column prop="student_id" label="学号" width="140" />
-        <el-table-column prop="tech_direction" label="技术方向" width="140">
+        <el-table-column prop="tech_direction" label="技术方向" min-width="140">
           <template #default="{ row }">
             <el-tag v-if="row.tech_direction" type="primary" size="small">{{ row.tech_direction }}</el-tag>
             <span v-else class="text-muted">未设置</span>
@@ -164,23 +201,12 @@ async function handleRemoveMember(id: number) {
         </el-table-column>
         <el-table-column prop="joined_at" label="加入时间" width="120" />
         <el-table-column prop="checkin_count" label="签到次数" width="100" />
-        <el-table-column label="操作" width="200" v-if="authStore.isCaptain || authStore.isSuperAdmin">
+        <el-table-column label="操作" width="110" fixed="right" v-if="authStore.isCaptain || authStore.isSuperAdmin">
           <template #default="{ row }">
-            <el-button
-              v-if="row.role !== 'captain'"
-              size="small"
-              @click="openTransferDialog(row.id, row.nickname)"
-            >
-              转让队长
-            </el-button>
-            <el-button
-              v-if="row.role !== 'captain'"
-              size="small"
-              type="danger"
-              @click="handleRemoveMember(row.id)"
-            >
-              移除
-            </el-button>
+            <el-dropdown v-if="row.role !== 'captain'" trigger="click">
+              <el-button text size="small">更多<el-icon><ArrowDown /></el-icon></el-button>
+              <template #dropdown><el-dropdown-menu><el-dropdown-item @click="openTransferDialog(row.id,row.nickname)">转让队长</el-dropdown-item><el-dropdown-item @click="handleRemoveMember(row.id)">移除成员</el-dropdown-item></el-dropdown-menu></template>
+            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -190,7 +216,7 @@ async function handleRemoveMember(id: number) {
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
           :page-sizes="[5, 10, 20, 50]"
-          :total="members.length"
+          :total="filteredMembers.length"
           :layout="paginationLayout"
           :pager-count="pagerCount"
           :small="paginationSmall"
@@ -228,6 +254,21 @@ async function handleRemoveMember(id: number) {
 </template>
 
 <style scoped>
+.member-filters { display:grid; grid-template-columns:minmax(180px,1fr) 160px 180px; gap:12px; margin-bottom:20px; }
+.member-name { white-space:nowrap; }
+.mobile-members { display:none; }
+@media(max-width:768px) {
+ .member-filters { grid-template-columns:1fr 1fr; gap:10px; }
+ .member-filters > .el-input { grid-column:1/-1; }
+ .desktop-members { display:none; }
+ .mobile-members { display:grid; gap:12px; }
+ .member-summary { padding:16px; border:1px solid var(--border); border-radius:10px; }
+ .summary-heading { display:flex; justify-content:space-between; gap:8px; }
+ .member-summary p { color:var(--text-muted); margin:6px 0 12px; font-variant-numeric:tabular-nums; }
+ .member-summary dl { display:grid; grid-template-columns:90px 1fr; gap:6px; margin-bottom:12px; }
+ .member-summary dt { color:var(--text-muted); }
+}
+
 .members {
   width: 100%;
 }

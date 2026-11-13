@@ -77,7 +77,7 @@ const reviewFindings = computed<QualityFinding[]>(() => reviewTarget.value?.vers
 const submittedReports = computed(() => reports.value.filter(r => r.status === 'submitted'))
 const submittedCount = computed(() => roster.value.filter(r => !!r.submitted_at).length)
 
-const firstDraftHint = computed(() => '尚未创建本期月报')
+const firstDraftHint = computed(() => !selectedPeriod.value ? '请选择月报周期' : !isCurrentPeriodMember.value ? '你不在本期提交名单中' : periodLocked.value ? '本期已截止，尚未创建月报' : '尚未创建本期月报，可点击创建月报开始填写')
 
 onMounted(async () => {
   await loadPeriods()
@@ -602,6 +602,12 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
       </div>
     </div>
 
+    <div v-if="isManager && selectedPeriod" class="report-progress" aria-label="月报提交进度">
+      <div><span>应提交</span><strong>{{ roster.length }} <small>人</small></strong></div>
+      <div><span>已提交</span><strong>{{ submittedCount }} <small>人</small></strong></div>
+      <div><span>待审核</span><strong>{{ submittedReports.length }} <small>份</small></strong></div>
+      <div><span>{{ periodLocked ? '截止未提交' : '待提交' }}</span><strong>{{ Math.max(0, roster.length - submittedCount) }} <small>人</small></strong></div>
+    </div>
     <div class="card report-mine">
       <div class="card-header">
         <h3>我的月报</h3>
@@ -682,7 +688,7 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
           </div>
         </template>
       </template>
-      <el-empty v-else :description="firstDraftHint" :image-size="64" />
+      <p v-else class="compact-empty" role="status">{{ firstDraftHint }}</p>
     </div>
 
     <template v-if="isManager">
@@ -703,7 +709,7 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
             </div>
           </div>
         </div>
-        <el-empty v-else description="暂未收到待审核月报" :image-size="48" />
+        <p v-else class="compact-empty" role="status">当前没有待审核月报</p>
       </div>
 
       <div class="card">
@@ -840,6 +846,14 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
 </template>
 
 <style scoped>
+.report-progress { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+.report-progress > div { background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:16px 20px; }
+.report-progress span { display:block; color:var(--text-muted); font-size:12px; }
+.report-progress strong { display:block; font-size:26px; font-variant-numeric:tabular-nums; margin-top:6px; }
+.report-progress small { font-size:12px; font-weight:400; }
+.compact-empty { padding:16px 0; color:var(--text-muted); }
+@media(max-width:600px) { .report-progress { grid-template-columns:1fr 1fr; } }
+
 .report {
   width: 100%;
   display: flex;
