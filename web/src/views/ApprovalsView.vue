@@ -6,6 +6,8 @@ import { ElMessage } from 'element-plus'
 import { renderMarkdown } from '@/utils/markdown'
 import { usePaginationLayout } from '@/composables/usePaginationLayout'
 
+const loading = ref(true)
+const loadError = ref('')
 const authStore = useAuthStore()
 const items = ref<Array<{
   id: number
@@ -47,6 +49,8 @@ onMounted(async () => {
 })
 
 async function loadItems() {
+  loading.value = true
+  loadError.value = ''
   try {
     if (isManager.value) {
       const res = await knowledgeApi.listPendingItems()
@@ -56,7 +60,9 @@ async function loadItems() {
       items.value = res.data
     }
   } catch {
-    console.error('Failed to load items')
+    loadError.value = '内容加载失败，请检查网络后重试'
+  } finally {
+    loading.value = false
   }
 }
 
@@ -135,9 +141,10 @@ function openPreview(item: { name: string; description: string }) {
     <div class="card">
       <div class="card-header">
         <h3>{{ isManager ? '审批管理' : '我的申请' }}</h3>
-        <span class="pending-count" v-if="isManager">{{ items.filter(i => !i.approved && !i.rejected).length }} 条待审批</span>
+        <span class="pending-count" v-if="isManager && !loading && !loadError">{{ items.filter(i => !i.approved && !i.rejected).length }} 条待审批</span>
       </div>
 
+      <ContentState :loading="loading" :error="loadError" :has-content="items.length > 0" @retry="loadItems">
       <div class="approval-list">
         <div v-for="item in paginatedItems" :key="item.id" class="approval-card">
           <div class="item-icon">
@@ -205,6 +212,7 @@ function openPreview(item: { name: string; description: string }) {
           background
         />
       </div>
+      </ContentState>
     </div>
 
     <el-dialog align-center v-model="showRejectDialog" title="拒绝理由" width="500px">

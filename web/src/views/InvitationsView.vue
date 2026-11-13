@@ -4,6 +4,8 @@ import { invitationApi } from '@/api/invitation'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
 
+const loading = ref(true)
+const loadError = ref('')
 const authStore = useAuthStore()
 const codes = ref<Array<{
   id: number
@@ -29,11 +31,15 @@ onMounted(async () => {
 })
 
 async function loadCodes() {
+  loading.value = true
+  loadError.value = ''
   try {
     const res = await invitationApi.getMyCodes()
     codes.value = res.data || []
   } catch {
-    console.error('Failed to load invitation codes')
+    loadError.value = '内容加载失败，请检查网络后重试'
+  } finally {
+    loading.value = false
   }
 }
 
@@ -64,6 +70,7 @@ async function copyCode(code: string) {
       </div>
 
       <el-radio-group v-model="statusFilter" class="code-filter" aria-label="邀请码状态"><el-radio-button value="valid">有效</el-radio-button><el-radio-button value="used">已使用</el-radio-button><el-radio-button value="expired">已过期</el-radio-button><el-radio-button value="">全部</el-radio-button></el-radio-group>
+      <ContentState :loading="loading" :error="loadError" :has-content="codes.length > 0" compact @retry="loadCodes">
       <el-table :data="filteredCodes" empty-text="当前分类暂无邀请码" style="width: 100%">
         <el-table-column prop="code" label="邀请码" min-width="170">
           <template #default="{ row }">
@@ -90,6 +97,7 @@ async function copyCode(code: string) {
         <el-table-column prop="expires_at" label="过期时间" min-width="190"><template #default="{ row }">{{ formatDate(row.expires_at) }}</template></el-table-column>
         <el-table-column prop="created_at" label="创建时间" min-width="190"><template #default="{ row }">{{ formatDate(row.created_at) }}</template></el-table-column>
       </el-table>
+      </ContentState>
     </div>
 
     <el-dialog align-center v-model="showGenerateDialog" title="生成邀请码" width="400px">

@@ -68,6 +68,11 @@ const items = ref<Array<{
   created_at: string
 }>>([])
 
+const itemsLoading = ref(true)
+const itemsError = ref('')
+const categoriesLoading = ref(true)
+const categoriesError = ref('')
+let itemsRequest = 0
 const selectedCategory = ref<number | undefined>(undefined)
 const searchQuery = ref('')
 
@@ -101,24 +106,33 @@ onBeforeUnmount(() => {
 })
 
 async function loadCategories() {
+  categoriesLoading.value = true
+  categoriesError.value = ''
   try {
     const res = await knowledgeApi.listCategories()
     categories.value = res.data
     return true
   } catch {
-    console.error('Failed to load categories')
+    categoriesError.value = '分类加载失败'
     return false
+  } finally {
+    categoriesLoading.value = false
   }
 }
 
 async function loadItems() {
+  const request = ++itemsRequest
+  itemsLoading.value = true
+  itemsError.value = ''
   try {
     const res = await knowledgeApi.listItems(selectedCategory.value, searchQuery.value)
-    items.value = res.data
+    if (request === itemsRequest) items.value = res.data || []
     return true
   } catch {
-    console.error('Failed to load items')
+    if (request === itemsRequest) itemsError.value = '资源加载失败，请重试'
     return false
+  } finally {
+    if (request === itemsRequest) itemsLoading.value = false
   }
 }
 
@@ -348,6 +362,7 @@ async function handleDownloadFile(id: number, name: string) {
             <el-icon><Plus /></el-icon><span>添加</span>
           </el-button>
         </div>
+        <ContentState class="category-state" :loading="categoriesLoading" :error="categoriesError" :has-content="categories.length > 0" :rows="1" compact @retry="loadCategories">
         <div class="category-list">
           <div
             class="category-item" role="button" tabindex="0"
@@ -376,6 +391,7 @@ async function handleDownloadFile(id: number, name: string) {
             </el-button>
           </div>
         </div>
+        </ContentState>
       </div>
     </div>
 
@@ -403,6 +419,7 @@ async function handleDownloadFile(id: number, name: string) {
           </div>
         </div>
 
+        <ContentState :loading="itemsLoading" :error="itemsError" :has-content="items.length > 0" @retry="loadItems">
         <div class="items-list">
           <div v-for="item in paginatedItems" :key="item.id" class="item-card">
             <div class="item-icon">
@@ -458,6 +475,7 @@ async function handleDownloadFile(id: number, name: string) {
             background
           />
         </div>
+        </ContentState>
       </div>
     </div>
 
@@ -886,6 +904,7 @@ async function handleDownloadFile(id: number, name: string) {
  .sidebar .card { display:flex; align-items:center; gap:12px; }
  .sidebar .card-header { flex:none; gap:6px; margin:0; }
  .sidebar .card-header h3 { display:none; }
+ .category-state { min-width:0; flex:1; }
  .category-list { min-width:0; flex:1; }
  .actions .el-button { margin-left:0; }
 }

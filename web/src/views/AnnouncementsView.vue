@@ -8,7 +8,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { renderMarkdown } from '@/utils/markdown'
 import { usePaginationLayout } from '@/composables/usePaginationLayout'
 
+const loading = ref(true)
+const loadError = ref('')
 const authStore = useAuthStore()
+const draftsLoading = ref(true)
+const draftsError = ref('')
 const drafts = ref<AnnouncementDraft[]>([])
 const announcements = ref<Array<{
   id: number
@@ -62,25 +66,32 @@ const paginatedAnnouncements = computed(() => {
 })
 
 onMounted(async () => {
-  await loadAnnouncements()
-  if (authStore.isCaptain || authStore.isSuperAdmin) await loadDrafts()
+  await Promise.all([loadAnnouncements(), ...(authStore.isCaptain || authStore.isSuperAdmin ? [loadDrafts()] : [])])
 })
 
 async function loadAnnouncements() {
+  loading.value = true
+  loadError.value = ''
   try {
     const res = await announcementApi.list()
     announcements.value = res.data
   } catch {
-    console.error('Failed to load announcements')
+    loadError.value = '内容加载失败，请检查网络后重试'
+  } finally {
+    loading.value = false
   }
 }
 
 async function loadDrafts() {
+  draftsLoading.value = true
+  draftsError.value = ''
   try {
     const res = await announcementDraftApi.list()
     drafts.value = res.data || []
   } catch {
-    drafts.value = []
+    draftsError.value = '草稿加载失败'
+  } finally {
+    draftsLoading.value = false
   }
 }
 
@@ -291,11 +302,12 @@ function announcementSummary(content: string, title: string) {
         </el-button>
       </div>
 
-      <section v-if="authStore.isCaptain || authStore.isSuperAdmin" class="draft-section" :class="{ 'is-empty': !drafts.length }">
+      <section v-if="authStore.isCaptain || authStore.isSuperAdmin" class="draft-section" :class="{ 'is-empty': !draftsLoading && !draftsError && !drafts.length }">
         <div class="section-title">
           <span>待审核草稿</span>
-          <el-tag size="small" type="info">{{ drafts.length }}</el-tag>
+          <el-tag v-if="!draftsLoading && !draftsError" size="small" type="info">{{ drafts.length }}</el-tag>
         </div>
+        <ContentState :loading="draftsLoading" :error="draftsError" :has-content="drafts.length > 0" :rows="1" compact @retry="loadDrafts">
         <div v-if="drafts.length" class="draft-list">
           <div v-for="draft in drafts" :key="draft.id" class="draft-item">
             <div class="draft-main">
@@ -311,8 +323,10 @@ function announcementSummary(content: string, title: string) {
           </div>
         </div>
         <div v-else class="draft-empty">暂无待审核草稿</div>
+        </ContentState>
       </section>
 
+      <ContentState :loading="loading" :error="loadError" :has-content="announcements.length > 0" @retry="loadAnnouncements">
       <div class="announcements-list">
         <div v-for="ann in paginatedAnnouncements" :key="ann.id" class="announcement-item">
           <div class="ann-header">
@@ -351,6 +365,7 @@ function announcementSummary(content: string, title: string) {
           background
         />
       </div>
+      </ContentState>
     </div>
 
     <!-- Create / Edit Dialog -->

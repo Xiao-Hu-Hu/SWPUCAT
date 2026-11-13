@@ -28,7 +28,7 @@ const { layout: paginationLayout, pagerCount, small: paginationSmall } = usePagi
 const search = ref('')
 const roleFilter = ref('')
 const directionFilter = ref('')
-const loading = ref(false)
+const loading = ref(true)
 const loadError = ref('')
 const directions = computed(() => [...new Set(members.value.map(m => m.tech_direction).filter(Boolean))])
 const filteredMembers = computed(() => members.value.filter(m =>
@@ -154,7 +154,7 @@ async function handleRemoveMember(id: number) {
     <div class="card">
       <div class="card-header">
         <h3>团队成员</h3>
-        <span class="member-count">共 {{ members.length }} 人</span>
+        <span v-if="!loading && !loadError" class="member-count">共 {{ members.length }} 人</span>
       </div>
 
       <div class="member-filters">
@@ -162,8 +162,8 @@ async function handleRemoveMember(id: number) {
         <el-select v-model="roleFilter" placeholder="全部角色" aria-label="角色筛选" clearable><el-option label="超级管理员" value="super_admin" /><el-option label="队长" value="captain" /><el-option label="成员" value="member" /></el-select>
         <el-select v-model="directionFilter" placeholder="全部技术方向" aria-label="技术方向筛选" clearable><el-option v-for="d in directions" :key="d" :label="d" :value="d" /></el-select>
       </div>
-      <el-alert v-if="loadError" :title="loadError" type="error" :closable="false"><el-button link @click="loadMembers">重新加载</el-button></el-alert>
-      <div class="mobile-members" v-loading="loading">
+      <ContentState :loading="loading" :error="loadError" :has-content="members.length > 0" compact @retry="loadMembers">
+      <div class="mobile-members">
         <article v-for="row in paginatedMembers" :key="row.id" class="member-summary">
           <div class="summary-heading"><strong>{{ row.nickname }}</strong><el-tag size="small" type="info">{{ roleLabel(row.role) }}</el-tag></div>
           <p>{{ row.student_id || row.username }}</p>
@@ -175,7 +175,7 @@ async function handleRemoveMember(id: number) {
         </article>
         <el-empty v-if="!loading && !loadError && !filteredMembers.length" description="没有符合条件的成员" :image-size="48" />
       </div>
-      <el-table class="desktop-members" v-loading="loading" :data="paginatedMembers" style="width: 100%">
+      <el-table class="desktop-members" :data="paginatedMembers" style="width: 100%">
         <el-table-column prop="nickname" label="昵称" min-width="190">
           <template #default="{ row }">
             <div class="member-info">
@@ -223,6 +223,7 @@ async function handleRemoveMember(id: number) {
           background
         />
       </div>
+      </ContentState>
     </div>
 
     <el-dialog align-center v-model="showTransferDialog" title="转让队长权限" width="450px">

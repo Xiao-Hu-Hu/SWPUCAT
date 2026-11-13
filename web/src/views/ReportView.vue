@@ -79,17 +79,20 @@ const submittedCount = computed(() => roster.value.filter(r => !!r.submitted_at)
 
 const firstDraftHint = computed(() => !selectedPeriod.value ? '请选择月报周期' : !isCurrentPeriodMember.value ? '你不在本期提交名单中' : periodLocked.value ? '本期已截止，尚未创建月报' : '尚未创建本期月报，可点击创建月报开始填写')
 
-onMounted(async () => {
-  await loadPeriods()
-  await loadMembership()
-  if (isManager.value) {
-    await loadMembers()
+const pageLoading = ref(true)
+const pageError = ref('')
+onMounted(loadPage)
+async function loadPage() {
+  pageLoading.value = true
+  pageError.value = ''
+  try {
+    await loadPeriods()
+    await Promise.all([loadMembership(), ...(isManager.value ? [loadMembers()] : [])])
+    if (selectedPeriodId.value) await Promise.all([loadReports(), ...(isManager.value ? [loadRoster()] : [])])
+  } finally {
+    pageLoading.value = false
   }
-  if (selectedPeriodId.value) {
-    await loadReports()
-    if (isManager.value) await loadRoster()
-  }
-})
+}
 
 function periodStatusLabel(status: string): string {
   if (status === 'open') return '进行中'
@@ -199,7 +202,7 @@ async function loadPeriods() {
       selectedPeriodId.value = periods.value[0].id
     }
   } catch {
-    console.error('Failed to load periods')
+    pageError.value = '月报周期加载失败，请重试'
   }
 }
 
@@ -260,7 +263,7 @@ async function loadRoster() {
     const res = await reportApi.listRoster(selectedPeriodId.value)
     roster.value = res.data || []
   } catch {
-    roster.value = []
+    pageError.value = '提交名单加载失败，请重试'
   }
 }
 
@@ -277,7 +280,7 @@ async function loadCurrentVersion() {
     editorTitle.value = res.data.title || ''
     editorBody.value = res.data.body_markdown || ''
   } catch {
-    console.error('Failed to load report version')
+    pageError.value = '月报正文加载失败，请重试'
   }
 }
 
@@ -289,14 +292,18 @@ async function loadReports() {
     myReport.value = reports.value.find(r => r.author_id === authStore.user?.id) || null
     await loadCurrentVersion()
   } catch {
-    console.error('Failed to load reports')
+    pageError.value = '月报加载失败，请重试'
   }
 }
 
 async function handlePeriodChange() {
-  await loadMembership()
-  await loadReports()
-  if (isManager.value) await loadRoster()
+  pageLoading.value = true
+  pageError.value = ''
+  try {
+    await Promise.all([loadMembership(), loadReports(), ...(isManager.value ? [loadRoster()] : [])])
+  } finally {
+    pageLoading.value = false
+  }
 }
 
 async function handleCreateReport() {
@@ -584,6 +591,7 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
 
 <template>
   <div class="report">
+    <ContentState :loading="pageLoading" :error="pageError" @retry="loadPage">
     <div class="card">
       <div class="card-header">
         <h3>月报周期</h3>
@@ -732,6 +740,7 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
       </div>
     </template>
 
+    </ContentState>
     <el-dialog align-center v-model="showCreatePeriod" title="新建月报周期" width="520px">
       <el-form label-width="100px">
         <el-form-item label="周期">
@@ -846,6 +855,8 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
 </template>
 
 <style scoped>
+.report > .content-state > .card, .report > .content-state > .report-progress { margin-bottom:16px; }
+
 .report-progress { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
 .report-progress > div { background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:16px 20px; }
 .report-progress span { display:block; color:var(--text-muted); font-size:12px; }
