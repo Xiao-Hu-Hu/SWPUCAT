@@ -401,7 +401,7 @@ async function handleDownloadFile(id: number, name: string) {
     <div class="content">
       <div class="card">
         <div class="card-header">
-          <h3>共享资源 <span v-if="refreshingCount > 0" class="refresh-status" role="status">正在刷新列表…</span></h3>
+          <h3>共享资源</h3>
           <div class="actions">
             <el-input
               v-model="searchQuery"
@@ -631,8 +631,7 @@ async function handleDownloadFile(id: number, name: string) {
 }
 
 .upload-details,
-.upload-remaining,
-.refresh-status {
+.upload-remaining {
   color: var(--text-secondary);
   font-size: 0.75rem;
   font-weight: normal;
@@ -640,10 +639,6 @@ async function handleDownloadFile(id: number, name: string) {
 
 .upload-remaining {
   margin-top: 0.25rem;
-}
-
-.refresh-status {
-  margin-left: 0.5rem;
 }
 
 .knowledge {

@@ -93,7 +93,7 @@ function handleLogout() {
         </el-dropdown>
       </header>
       <main class="content" id="main-content">
-        <router-view v-slot="{ Component }"><Transition name="page" mode="out-in"><component :is="Component" /></Transition></router-view>
+        <router-view />
       </main>
     </div>
   </div>
@@ -106,9 +106,6 @@ function handleLogout() {
 .group-label { padding:16px 12px 6px; font-size:11px; color:var(--text-muted); letter-spacing:.08em; }
 .nav-group + .nav-group { margin-top:6px; }
 .collapse-btn { border:0; background:transparent; width:100%; text-align:left; }
-.page-enter-active,.page-leave-active { transition:opacity .12s ease; }
-.page-enter-from,.page-leave-to { opacity:0; }
-@media (prefers-reduced-motion:reduce) { .page-enter-active,.page-leave-active { transition:none; } }
 
 .app-layout {
   display: flex;
