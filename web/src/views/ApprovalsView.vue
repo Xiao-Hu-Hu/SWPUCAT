@@ -145,6 +145,14 @@ function openPreview(item: { name: string; description: string }) {
       </div>
 
       <ContentState :loading="loading" :error="loadError" :has-content="items.length > 0" @retry="loadItems">
+      <template #skeleton>
+        <div class="approval-list" aria-hidden="true"><div v-for="n in Math.min(pageSize,3)" :key="n" class="approval-card skeleton-shell">
+          <div class="item-icon"><span class="sk-block sk-icon"></span></div>
+          <div class="item-info"><div class="item-name"><span class="sk-block sk-title"></span></div><div class="item-meta"><span class="sk-block sk-meta"></span></div></div>
+          <div class="item-actions"><span class="sk-block sk-button"></span><span class="sk-block sk-button"></span></div>
+        </div></div>
+      <div class="pagination-wrapper" aria-hidden="true"><span class="sk-block sk-pagination"></span></div>
+      </template>
       <div class="approval-list">
         <div v-for="item in paginatedItems" :key="item.id" class="approval-card">
           <div class="item-icon">

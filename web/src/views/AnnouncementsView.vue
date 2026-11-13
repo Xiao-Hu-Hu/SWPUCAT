@@ -308,6 +308,7 @@ function announcementSummary(content: string, title: string) {
           <el-tag v-if="!draftsLoading && !draftsError" size="small" type="info">{{ drafts.length }}</el-tag>
         </div>
         <ContentState :loading="draftsLoading" :error="draftsError" :has-content="drafts.length > 0" :rows="1" compact @retry="loadDrafts">
+          <template #skeleton><div class="draft-loading skeleton-shell" aria-hidden="true"><span class="sk-block sk-meta"></span></div></template>
         <div v-if="drafts.length" class="draft-list">
           <div v-for="draft in drafts" :key="draft.id" class="draft-item">
             <div class="draft-main">
@@ -327,6 +328,16 @@ function announcementSummary(content: string, title: string) {
       </section>
 
       <ContentState :loading="loading" :error="loadError" :has-content="announcements.length > 0" @retry="loadAnnouncements">
+      <template #skeleton>
+        <div class="announcements-list" aria-hidden="true">
+          <article v-for="n in pageSize" :key="n" class="announcement-item skeleton-shell">
+            <div class="ann-header"><div class="ann-title"><span class="sk-block sk-title"></span></div><div class="ann-meta"><span class="sk-block sk-meta"></span></div></div>
+            <p class="ann-summary"><span class="sk-block sk-line"></span><span class="sk-block sk-line sk-line-short"></span></p>
+            <div class="ann-footer"><span v-if="authStore.isCaptain || authStore.isSuperAdmin" class="sk-block sk-button"></span><span class="sk-block sk-button detail-btn"></span></div>
+          </article>
+        </div>
+      <div class="pagination-wrapper" aria-hidden="true"><span class="sk-block sk-pagination"></span></div>
+      </template>
       <div class="announcements-list">
         <div v-for="ann in paginatedAnnouncements" :key="ann.id" class="announcement-item">
           <div class="ann-header">
@@ -543,6 +554,7 @@ function announcementSummary(content: string, title: string) {
 }
 
 .announcement-item {
+  min-height:157px;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -802,8 +814,15 @@ function announcementSummary(content: string, title: string) {
   .section-title { flex-wrap: wrap; gap: 0.5rem; }
 }
 
-.ann-summary { color:var(--text-secondary); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; line-height:1.8; margin:12px 0; overflow-wrap:anywhere; }
+.ann-summary { color:var(--text-secondary); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; line-height:1.8; min-height:3.6em; margin:12px 0; overflow-wrap:anywhere; }
 .draft-section.is-empty { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; }
 .draft-section.is-empty .section-title { margin:0; }
 .draft-section.is-empty .draft-empty { padding:0; }
+
+.draft-loading { min-height:22.4px; display:flex; align-items:center; }
+.draft-section { min-height:58.4px; }
+.draft-section:has(.draft-loading) { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; }
+.draft-section:has(.draft-loading) .section-title { margin:0; }
+
+@media(max-width:768px) { .announcement-item { min-height:184px; } .ann-header { flex-direction:column; gap:8px; } .ann-title { width:100%; min-height:24px; } .ann-meta { margin-left:0; } }
 </style>

@@ -163,6 +163,14 @@ async function handleRemoveMember(id: number) {
         <el-select v-model="directionFilter" placeholder="全部技术方向" aria-label="技术方向筛选" clearable><el-option v-for="d in directions" :key="d" :label="d" :value="d" /></el-select>
       </div>
       <ContentState :loading="loading" :error="loadError" :has-content="members.length > 0" compact @retry="loadMembers">
+      <template #skeleton>
+        <TableSkeleton class="desktop-members" :columns="[{label:'昵称',minWidth:190},{label:'学号',width:140},{label:'技术方向',minWidth:140},{label:'角色',width:120},{label:'加入时间',width:120},{label:'签到次数',width:100},...(authStore.isCaptain || authStore.isSuperAdmin ? [{label:'操作',width:110}] : [])]" :row-height="56" />
+        <div class="mobile-members" aria-hidden="true"><article v-for="n in 3" :key="n" class="member-summary skeleton-shell">
+          <div class="summary-heading"><span class="sk-block sk-title"></span><span class="sk-block sk-button"></span></div><p><span class="sk-block sk-meta"></span></p>
+          <dl><template v-for="label in ['技术方向','加入时间','签到次数']" :key="label"><dt>{{ label }}</dt><dd><span class="sk-block sk-meta"></span></dd></template></dl>
+          <span v-if="authStore.isCaptain || authStore.isSuperAdmin" class="sk-block sk-button"></span>
+        </article></div>
+      </template>
       <div class="mobile-members">
         <article v-for="row in paginatedMembers" :key="row.id" class="member-summary">
           <div class="summary-heading"><strong>{{ row.nickname }}</strong><el-tag size="small" type="info">{{ roleLabel(row.role) }}</el-tag></div>
@@ -342,4 +350,6 @@ async function handleRemoveMember(id: number) {
   .member-info { gap: 0.5rem; }
   .pagination-wrapper { padding-top: 0.75rem; margin-top: 1rem; }
 }
+
+@media(max-width:768px) { .member-summary { min-height:222.4px; } .member-summary p .sk-meta { height:22.4px; } .member-summary dd .sk-meta { height:22.4px; } }
 </style>

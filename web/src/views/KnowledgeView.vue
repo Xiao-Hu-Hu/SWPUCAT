@@ -363,6 +363,9 @@ async function handleDownloadFile(id: number, name: string) {
           </el-button>
         </div>
         <ContentState class="category-state" :loading="categoriesLoading" :error="categoriesError" :has-content="categories.length > 0" :rows="1" compact @retry="loadCategories">
+      <template #skeleton>
+        <div class="category-list" aria-hidden="true"><div v-for="n in 4" :key="n" class="category-item skeleton-shell"><span class="sk-block sk-meta"></span></div></div>
+      </template>
         <div class="category-list">
           <div
             class="category-item" role="button" tabindex="0"
@@ -420,6 +423,16 @@ async function handleDownloadFile(id: number, name: string) {
         </div>
 
         <ContentState :loading="itemsLoading" :error="itemsError" :has-content="items.length > 0" @retry="loadItems">
+      <template #skeleton>
+        <div class="items-list" aria-hidden="true">
+          <div v-for="n in pageSize" :key="n" class="item-card skeleton-shell">
+            <div class="item-icon"><span class="sk-block sk-icon"></span></div>
+            <div class="item-info"><div class="item-name"><span class="sk-block sk-title"></span></div><div class="item-meta"><span class="sk-block sk-meta"></span></div></div>
+            <div class="item-card-actions"><span class="sk-block sk-button"></span><span class="sk-block sk-button"></span></div>
+          </div>
+        </div>
+      <div class="pagination-wrapper" aria-hidden="true"><span class="sk-block sk-pagination"></span></div>
+      </template>
         <div class="items-list">
           <div v-for="item in paginatedItems" :key="item.id" class="item-card">
             <div class="item-icon">
@@ -907,5 +920,15 @@ async function handleDownloadFile(id: number, name: string) {
  .category-state { min-width:0; flex:1; }
  .category-list { min-width:0; flex:1; }
  .actions .el-button { margin-left:0; }
+}
+
+.item-card { min-height:82px; }
+.item-icon { flex-shrink:0; }
+.item-name { min-height:22.4px; }
+.item-name .sk-title { height:22.4px; }
+@media(max-width:768px) {
+ .item-card { min-height:144px; }
+ .item-name { min-height:44.8px; }
+ .category-item .sk-meta { width:56px; height:22.4px; }
 }
 </style>

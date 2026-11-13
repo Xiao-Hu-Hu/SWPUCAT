@@ -71,6 +71,9 @@ async function copyCode(code: string) {
 
       <el-radio-group v-model="statusFilter" class="code-filter" aria-label="邀请码状态"><el-radio-button value="valid">有效</el-radio-button><el-radio-button value="used">已使用</el-radio-button><el-radio-button value="expired">已过期</el-radio-button><el-radio-button value="">全部</el-radio-button></el-radio-group>
       <ContentState :loading="loading" :error="loadError" :has-content="codes.length > 0" compact @retry="loadCodes">
+      <template #skeleton>
+        <TableSkeleton :columns="[{label:'邀请码',minWidth:170},{label:'类型',width:100},{label:'状态',width:100},{label:'过期时间',minWidth:190},{label:'创建时间',minWidth:190}]" :row-height="48" />
+      </template>
       <el-table :data="filteredCodes" empty-text="当前分类暂无邀请码" style="width: 100%">
         <el-table-column prop="code" label="邀请码" min-width="170">
           <template #default="{ row }">

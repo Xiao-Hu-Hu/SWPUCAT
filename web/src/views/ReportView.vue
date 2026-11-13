@@ -592,6 +592,13 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
 <template>
   <div class="report">
     <ContentState :loading="pageLoading" :error="pageError" @retry="loadPage">
+      <template #skeleton>
+        <div class="report-placeholder">
+        <div class="card skeleton-shell" aria-hidden="true"><div class="card-header"><h3>月报周期</h3><span class="sk-block sk-button"></span></div><div class="period-meta"><span class="sk-block sk-meta"></span></div></div>
+        <div v-if="isManager" class="report-progress" aria-hidden="true"><div v-for="n in 4" :key="n" class="skeleton-shell"><span class="sk-block sk-meta"></span><strong><span class="sk-block sk-title"></span></strong></div></div>
+        <div v-for="title in (isManager ? ['我的月报','审批管理','提交名单'] : ['我的月报'])" :key="title" class="card skeleton-shell" aria-hidden="true"><div class="card-header"><h3>{{ title }}</h3></div><p class="compact-empty"><span class="sk-block sk-meta"></span></p></div>
+              </div>
+      </template>
     <div class="card">
       <div class="card-header">
         <h3>月报周期</h3>
@@ -1195,4 +1202,9 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
   .period-meta { flex-wrap: wrap; gap: 0.5rem; }
   .review-row, .roster-row { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
 }
+
+.report-placeholder { display:flex; flex-direction:column; gap:16px; }
+.report .card-header { min-height:32px; }
+.report-progress strong { min-height:41.6px; }
+.compact-empty { min-height:54.4px; }
 </style>

@@ -6,10 +6,12 @@ import 'element-plus/dist/index.css'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import App from './App.vue'
 import ContentState from './components/ContentState.vue'
+import TableSkeleton from './components/TableSkeleton.vue'
 import router from './router'
 
 const app = createApp(App)
 app.component('ContentState', ContentState)
+app.component('TableSkeleton', TableSkeleton)
 
 // Register Element Plus icons
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
