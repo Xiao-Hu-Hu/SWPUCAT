@@ -13,6 +13,7 @@ const drawerOpen = ref(false)
 function syncIsMobile() {
   isMobile.value = window.matchMedia('(max-width: 768px)').matches
   if (!isMobile.value) drawerOpen.value = false
+  else isCollapse.value = false
 }
 
 onMounted(() => {
@@ -46,7 +47,7 @@ function handleLogout() {
 </script>
 
 <template>
-  <div class="app-layout" :class="{ mobile: isMobile }">
+  <div class="app-layout" :class="{ mobile: isMobile }" @keydown.esc="drawerOpen = false">
     <div class="sidebar-mask" v-if="isMobile" :class="{ show: drawerOpen }" @click="drawerOpen = false"></div>
     <aside class="sidebar" :class="{ collapsed: isCollapse, 'drawer-open': drawerOpen }">
       <div class="sidebar-header">
@@ -62,7 +63,7 @@ function handleLogout() {
           </RouterLink>
         </section>
       </nav>
-      <div class="sidebar-footer">
+      <div class="sidebar-footer" v-if="!isMobile">
         <button class="collapse-btn" :aria-label="isCollapse ? '展开导航' : '收起导航'" :aria-expanded="!isCollapse" @click="isCollapse = !isCollapse">
           <el-icon :size="16"><Fold v-if="!isCollapse" /><Expand v-else /></el-icon>
           <span v-if="!isCollapse" class="nav-label">收起</span>
@@ -72,7 +73,7 @@ function handleLogout() {
 
     <div class="main-area">
       <header class="topbar">
-        <button class="sidebar-toggle" v-if="isMobile" aria-label="菜单" @click="drawerOpen = !drawerOpen">
+        <button class="sidebar-toggle" v-if="isMobile" :aria-expanded="drawerOpen" aria-label="菜单" @click="drawerOpen = !drawerOpen">
           <el-icon :size="20"><Menu /></el-icon>
         </button>
         <h2 class="page-title">{{ menuItems.find(m => m.path === route.path)?.title || '签到打卡' }}</h2>

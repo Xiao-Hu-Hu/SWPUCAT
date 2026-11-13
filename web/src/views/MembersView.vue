@@ -225,7 +225,7 @@ async function handleRemoveMember(id: number) {
       </div>
     </div>
 
-    <el-dialog v-model="showTransferDialog" title="转让队长权限" width="450px">
+    <el-dialog align-center v-model="showTransferDialog" title="转让队长权限" width="450px">
       <p style="margin-bottom: 1rem;">确定要将队长权限转让给 <strong>{{ transferTargetName }}</strong> 吗？此操作不可撤销。</p>
       <el-form label-width="80px">
         <el-form-item label="验证码">

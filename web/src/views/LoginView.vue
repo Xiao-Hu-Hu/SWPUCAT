@@ -140,7 +140,7 @@ onUnmounted(() => { if (countdownTimer) clearInterval(countdownTimer) })
       <div class="register-entry">还没有账号？<el-button link type="primary" @click="showRegister = true">使用邀请码注册</el-button></div>
     </section>
     <!-- Register Dialog -->
-    <el-dialog v-model="showRegister" title="注册" width="400px">
+    <el-dialog align-center v-model="showRegister" title="注册" width="400px">
       <el-form :model="registerForm" label-width="80px">
         <el-form-item label="邀请码">
           <el-input v-model="registerForm.invitationCode" placeholder="请输入6位邀请码" maxlength="6" />

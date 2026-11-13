@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { invitationApi } from '@/api/invitation'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
@@ -14,6 +14,13 @@ const codes = ref<Array<{
   created_at: string
 }>>([])
 
+const statusFilter = ref('valid')
+const currentTime = ref(Date.now())
+const clockTimer = window.setInterval(() => { currentTime.value = Date.now() }, 30000)
+onUnmounted(() => window.clearInterval(clockTimer))
+function codeStatus(code: { used: boolean; expires_at: string }) { return code.used ? 'used' : new Date(code.expires_at).getTime() <= currentTime.value ? 'expired' : 'valid' }
+const filteredCodes = computed(() => codes.value.filter(code => !statusFilter.value || codeStatus(code) === statusFilter.value))
+function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('zh-CN', { hour12:false }) }
 const showGenerateDialog = ref(false)
 const generateType = ref('member')
 
@@ -41,9 +48,8 @@ async function handleGenerate() {
   }
 }
 
-function copyCode(code: string) {
-  navigator.clipboard.writeText(code)
-  ElMessage.success('已复制到剪贴板')
+async function copyCode(code: string) {
+  try { await navigator.clipboard.writeText(code); ElMessage.success('已复制到剪贴板') } catch { ElMessage.error('复制失败，请手动选择邀请码复制') }
 }
 </script>
 
@@ -51,17 +57,18 @@ function copyCode(code: string) {
   <div class="invitations">
     <div class="card">
       <div class="card-header">
-        <h3>邀请码管理</h3>
+        <h3>成员邀请</h3>
         <el-button type="primary" @click="showGenerateDialog = true">
           生成邀请码
         </el-button>
       </div>
 
-      <el-table :data="codes" style="width: 100%">
-        <el-table-column prop="code" label="邀请码" width="120">
+      <el-radio-group v-model="statusFilter" class="code-filter" aria-label="邀请码状态"><el-radio-button value="valid">有效</el-radio-button><el-radio-button value="used">已使用</el-radio-button><el-radio-button value="expired">已过期</el-radio-button><el-radio-button value="">全部</el-radio-button></el-radio-group>
+      <el-table :data="filteredCodes" empty-text="当前分类暂无邀请码" style="width: 100%">
+        <el-table-column prop="code" label="邀请码" min-width="170">
           <template #default="{ row }">
             <span class="code-text">{{ row.code }}</span>
-            <el-button size="small" link @click="copyCode(row.code)">
+            <el-button size="small" link :disabled="codeStatus(row) !== 'valid'" @click="copyCode(row.code)">
               复制
             </el-button>
           </template>
@@ -76,16 +83,16 @@ function copyCode(code: string) {
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
             <el-tag v-if="row.used" type="success">已使用</el-tag>
-            <el-tag v-else-if="new Date(row.expires_at) < new Date()" type="info">已过期</el-tag>
+            <el-tag v-else-if="codeStatus(row) === 'expired'" type="info">已过期</el-tag>
             <el-tag v-else type="warning">未使用</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="expires_at" label="过期时间" width="180" />
-        <el-table-column prop="created_at" label="创建时间" width="180" />
+        <el-table-column prop="expires_at" label="过期时间" min-width="190"><template #default="{ row }">{{ formatDate(row.expires_at) }}</template></el-table-column>
+        <el-table-column prop="created_at" label="创建时间" min-width="190"><template #default="{ row }">{{ formatDate(row.created_at) }}</template></el-table-column>
       </el-table>
     </div>
 
-    <el-dialog v-model="showGenerateDialog" title="生成邀请码" width="400px">
+    <el-dialog align-center v-model="showGenerateDialog" title="生成邀请码" width="400px">
       <el-form label-width="80px">
         <el-form-item label="邀请类型">
           <el-radio-group v-model="generateType">
@@ -103,6 +110,7 @@ function copyCode(code: string) {
 </template>
 
 <style scoped>
+.code-filter { margin-bottom:20px; }
 .invitations {
   width: 100%;
 }

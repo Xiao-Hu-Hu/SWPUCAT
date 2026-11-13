@@ -190,7 +190,7 @@ function openPreview(item: { name: string; description: string }) {
             </template>
           </div>
         </div>
-        <el-empty v-if="items.length === 0" :description="isManager ? '暂无待审批项目' : '暂无申请记录'" />
+        <el-empty v-if="items.length === 0" :description="isManager ? '当前没有待处理的审批' : '暂无申请记录'" />
       </div>
 
       <div class="pagination-wrapper" v-if="items.length > 0">
@@ -207,7 +207,7 @@ function openPreview(item: { name: string; description: string }) {
       </div>
     </div>
 
-    <el-dialog v-model="showRejectDialog" title="拒绝理由" width="500px">
+    <el-dialog align-center v-model="showRejectDialog" title="拒绝理由" width="500px">
       <el-form label-width="80px">
         <el-form-item label="拒绝理由">
           <el-input
@@ -224,7 +224,7 @@ function openPreview(item: { name: string; description: string }) {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showPreviewDialog" :title="previewItem?.name || '资源说明'" width="600px">
+    <el-dialog align-center v-model="showPreviewDialog" :title="previewItem?.name || '资源说明'" width="600px">
       <div v-if="previewItem" class="markdown-preview" v-html="renderMarkdown(previewItem.description)"></div>
       <template #footer>
         <el-button @click="showPreviewDialog = false">关闭</el-button>

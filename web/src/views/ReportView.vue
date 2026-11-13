@@ -732,7 +732,7 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
       </div>
     </template>
 
-    <el-dialog v-model="showCreatePeriod" title="新建月报周期" width="520px">
+    <el-dialog align-center v-model="showCreatePeriod" title="新建月报周期" width="520px">
       <el-form label-width="100px">
         <el-form-item label="周期">
           <el-input v-model="createPeriodForm.period_key" placeholder="2026-09" />
@@ -753,7 +753,7 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showAddMember" title="添加提交成员" width="520px">
+    <el-dialog align-center v-model="showAddMember" title="添加提交成员" width="520px">
       <p class="notify-desc">按年级勾选要加入提交名单的成员，已加入的成员不可重复选择：</p>
       <div v-if="gradeGroups.length" class="notify-members">
         <div v-for="g in gradeGroups" :key="g.year" class="grade-group">
@@ -781,7 +781,7 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
       </template>
     </el-dialog>
 
-    <el-dialog
+    <el-dialog align-center
       v-model="showReviewDialog"
       :title="reviewTarget ? `${reviewTarget.report.author_name} · 月报` : '月报详情'"
       width="720px"
@@ -822,7 +822,7 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
       </template>
     </el-dialog>
 
-    <el-dialog
+    <el-dialog align-center
       v-model="showRosterPreview"
       :title="rosterPreview ? `${rosterPreview.report.author_name} · 月报` : '月报预览'"
       width="720px"

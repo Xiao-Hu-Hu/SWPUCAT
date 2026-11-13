@@ -57,7 +57,8 @@ function fixture() {
       ElMessage: Object.fromEntries(['success', 'error', 'warning', 'info'].map(kind => [kind, text => messages.push({ kind, text })])),
       ElMessageBox: {}
     },
-    marked: { marked: { parse: text => text } }
+    '@/utils/markdown': { renderMarkdown: text => text },
+    '@/composables/usePaginationLayout': { usePaginationLayout: () => ({ layout: vue.ref('prev, pager, next'), pagerCount: vue.ref(7), small: vue.ref(false) }) }
   }).default
   const state = component.setup({}, { expose() {} })
   const file = new File(['test file'], 'test.pdf')

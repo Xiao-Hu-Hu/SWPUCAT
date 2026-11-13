@@ -22,8 +22,10 @@ const summary = ref<AgentAuditSummary | null>(null)
 const detail = ref<AgentAuditDetail | null>(null)
 const detailVisible = ref(false)
 
+const dateShortcuts = [1, 7, 30].map(days => ({ text: days === 1 ? '最近24小时' : `最近${days}天`, value: () => [new Date(Date.now() - days * 86400000), new Date()] }))
+const statusNames: Record<string, string> = { success:'成功', rejected:'已拒绝', busy:'繁忙', unavailable:'不可用', timeout:'超时', canceled:'已取消', error:'失败' }
 const statusRows = computed(() => Object.entries(summary.value?.status_counts || {})
-  .map(([name, count]) => ({ name, count }))
+  .map(([name, count]) => ({ name: statusNames[name] || name, count }))
   .sort((left, right) => right.count - left.count))
 
 const toolRows = computed(() => Object.entries(summary.value?.tool_counts || {})
@@ -51,7 +53,7 @@ async function load() {
     total.value = listResponse.data.total || 0
     summary.value = summaryResponse.data
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || 'Agent 审计数据加载失败')
+    ElMessage.error(error?.response?.data?.message || '助手运行记录加载失败')
   } finally {
     loading.value = false
   }
@@ -78,7 +80,7 @@ async function openDetail(run: AgentAuditRun) {
 }
 
 function formatPercent(value?: number) {
-  return `${((value || 0) * 100).toFixed(1)}%`
+  return summary.value?.total_runs ? `${((value || 0) * 100).toFixed(1)}%` : '—'
 }
 
 function formatDuration(value?: number) {
@@ -122,13 +124,13 @@ onMounted(() => void load())
   <div class="audit-page">
     <div class="page-heading">
       <div>
-        <h2>Agent 运行审计</h2>
+        <h2>调用概览</h2>
         <p>仅展示隐私安全投影；不保存提示词、回答正文、授权头或原始敏感参数。</p>
       </div>
       <div class="filters">
-        <el-date-picker v-model="range" type="datetimerange" :clearable="false" start-placeholder="开始时间" end-placeholder="结束时间" />
+        <el-date-picker v-model="range" type="datetimerange" :shortcuts="dateShortcuts" format="YYYY-MM-DD HH:mm" :clearable="false" start-placeholder="开始时间" end-placeholder="结束时间" />
         <el-select v-model="status" clearable placeholder="全部状态" style="width: 150px">
-          <el-option v-for="item in ['success', 'rejected', 'busy', 'unavailable', 'timeout', 'canceled', 'error']" :key="item" :label="item" :value="item" />
+          <el-option v-for="item in ['success', 'rejected', 'busy', 'unavailable', 'timeout', 'canceled', 'error']" :key="item" :label="statusNames[item] || item" :value="item" />
         </el-select>
         <el-button type="primary" :loading="loading" @click="applyFilters">查询</el-button>
       </div>
@@ -139,7 +141,7 @@ onMounted(() => void load())
       <div class="metric-card"><span>成功率</span><strong>{{ formatPercent(summary?.success_rate) }}</strong></div>
       <div class="metric-card"><span>平均延迟</span><strong>{{ formatDuration(summary?.average_duration_ms) }}</strong></div>
       <div class="metric-card"><span>总 Token</span><strong>{{ formatTokens(summary?.total_tokens) }}</strong></div>
-      <div class="metric-card"><span>估算费用</span><strong>{{ formatCost(summary?.estimated_cost) }}</strong></div>
+      <div class="metric-card"><span title="费用取决于服务返回的用量及价格配置，未提供时显示未知">估算费用 ⓘ</span><strong>{{ formatCost(summary?.estimated_cost) }}</strong></div>
     </div>
 
     <div class="distribution-grid">
@@ -164,7 +166,7 @@ onMounted(() => void load())
       <el-table v-loading="loading" :data="runs" empty-text="当前筛选范围内没有记录" @row-click="openDetail">
         <el-table-column label="时间" min-width="170"><template #default="{ row }">{{ formatTime(row.created_at) }}</template></el-table-column>
         <el-table-column prop="actor_role" label="角色" width="120" />
-        <el-table-column label="状态" width="120"><template #default="{ row }"><el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag></template></el-table-column>
+        <el-table-column label="状态" width="120"><template #default="{ row }"><el-tag :type="statusType(row.status)" size="small">{{ statusNames[row.status] || row.status }}</el-tag></template></el-table-column>
         <el-table-column label="耗时" width="120"><template #default="{ row }">{{ formatDuration(row.duration_ms) }}</template></el-table-column>
         <el-table-column label="Token" width="120"><template #default="{ row }">{{ formatTokens(row.total_tokens) }}</template></el-table-column>
         <el-table-column label="费用" width="120"><template #default="{ row }">{{ formatCost(row.estimated_cost) }}</template></el-table-column>
@@ -174,7 +176,7 @@ onMounted(() => void load())
       <el-pagination v-model:current-page="page" :page-size="pageSize" :total="total" layout="prev, pager, next, total" @current-change="load" />
     </section>
 
-    <el-dialog v-model="detailVisible" title="运行审计详情" width="760px">
+    <el-dialog align-center v-model="detailVisible" title="运行审计详情" width="760px">
       <div v-loading="detailLoading" class="detail-body">
         <template v-if="detail">
           <el-descriptions :column="2" border>

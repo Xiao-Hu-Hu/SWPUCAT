@@ -275,19 +275,23 @@ async function handleDelete(id: number) {
     // Cancelled
   }
 }
+function announcementSummary(content: string, title: string) {
+  return content.split('\n').filter(line => line.replace(/^#+\s*/, '').trim() !== title.trim()).join(' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/[#*`>_~|]/g, '').trim().slice(0, 180) || '点击查看公告详情'
+}
 </script>
 
 <template>
   <div class="announcements">
     <div class="card">
       <div class="card-header">
-        <h3>公告管理</h3>
+        <h3>团队公告</h3>
         <el-button v-if="authStore.isCaptain || authStore.isSuperAdmin" type="primary" @click="openCreate">
           <el-icon><Plus /></el-icon> 发布公告
         </el-button>
       </div>
 
-      <section v-if="authStore.isCaptain || authStore.isSuperAdmin" class="draft-section">
+      <section v-if="authStore.isCaptain || authStore.isSuperAdmin" class="draft-section" :class="{ 'is-empty': !drafts.length }">
         <div class="section-title">
           <span>待审核草稿</span>
           <el-tag size="small" type="info">{{ drafts.length }}</el-tag>
@@ -321,13 +325,12 @@ async function handleDelete(id: number) {
               <span>{{ ann.created_at }}</span>
             </div>
           </div>
-          <div class="ann-content markdown-body" v-html="renderMarkdown(ann.content)"></div>
+          <p class="ann-summary">{{ announcementSummary(ann.content, ann.title) }}</p>
           <div class="ann-footer">
-            <div class="ann-actions" v-if="authStore.isCaptain || authStore.isSuperAdmin">
-              <el-button size="small" @click="openEdit(ann)">编辑</el-button>
-              <el-button size="small" type="success" @click="openNotify(ann)">通知</el-button>
-              <el-button size="small" type="danger" @click="handleDelete(ann.id)">删除</el-button>
-            </div>
+            <el-dropdown v-if="authStore.isCaptain || authStore.isSuperAdmin" trigger="click">
+              <el-button size="small" text>管理公告<el-icon><ArrowDown /></el-icon></el-button>
+              <template #dropdown><el-dropdown-menu><el-dropdown-item @click="openEdit(ann)">编辑</el-dropdown-item><el-dropdown-item @click="openNotify(ann)">通知成员</el-dropdown-item><el-dropdown-item divided @click="handleDelete(ann.id)">删除公告</el-dropdown-item></el-dropdown-menu></template>
+            </el-dropdown>
             <el-button class="detail-btn" size="small" type="primary" text @click="openDetail(ann)">
               查看详情
             </el-button>
@@ -351,7 +354,7 @@ async function handleDelete(id: number) {
     </div>
 
     <!-- Create / Edit Dialog -->
-    <el-dialog v-model="showDialog" :title="editingDraftId ? '编辑公告草稿' : (editingId ? '编辑公告' : '发布公告')" width="600px">
+    <el-dialog align-center v-model="showDialog" :title="editingDraftId ? '编辑公告草稿' : (editingId ? '编辑公告' : '发布公告')" width="600px">
       <el-form :model="form" label-width="80px">
         <el-form-item label="标题">
           <el-input v-model="form.title" placeholder="请输入公告标题" />
@@ -370,7 +373,7 @@ async function handleDelete(id: number) {
     </el-dialog>
 
     <!-- Detail Dialog -->
-    <el-dialog v-model="showDetail" :title="detailAnn?.title || '公告详情'" width="700px" class="detail-dialog">
+    <el-dialog align-center v-model="showDetail" :title="detailAnn?.title || '公告详情'" width="700px" class="detail-dialog">
       <div v-if="detailAnn" class="detail-meta">
         <span>{{ detailAnn.author_name }}</span>
         <span>{{ detailAnn.created_at }}</span>
@@ -380,7 +383,7 @@ async function handleDelete(id: number) {
     </el-dialog>
 
     <!-- Notify Dialog -->
-    <el-dialog v-model="showNotifyDialog" title="通知成员" width="500px">
+    <el-dialog align-center v-model="showNotifyDialog" title="通知成员" width="500px">
       <p class="notify-desc">选择要发送邮件通知的成员：</p>
       <div class="notify-members">
         <div v-for="group in gradeGroups" :key="group.year" class="grade-group">
@@ -783,4 +786,9 @@ async function handleDelete(id: number) {
   .ann-actions { flex-wrap: wrap; gap: 0.5rem; }
   .section-title { flex-wrap: wrap; gap: 0.5rem; }
 }
+
+.ann-summary { color:var(--text-secondary); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; line-height:1.8; margin:12px 0; overflow-wrap:anywhere; }
+.draft-section.is-empty { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; }
+.draft-section.is-empty .section-title { margin:0; }
+.draft-section.is-empty .draft-empty { padding:0; }
 </style>
