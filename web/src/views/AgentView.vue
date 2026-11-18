@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   agentApi,
@@ -11,42 +13,22 @@ import {
 } from '@/api/agent'
 import { knowledgeApi } from '@/api/knowledge'
 import { useAuthStore } from '@/stores/auth'
+import { newGreetingMessage, newTurnIdentifier, useAgentStore, type ChatMessage } from '@/stores/agent'
 import { renderMarkdown } from '@/utils/markdown'
 
-interface ChatMessage {
-  role: 'user' | 'assistant'
-  content: string
-  createdAt: string
-  sources?: AgentKnowledgeSource[]
-  id?: number
-  localId: string
-  status: 'completed' | 'pending' | 'streaming' | 'failed' | 'stopped'
-  clientTurnId?: string
-  generationId?: string
-  requestId?: string
-  sourceMessage?: string
-  regenerate?: boolean
-  feedback?: boolean
-  proposals?: AgentActionProposal[]
-  actionResults?: Record<string, AgentActionResult>
-}
-
-const greetingMessage = '你好，我可以协助查询知识库、查看打卡状态；涉及打卡或创建草稿时，我会先给出待确认操作。'
-
-function newGreetingMessage(): ChatMessage {
-  return { role: 'assistant', content: greetingMessage, createdAt: new Date().toISOString(), localId: `greeting-${Date.now()}`, status: 'completed' }
-}
-
 const authStore = useAuthStore()
+const agentStore = useAgentStore()
+const { conversations, sessionId, messages, loading } = storeToRefs(agentStore)
+const route = useRoute()
+const router = useRouter()
+const ownerId = authStore.user?.id
+const viewRequests = new AbortController()
+const isViewActive = () => !viewRequests.signal.aborted && authStore.user?.id === ownerId
 const input = ref('')
-const loading = ref(false)
 const historyLoading = ref(false)
 const conversationsLoading = ref(false)
 const creatingConversation = ref(false)
-const conversations = ref<AgentConversation[]>([])
 const sessionsOpen = ref(false)
-const messages = ref<ChatMessage[]>([newGreetingMessage()])
-const sessionId = ref('')
 const messagesRef = ref<HTMLElement | null>(null)
 const downloadingSources = ref<Record<number, boolean>>({})
 const historyRequestId = ref(0)
@@ -54,29 +36,46 @@ const editingSessionId = ref('')
 const editingTitle = ref('')
 const renamingSessionId = ref('')
 const deletingSessionId = ref('')
-const activeAbortController = ref<AbortController | null>(null)
 const feedbackSaving = ref<Record<string, boolean>>({})
 const actionConfirming = ref<Record<string, boolean>>({})
 const expandedSources = ref<Record<string, boolean>>({})
-
-const sessionStorageKey = () => `swpucat-agent-session:${authStore.user?.id || 'anonymous'}`
 
 onMounted(() => {
   void initializeConversations()
 })
 
 onBeforeUnmount(() => {
-  activeAbortController.value?.abort()
+  viewRequests.abort()
 })
 
+watch(() => route.query.session, (target) => {
+  if (route.name === 'agent' && typeof target === 'string' && target !== sessionId.value && !loading.value && !conversationsLoading.value) {
+    void loadConversation(target)
+  }
+})
+
+watch(() => [messages.value.length, messages.value[messages.value.length - 1]?.content], scrollToBottom)
+
 async function initializeConversations() {
+  if (sessionId.value || loading.value) {
+    const requested = route.query.session
+    if (!loading.value && typeof requested === 'string' && requested !== sessionId.value) {
+      await loadConversation(requested)
+    } else {
+      if (!loading.value) recoverTokenlessProposals()
+      await scrollToBottom()
+    }
+    return
+  }
   conversationsLoading.value = true
   try {
-    const res = await agentApi.listConversations()
+    const res = await agentApi.listConversations(viewRequests.signal)
+    if (!isViewActive()) return
     const items = Array.isArray(res.data) ? res.data : []
     conversations.value = items
 
-    const storedSessionId = localStorage.getItem(sessionStorageKey()) || ''
+    const requested = route.query.session
+    const storedSessionId = typeof requested === 'string' ? requested : localStorage.getItem(agentStore.sessionStorageKey()) || ''
     const preferred = items.find((item) => item.session_id === storedSessionId) || items[0]
     if (preferred) {
       await loadConversation(preferred.session_id)
@@ -84,6 +83,7 @@ async function initializeConversations() {
       resetDraft()
     }
   } catch {
+    if (!isViewActive()) return
     resetDraft()
     ElMessage.error('会话列表加载失败，请稍后重试')
   } finally {
@@ -99,8 +99,7 @@ async function scrollToBottom() {
 }
 
 function resetDraft() {
-  sessionId.value = ''
-  localStorage.removeItem(sessionStorageKey())
+  agentStore.activateSession('')
   messages.value = [newGreetingMessage()]
 }
 
@@ -108,39 +107,30 @@ async function createNewConversation() {
   if (creatingConversation.value || conversationsLoading.value || loading.value || historyLoading.value || editingSessionId.value || renamingSessionId.value) return
   creatingConversation.value = true
   try {
-    const res = await agentApi.createConversation()
+    const res = await agentApi.createConversation(undefined, viewRequests.signal)
+    if (!isViewActive()) return
     const created = res.data
     conversations.value = [created, ...conversations.value.filter((item) => item.session_id !== created.session_id)]
-    sessionId.value = created.session_id
-    localStorage.setItem(sessionStorageKey(), created.session_id)
+    agentStore.activateSession(created.session_id)
+    clearSessionLink()
     editingSessionId.value = ''
     messages.value = [newGreetingMessage()]
     await scrollToBottom()
   } catch {
-    ElMessage.error('新建会话失败，请稍后重试')
+    if (isViewActive()) ElMessage.error('新建会话失败，请稍后重试')
   } finally {
     creatingConversation.value = false
   }
 }
 
-async function ensureConversation() {
-  if (sessionId.value) return true
-  try {
-    const res = await agentApi.createConversation()
-    const created = res.data
-    conversations.value = [created, ...conversations.value.filter((item) => item.session_id !== created.session_id)]
-    sessionId.value = created.session_id
-    localStorage.setItem(sessionStorageKey(), created.session_id)
-    return true
-  } catch {
-    ElMessage.error('无法创建会话，请稍后重试')
-    return false
-  }
+function clearSessionLink() {
+  if (route.name === 'agent' && route.query.session) void router.replace({ name: 'agent' })
 }
 
 async function selectConversation(item: AgentConversation) {
   if (item.session_id === sessionId.value && !historyLoading.value) return
   if (loading.value || historyLoading.value || creatingConversation.value || editingSessionId.value || renamingSessionId.value) return
+  clearSessionLink()
   await loadConversation(item.session_id)
   sessionsOpen.value = false
 }
@@ -157,18 +147,22 @@ async function deleteConversation(item: AgentConversation) {
     return
   }
 
+  if (!isViewActive()) return
   deletingSessionId.value = item.session_id
   try {
     await agentApi.deleteConversation(item.session_id)
+    if (!isViewActive()) return
     const wasCurrent = sessionId.value === item.session_id
     conversations.value = conversations.value.filter((conversation) => conversation.session_id !== item.session_id)
     if (wasCurrent) {
+      clearSessionLink()
       resetDraft()
       const next = conversations.value[0]
       if (next) await loadConversation(next.session_id)
     }
     ElMessage.success('会话已永久删除')
   } catch (error: any) {
+    if (!isViewActive()) return
     const detail = error?.response?.data?.message
     ElMessage.error(detail || '会话删除失败，请稍后重试')
   } finally {
@@ -180,10 +174,9 @@ async function loadConversation(targetSessionId: string) {
   const requestId = ++historyRequestId.value
   historyLoading.value = true
   try {
-    const res = await agentApi.getConversation(targetSessionId)
-    if (requestId !== historyRequestId.value) return
-    sessionId.value = res.data.conversation.session_id
-    localStorage.setItem(sessionStorageKey(), sessionId.value)
+    const res = await agentApi.getConversation(targetSessionId, viewRequests.signal)
+    if (!isViewActive() || requestId !== historyRequestId.value) return
+    agentStore.activateSession(res.data.conversation.session_id)
     messages.value = res.data.messages
       .filter((item) => item.role === 'user' || item.role === 'assistant')
       .map(messageFromHistory)
@@ -200,7 +193,7 @@ async function loadConversation(targetSessionId: string) {
     }
     recoverTokenlessProposals()
   } catch (error: any) {
-    if (requestId !== historyRequestId.value) return
+    if (!isViewActive() || requestId !== historyRequestId.value) return
     if (error?.response?.status === 404) {
       conversations.value = conversations.value.filter((item) => item.session_id !== targetSessionId)
       if (targetSessionId === sessionId.value) resetDraft()
@@ -256,113 +249,12 @@ function parseSources(value?: string): AgentKnowledgeSource[] {
   }
 }
 
-async function refreshConversationList() {
-  try {
-    const res = await agentApi.listConversations()
-    conversations.value = Array.isArray(res.data) ? res.data : []
-  } catch {
-    // The current answer is already available. A later page refresh can retry
-    // the list request without interrupting the completed chat turn.
-  }
-}
-
 async function sendMessage() {
   const message = input.value.trim()
-  if (!message || conversationsLoading.value || loading.value || historyLoading.value || editingSessionId.value || renamingSessionId.value) return
-  if (!(await ensureConversation())) return
-
-  const clientTurnId = newTurnIdentifier()
-  const generationId = newTurnIdentifier()
-  messages.value.push({
-    role: 'user', content: message, createdAt: new Date().toISOString(), localId: `user-${clientTurnId}`,
-    status: 'completed', clientTurnId, generationId, sourceMessage: message
-  })
-  const assistantIndex = messages.value.push({
-    role: 'assistant', content: '', createdAt: new Date().toISOString(), localId: `assistant-${clientTurnId}`,
-    status: 'pending', clientTurnId, generationId, sourceMessage: message, regenerate: false, sources: []
-  }) - 1
+  if (!message || conversationsLoading.value || loading.value || historyLoading.value || creatingConversation.value || deletingSessionId.value || editingSessionId.value || renamingSessionId.value) return
   input.value = ''
-  await scrollToBottom()
-  await runGeneration(assistantIndex)
-}
-
-function newTurnIdentifier(): string {
-  const bytes = new Uint8Array(16)
-  crypto.getRandomValues(bytes)
-  return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('')
-}
-
-async function runGeneration(assistantIndex: number) {
-  const target = messages.value[assistantIndex]
-  if (!target || target.role !== 'assistant' || !target.sourceMessage || !target.clientTurnId || !target.generationId || loading.value) return
-  const targetSessionId = sessionId.value
-  const controller = new AbortController()
-  activeAbortController.value = controller
-  loading.value = true
-  target.status = 'pending'
-  const previousContent = target.content
-  const previousSources = target.sources
-  const previousMessageID = target.id
-  const previousRequestID = target.requestId
-  const regeneration = Boolean(target.regenerate)
-  target.content = ''
-  target.sources = []
-  target.feedback = undefined
-  try {
-    const data = await agentApi.chatStream(
-      target.sourceMessage,
-      targetSessionId,
-      target.clientTurnId,
-      target.generationId,
-      Boolean(target.regenerate),
-      (delta) => {
-        if (messages.value[assistantIndex] !== target) return
-        target.status = 'streaming'
-        target.content += delta
-        void scrollToBottom()
-      },
-      controller.signal
-    )
-    if (data.session_id && data.session_id !== sessionId.value) {
-      sessionId.value = data.session_id
-      localStorage.setItem(sessionStorageKey(), data.session_id)
-    }
-    target.content = data.answer
-    target.sources = data.sources || []
-    target.proposals = data.proposals || []
-    target.actionResults = {}
-    target.createdAt = new Date().toISOString()
-    target.id = data.message_id
-    target.clientTurnId = data.client_turn_id || target.clientTurnId
-    target.generationId = data.generation_id || target.generationId
-    target.requestId = data.request_id
-    target.status = data.conversation_persisted ? 'completed' : 'failed'
-    target.regenerate = data.conversation_persisted ? false : regeneration
-    if (!data.conversation_persisted) {
-      ElMessage.warning('回答已生成，但会话记录保存失败；可点击重试再次保存')
-    } else {
-      await refreshConversationList()
-    }
-  } catch (error: any) {
-    const stopped = controller.signal.aborted || error?.name === 'AbortError'
-    if (target.regenerate && previousContent) {
-      target.content = previousContent
-      target.sources = previousSources
-      target.id = previousMessageID
-      target.requestId = previousRequestID
-    }
-    target.status = stopped ? 'stopped' : 'failed'
-    if (stopped) {
-      ElMessage.info('已停止生成，未保存本次部分回答')
-    } else {
-      const detail = error?.message || error?.response?.data?.message
-      ElMessage.error(detail || '智能助手暂时不可用，请稍后重试')
-    }
-  } finally {
-    if (activeAbortController.value === controller) activeAbortController.value = null
-    loading.value = false
-    await scrollToBottom()
-  }
+  await agentStore.sendMessage(message)
+  if (isViewActive() && !sessionId.value && !input.value) input.value = message
 }
 
 function proposalStableKey(proposal: AgentActionProposal): string {
@@ -467,13 +359,10 @@ function recoverTokenlessProposals() {
   }
 }
 
-function stopGeneration() {
-  activeAbortController.value?.abort()
-}
-
 async function retryGeneration(index: number) {
   if (loading.value) return
-  await runGeneration(index)
+  const target = messages.value[index]
+  if (target) await agentStore.generateResponse(target)
 }
 
 async function regenerateResponse(index: number) {
@@ -481,7 +370,7 @@ async function regenerateResponse(index: number) {
   if (!target || target.role !== 'assistant' || !target.clientTurnId || !target.sourceMessage || loading.value) return
   target.generationId = newTurnIdentifier()
   target.regenerate = true
-  await runGeneration(index)
+  await agentStore.generateResponse(target)
 }
 
 function isLastAssistant(index: number): boolean {
@@ -554,11 +443,13 @@ async function saveRename(item: AgentConversation) {
   renamingSessionId.value = item.session_id
   try {
     const res = await agentApi.updateConversationTitle(item.session_id, title)
+    if (authStore.user?.id !== ownerId) return
     const updated = res.data
     const index = conversations.value.findIndex((conversation) => conversation.session_id === item.session_id)
     if (index >= 0) conversations.value[index] = { ...conversations.value[index], ...updated }
     cancelRename()
   } catch (error: any) {
+    if (!isViewActive()) return
     const detail = error?.response?.data?.message
     ElMessage.error(detail || '会话标题修改失败，请稍后重试')
   } finally {
@@ -1001,7 +892,7 @@ function handleMarkdownClick(event: MouseEvent, message: ChatMessage) {
           />
           <div class="composer-footer">
             <span class="desktop-composer-hint">Enter 发送，Shift + Enter 换行</span><span class="mobile-composer-hint">点击发送，与助手交流</span>
-            <el-button v-if="loading" type="danger" plain @click="stopGeneration">停止生成</el-button>
+            <el-button v-if="loading" type="danger" plain @click="agentStore.stopGeneration">停止生成</el-button>
             <el-button v-else type="primary" :disabled="conversationsLoading || historyLoading || Boolean(editingSessionId) || Boolean(renamingSessionId) || !input.trim()" @click="sendMessage">发送</el-button>
           </div>
         </div>
