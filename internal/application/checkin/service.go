@@ -3,6 +3,7 @@ package checkin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -645,6 +646,8 @@ func (s *CheckinService) SetRequirements(ctx context.Context, req RequirementsDT
 	return s.settingsRepo.Set(ctx, "checkin_requirements", string(data))
 }
 
+var ErrNoReportMembers = errors.New("no members to include in the check-in report")
+
 func (s *CheckinService) PublishReport(ctx context.Context) (string, string, error) {
 	// Get weekly stats
 	stats, err := s.GetStatsByPeriod(ctx, "week")
@@ -670,7 +673,7 @@ func (s *CheckinService) PublishReport(ctx context.Context) (string, string, err
 	}
 
 	// Build report rows
-	now := time.Now()
+	now := s.now()
 	weekday := now.Weekday()
 	if weekday == time.Sunday {
 		weekday = 7
@@ -688,40 +691,46 @@ func (s *CheckinService) PublishReport(ctx context.Context) (string, string, err
 		return stats[i].Nickname < stats[j].Nickname
 	})
 
+	rowCount := 0
 	for _, stat := range stats {
 		u := userMap[stat.UserID]
 		studentID := ""
 		grade := 0
 		if u != nil {
 			studentID = string(u.StudentID)
-			grade = gradeFromStudentID(studentID)
+			grade = gradeFromStudentIDAt(studentID, now)
 		}
 
-		requiredMin := reqMap[grade]
+		requiredMin, configured := reqMap[grade]
+		if configured && requiredMin == 0 {
+			continue
+		}
 		totalMin := stat.TotalMinutes
-		shortfall := float64(requiredMin) - totalMin
-
-		status := "达标"
-		if shortfall > 0 {
-			status = fmt.Sprintf("-%.1fh", math.Round(shortfall*10)/10/60)
+		requirement, status := "未配置", "—"
+		if configured && requiredMin > 0 {
+			requirement = fmt.Sprintf("%.1fh", float64(requiredMin)/60)
+			status = "达标"
+			if shortfall := float64(requiredMin) - totalMin; shortfall > 0 {
+				status = fmt.Sprintf("-%.1fh", math.Round(shortfall*10)/10/60)
+			}
 		}
 
-		sb.WriteString(fmt.Sprintf("| %s | %s | %d | %.1fh | %.1fh | %s |\n",
+		sb.WriteString(fmt.Sprintf("| %s | %s | %d | %.1fh | %s | %s |\n",
 			stat.Nickname,
 			studentID,
 			grade,
 			math.Round(totalMin*10)/10/60,
-			math.Round(float64(requiredMin)*10)/10/60,
+			requirement,
 			status,
 		))
+		rowCount++
+	}
+	if rowCount == 0 {
+		return "", "", ErrNoReportMembers
 	}
 
 	title := fmt.Sprintf("本周打卡报告（%s ~ %s）", weekStart, weekEnd)
 	return title, sb.String(), nil
-}
-
-func gradeFromStudentID(studentID string) int {
-	return gradeFromStudentIDAt(studentID, time.Now())
 }
 
 func gradeFromStudentIDAt(studentID string, now time.Time) int {

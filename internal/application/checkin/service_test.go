@@ -28,6 +28,10 @@ func (r *personalCheckinRepo) FindByUserIDAndDateRange(_ context.Context, userID
 	return r.records, r.err
 }
 
+func (r *personalCheckinRepo) FindByDateRange(context.Context, string, string) ([]*checkindomain.CheckinRecord, error) {
+	return r.records, r.err
+}
+
 type personalUserRepo struct {
 	userdomain.Repository
 	member      *userdomain.User
@@ -70,6 +74,37 @@ type checkinSettingsStub struct {
 
 func (s checkinSettingsStub) Get(context.Context, string) (string, error) { return s.value, s.err }
 func (s checkinSettingsStub) Set(context.Context, string, string) error   { return nil }
+
+func TestPublishReportExcludesOnlyMembersWithExplicitZeroRequirement(t *testing.T) {
+	users := &onlineUserRepo{members: []*userdomain.User{
+		{ID: 1, StudentID: "202331060420", Nickname: "免打卡成员"},
+		{ID: 2, StudentID: "202431060421", Nickname: "应打卡未打卡成员"},
+		{ID: 3, StudentID: "202531060422", Nickname: "要求未配置成员"},
+	}}
+	records := &personalCheckinRepo{records: []*checkindomain.CheckinRecord{
+		checkinRecord(1, 1, checkindomain.CheckinTypeIn, "2026-09-16", "08:00:00"),
+		checkinRecord(2, 1, checkindomain.CheckinTypeOut, "2026-09-16", "09:00:00"),
+	}}
+	service := NewCheckinService(records, users, nil, checkinSettingsStub{
+		value: `{"requirements":[{"grade":4,"minutes":0},{"grade":3,"minutes":360}]}`,
+	})
+	service.now = func() time.Time { return time.Date(2026, time.September, 17, 12, 0, 0, 0, time.Local) }
+
+	_, report, err := service.PublishReport(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(report, "免打卡成员") ||
+		!strings.Contains(report, "| 应打卡未打卡成员 | 202431060421 | 3 | 0.0h | 6.0h | -6.0h |") ||
+		!strings.Contains(report, "| 要求未配置成员 | 202531060422 | 2 | 0.0h | 未配置 | — |") {
+		t.Fatalf("unexpected report:\n%s", report)
+	}
+
+	users.members = users.members[:1]
+	if title, report, err := service.PublishReport(context.Background()); !errors.Is(err, ErrNoReportMembers) || title != "" || report != "" {
+		t.Fatalf("all exempt members: title=%q, report=%q, err=%v", title, report, err)
+	}
+}
 
 func TestGetPersonalWorkHoursCalculatesWeekMonthAndRequirement(t *testing.T) {
 	fixedNow := time.Date(2026, time.September, 17, 12, 0, 0, 0, time.Local)
