@@ -6,6 +6,11 @@ import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
 import { renderMarkdown } from '@/utils/markdown'
 
+function formatDeadline(value: string) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '未设置' : date.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
 const authStore = useAuthStore()
 const isManager = computed(() => authStore.isCaptain || authStore.isSuperAdmin)
 
@@ -72,19 +77,22 @@ const reviewFindings = computed<QualityFinding[]>(() => reviewTarget.value?.vers
 const submittedReports = computed(() => reports.value.filter(r => r.status === 'submitted'))
 const submittedCount = computed(() => roster.value.filter(r => !!r.submitted_at).length)
 
-const firstDraftHint = computed(() => '尚未创建本期月报')
+const firstDraftHint = computed(() => !selectedPeriod.value ? '请选择月报周期' : !isCurrentPeriodMember.value ? '你不在本期提交名单中' : periodLocked.value ? '本期已截止，尚未创建月报' : '尚未创建本期月报，可点击创建月报开始填写')
 
-onMounted(async () => {
-  await loadPeriods()
-  await loadMembership()
-  if (isManager.value) {
-    await loadMembers()
+const pageLoading = ref(true)
+const pageError = ref('')
+onMounted(loadPage)
+async function loadPage() {
+  pageLoading.value = true
+  pageError.value = ''
+  try {
+    await loadPeriods()
+    await Promise.all([loadMembership(), ...(isManager.value ? [loadMembers()] : [])])
+    if (selectedPeriodId.value) await Promise.all([loadReports(), ...(isManager.value ? [loadRoster()] : [])])
+  } finally {
+    pageLoading.value = false
   }
-  if (selectedPeriodId.value) {
-    await loadReports()
-    if (isManager.value) await loadRoster()
-  }
-})
+}
 
 function periodStatusLabel(status: string): string {
   if (status === 'open') return '进行中'
@@ -194,7 +202,7 @@ async function loadPeriods() {
       selectedPeriodId.value = periods.value[0].id
     }
   } catch {
-    console.error('Failed to load periods')
+    pageError.value = '月报周期加载失败，请重试'
   }
 }
 
@@ -255,7 +263,7 @@ async function loadRoster() {
     const res = await reportApi.listRoster(selectedPeriodId.value)
     roster.value = res.data || []
   } catch {
-    roster.value = []
+    pageError.value = '提交名单加载失败，请重试'
   }
 }
 
@@ -272,7 +280,7 @@ async function loadCurrentVersion() {
     editorTitle.value = res.data.title || ''
     editorBody.value = res.data.body_markdown || ''
   } catch {
-    console.error('Failed to load report version')
+    pageError.value = '月报正文加载失败，请重试'
   }
 }
 
@@ -284,14 +292,18 @@ async function loadReports() {
     myReport.value = reports.value.find(r => r.author_id === authStore.user?.id) || null
     await loadCurrentVersion()
   } catch {
-    console.error('Failed to load reports')
+    pageError.value = '月报加载失败，请重试'
   }
 }
 
 async function handlePeriodChange() {
-  await loadMembership()
-  await loadReports()
-  if (isManager.value) await loadRoster()
+  pageLoading.value = true
+  pageError.value = ''
+  try {
+    await Promise.all([loadMembership(), loadReports(), ...(isManager.value ? [loadRoster()] : [])])
+  } finally {
+    pageLoading.value = false
+  }
 }
 
 async function handleCreateReport() {
@@ -579,9 +591,17 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
 
 <template>
   <div class="report">
+    <ContentState :loading="pageLoading" :error="pageError" @retry="loadPage">
+      <template #skeleton>
+        <div class="report-placeholder">
+        <div class="card skeleton-shell" aria-hidden="true"><div class="card-header"><h3>月报周期</h3><span class="sk-block sk-button"></span></div><div class="period-meta"><span class="sk-block sk-meta"></span></div></div>
+        <div v-if="isManager" class="report-progress" aria-hidden="true"><div v-for="n in 4" :key="n" class="skeleton-shell"><span class="sk-block sk-meta"></span><strong><span class="sk-block sk-title"></span></strong></div></div>
+        <div v-for="title in (isManager ? ['我的月报','审批管理','提交名单'] : ['我的月报'])" :key="title" class="card skeleton-shell" aria-hidden="true"><div class="card-header"><h3>{{ title }}</h3></div><p class="compact-empty"><span class="sk-block sk-meta"></span></p></div>
+              </div>
+      </template>
     <div class="card">
       <div class="card-header">
-        <h3>月报</h3>
+        <h3>月报周期</h3>
         <div class="actions">
           <el-select v-model="selectedPeriodId" placeholder="选择月份" @change="handlePeriodChange" style="width: 240px">
             <el-option v-for="p in periods" :key="p.id" :value="p.id" :label="`${p.period_key} · ${periodStatusLabel(periodEffectiveStatus(p))}`" />
@@ -592,11 +612,17 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
       <div v-if="selectedPeriod" class="period-meta">
         <span>{{ selectedPeriod.starts_on }} ~ {{ selectedPeriod.ends_on }}</span>
         <el-tag size="small" :type="periodStatusTag(periodEffectiveStatus(selectedPeriod))">{{ periodStatusLabel(periodEffectiveStatus(selectedPeriod)) }}</el-tag>
-        <span v-if="selectedPeriod.due_at">截止 {{ selectedPeriod.due_at }}</span>
+        <span v-if="selectedPeriod.due_at">截止 {{ formatDeadline(selectedPeriod.due_at) }}</span>
         <span v-if="selectedPeriod.member_count">应提交 {{ selectedPeriod.member_count }} 人</span>
       </div>
     </div>
 
+    <div v-if="isManager && selectedPeriod" class="report-progress" aria-label="月报提交进度">
+      <div><span>应提交</span><strong>{{ roster.length }} <small>人</small></strong></div>
+      <div><span>已提交</span><strong>{{ submittedCount }} <small>人</small></strong></div>
+      <div><span>待审核</span><strong>{{ submittedReports.length }} <small>份</small></strong></div>
+      <div><span>{{ periodLocked ? '截止未提交' : '待提交' }}</span><strong>{{ Math.max(0, roster.length - submittedCount) }} <small>人</small></strong></div>
+    </div>
     <div class="card report-mine">
       <div class="card-header">
         <h3>我的月报</h3>
@@ -677,7 +703,7 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
           </div>
         </template>
       </template>
-      <el-empty v-else :description="firstDraftHint" :image-size="64" />
+      <p v-else class="compact-empty" role="status">{{ firstDraftHint }}</p>
     </div>
 
     <template v-if="isManager">
@@ -698,7 +724,7 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
             </div>
           </div>
         </div>
-        <el-empty v-else description="暂未收到待审核月报" :image-size="48" />
+        <p v-else class="compact-empty" role="status">当前没有待审核月报</p>
       </div>
 
       <div class="card">
@@ -721,7 +747,8 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
       </div>
     </template>
 
-    <el-dialog v-model="showCreatePeriod" title="新建月报周期" width="520px">
+    </ContentState>
+    <el-dialog align-center v-model="showCreatePeriod" title="新建月报周期" width="520px">
       <el-form label-width="100px">
         <el-form-item label="周期">
           <el-input v-model="createPeriodForm.period_key" placeholder="2026-09" />
@@ -742,7 +769,7 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showAddMember" title="添加提交成员" width="520px">
+    <el-dialog align-center v-model="showAddMember" title="添加提交成员" width="520px">
       <p class="notify-desc">按年级勾选要加入提交名单的成员，已加入的成员不可重复选择：</p>
       <div v-if="gradeGroups.length" class="notify-members">
         <div v-for="g in gradeGroups" :key="g.year" class="grade-group">
@@ -770,7 +797,7 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
       </template>
     </el-dialog>
 
-    <el-dialog
+    <el-dialog align-center
       v-model="showReviewDialog"
       :title="reviewTarget ? `${reviewTarget.report.author_name} · 月报` : '月报详情'"
       width="720px"
@@ -811,7 +838,7 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
       </template>
     </el-dialog>
 
-    <el-dialog
+    <el-dialog align-center
       v-model="showRosterPreview"
       :title="rosterPreview ? `${rosterPreview.report.author_name} · 月报` : '月报预览'"
       width="720px"
@@ -835,6 +862,16 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
 </template>
 
 <style scoped>
+.report > .content-state > .card, .report > .content-state > .report-progress { margin-bottom:16px; }
+
+.report-progress { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+.report-progress > div { background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:16px 20px; }
+.report-progress span { display:block; color:var(--text-muted); font-size:12px; }
+.report-progress strong { display:block; font-size:26px; font-variant-numeric:tabular-nums; margin-top:6px; }
+.report-progress small { font-size:12px; font-weight:400; }
+.compact-empty { padding:16px 0; color:var(--text-muted); }
+@media(max-width:600px) { .report-progress { grid-template-columns:1fr 1fr; } }
+
 .report {
   width: 100%;
   display: flex;
@@ -1165,4 +1202,9 @@ const selectedPeriod = computed(() => periods.value.find(p => p.id === selectedP
   .period-meta { flex-wrap: wrap; gap: 0.5rem; }
   .review-row, .roster-row { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
 }
+
+.report-placeholder { display:flex; flex-direction:column; gap:16px; }
+.report .card-header { min-height:32px; }
+.report-progress strong { min-height:41.6px; }
+.compact-empty { min-height:54.4px; }
 </style>

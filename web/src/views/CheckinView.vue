@@ -343,7 +343,7 @@ async function loadOnlineMembers() {
         <div class="punch-time">{{ formatTime(status.clock_out) }}</div>
         <div class="punch-date">{{ status.clock_out ? formatDate() : '尚未签退' }}</div>
         <el-button
-          type="danger"
+          :type="status.status === 'clocked_in' ? 'primary' : 'default'"
           size="large"
           :disabled="status.status !== 'clocked_in'"
           @click="handleClockOut"
@@ -396,7 +396,7 @@ async function loadOnlineMembers() {
             <button class="filter-btn" :class="{ active: chartFilter === 'month' }" @click="setChartFilter('month')">本月</button>
           </div>
         </div>
-        <div class="chart-stage" v-loading="statsLoading">
+        <div class="chart-stage" :class="{ compact: !statsLoading && !filteredStats.length }" v-loading="statsLoading">
           <div ref="chartRef" class="chart-container" :class="{ 'is-empty': !filteredStats.length }"></div>
           <div v-if="!statsLoading && (statsError || !filteredStats.length)" class="chart-empty" role="status">
             <el-icon class="chart-empty-icon"><DataAnalysis /></el-icon>
@@ -465,6 +465,13 @@ async function loadOnlineMembers() {
 </template>
 
 <style scoped>
+.chart-stage.compact { min-height:140px; }
+.chart-stage.compact .chart-container,.chart-stage.compact .chart-empty { height:140px; min-height:140px; }
+.punch-card { display:grid; grid-template-columns:1fr auto; column-gap:20px; }
+.punch-card .el-button { grid-column:2; grid-row:1/4; align-self:center; }
+.punch-status { grid-column:1/-1; }
+@media(max-width:450px) { .punch-card { column-gap:10px; } .punch-card .el-button { padding-inline:14px; } }
+
 .checkin {
   width: 100%;
   display: flex;
@@ -484,7 +491,7 @@ async function loadOnlineMembers() {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
-  padding: 1.5rem;
+  padding: 1.25rem;
   position: relative;
   overflow: hidden;
   transition: border-color 0.2s, box-shadow 0.2s;
@@ -508,7 +515,7 @@ async function loadOnlineMembers() {
 }
 
 .punch-signout::before {
-  background: linear-gradient(90deg, var(--danger), transparent);
+  background: var(--border);
 }
 
 .punch-label {
@@ -525,7 +532,7 @@ async function loadOnlineMembers() {
 }
 
 .punch-signout .punch-label {
-  color: var(--danger);
+  color: var(--text-muted);
 }
 
 .punch-time {
@@ -612,9 +619,9 @@ async function loadOnlineMembers() {
 }
 
 .stat-value.accent { color: var(--accent); }
-.stat-value.blue { color: #2563eb; }
-.stat-value.amber { color: var(--warning); }
-.stat-value.violet { color: #7c3aed; }
+.stat-value.blue { color: var(--text); }
+.stat-value.amber { color: var(--text); }
+.stat-value.violet { color: var(--accent); }
 
 .stat-sub {
   font-size: 0.75rem;

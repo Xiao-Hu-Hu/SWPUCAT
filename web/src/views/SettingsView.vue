@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { userApi } from '@/api/user'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -7,6 +7,8 @@ import { useRouter } from 'vue-router'
 
 const authStore = useAuthStore()
 const router = useRouter()
+const saving = ref(false)
+onUnmounted(() => { if (timer) clearInterval(timer) })
 const email = ref('')
 const nickname = ref(authStore.user?.nickname || '')
 const avatar = ref(authStore.user?.avatar || '')
@@ -76,6 +78,9 @@ async function handleAvatarChange(file: any) {
 }
 
 async function handleSaveProfile() {
+  if (saving.value) return
+  if (!nickname.value.trim()) { ElMessage.warning('请输入昵称'); return }
+  saving.value = true
   try {
     await userApi.updateProfile(nickname.value)
     await userApi.updateTechDirection(techDirection.value)
@@ -86,6 +91,8 @@ async function handleSaveProfile() {
     ElMessage.success('保存成功')
   } catch {
     ElMessage.error('保存失败')
+  } finally {
+    saving.value = false
   }
 }
 
@@ -165,7 +172,7 @@ async function handleChangePassword() {
       type: 'success'
     })
     await authStore.logout()
-    router.push('/login')
+    router.push('/app/login')
   } catch (err: any) {
     ElMessage.error(err.response?.data?.message || '修改失败')
   }
@@ -185,7 +192,7 @@ async function handleChangePassword() {
           accept="image/*"
         >
           <div class="avatar-wrapper">
-            <img v-if="avatar" :src="getAvatarUrl(avatar)" class="avatar-img" />
+            <img v-if="avatar" :src="getAvatarUrl(avatar)" class="avatar-img" alt="个人头像" />
             <div v-else class="avatar-placeholder">
               <el-icon :size="32"><Plus /></el-icon>
             </div>
@@ -199,7 +206,7 @@ async function handleChangePassword() {
 
       <el-form label-width="100px" style="max-width: 600px">
         <el-form-item label="学号">
-          <el-input :value="authStore.user?.username" disabled />
+          <span>{{ authStore.user?.username }}</span>
         </el-form-item>
         <el-form-item label="昵称">
           <el-input v-model="nickname" placeholder="请输入昵称" />
@@ -210,7 +217,7 @@ async function handleChangePassword() {
           </el-select>
         </el-form-item>
         <el-form-item label="邮箱">
-          <el-input :value="email" disabled />
+          <span>{{ email || '未绑定邮箱' }}</span>
         </el-form-item>
         <el-form-item label="角色">
           <el-tag :type="authStore.isSuperAdmin ? 'danger' : authStore.isCaptain ? 'warning' : 'info'">
@@ -224,13 +231,13 @@ async function handleChangePassword() {
           <span>{{ authStore.user?.checkin_count }}</span>
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="handleSaveProfile">保存</el-button>
-          <el-button @click="openPasswordDialog">修改密码</el-button>
+          <el-button type="primary" :loading="saving" @click="handleSaveProfile">保存资料</el-button>
         </el-form-item>
       </el-form>
+      <section class="account-security"><div><h3>账号安全</h3><p>通过邮箱验证修改登录密码</p></div><el-button @click="openPasswordDialog">修改密码</el-button></section>
     </div>
 
-    <el-dialog v-model="showPasswordDialog" title="修改密码" width="500px">
+    <el-dialog align-center v-model="showPasswordDialog" title="修改密码" width="500px">
       <el-form :model="passwordForm" label-width="100px">
         <el-form-item label="旧密码">
           <el-input
@@ -285,6 +292,8 @@ async function handleChangePassword() {
 </template>
 
 <style scoped>
+.account-security { display:flex; justify-content:space-between; align-items:center; border-top:1px solid var(--border); padding-top:24px; margin-top:24px; gap:16px; }
+.account-security p { color:var(--text-muted); font-size:13px; margin-top:6px; }
 .settings {
   max-width: 720px;
 }

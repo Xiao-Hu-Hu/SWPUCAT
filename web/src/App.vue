@@ -62,13 +62,13 @@ body {
 
 /* Element Plus theme overrides */
 :root {
-  --el-color-primary: #2563eb;
-  --el-color-primary-light-3: #60a5fa;
-  --el-color-primary-light-5: #93bbfd;
-  --el-color-primary-light-7: #bfdbfe;
-  --el-color-primary-light-8: #dbeafe;
-  --el-color-primary-light-9: #eff6ff;
-  --el-color-primary-dark-2: #1d4ed8;
+  --el-color-primary: #096da9;
+  --el-color-primary-light-3: #5399c3;
+  --el-color-primary-light-5: #84b6d4;
+  --el-color-primary-light-7: #b5d3e5;
+  --el-color-primary-light-8: #cee2ee;
+  --el-color-primary-light-9: #e6f0f6;
+  --el-color-primary-dark-2: #075787;
   --el-color-success: #16a34a;
   --el-color-warning: #d97706;
   --el-color-danger: #dc2626;
@@ -93,9 +93,9 @@ body {
 /* Mobile global tweaks */
 @media (max-width: 768px) {
   body { -webkit-tap-highlight-color: transparent; }
-  .el-dialog { width: min(480px, calc(100vw - 24px)) !important; margin-top: 6vh !important; }
+  .el-dialog { width: min(480px, calc(100vw - 24px)) !important; }
   .el-message-box { width: calc(100vw - 32px) !important; }
-  .el-dialog__body { max-height: 72vh; overflow-y: auto; }
+  .el-dialog__body { max-height: calc(100dvh - 180px); overflow-y: auto; }
   .el-button.is-circle { min-width: 40px; min-height: 40px; }
   .el-button.is-text.is-circle { min-width: 36px; min-height: 36px; }
   .el-form-item { display: flex; flex-direction: column; align-items: stretch; }
@@ -117,4 +117,20 @@ body {
   .el-pagination { max-width: 100%; flex-wrap: wrap; justify-content: center; row-gap: 0.5rem; }
   .el-pagination__jump { display: none; }
 }
+
+/* Platform UI: scoped away from the public association homepage. */
+.app-layout { --accent:#096da9; --accent-bg:#eaf4fb; --bg-deep:#f3f6f9; --border:#e1e8ef; --text:#203446; --text-muted:#677b8d; }
+.app-layout > .main-area > .content { max-width:1680px; width:100%; margin-inline:auto; padding:24px; }
+.app-layout .topbar .page-title { font-size:20px; }
+.app-layout .el-card,.app-layout .card { box-shadow:none; }
+.app-layout .el-table { --el-table-header-bg-color:#f6f8fb; font-variant-numeric:tabular-nums; }
+.app-layout .el-empty { padding:24px 0; }
+.app-layout .el-empty__description { margin-top:12px; }
+.app-layout :is(.card-header,.page-header,.header) h2 { font-size:20px; }
+/* Element Plus inputs draw their focus ring on the wrapper, not the inner input. */
+:is(.app-layout,.login-page) :is(button,a):focus-visible { outline:2px solid #096da9; outline-offset:3px; }
+:is(.app-layout,.login-page) .el-button { transition:background-color .18s,border-color .18s,box-shadow .18s; }
+.app-layout .el-button:active:not(:disabled) { transform:translateY(1px); }
+@media(max-width:768px) { .app-layout > .main-area > .content { padding:16px 12px; } .app-layout .topbar .page-title { font-size:16px; } }
+@media(prefers-reduced-motion:reduce) { *,*::before,*::after { animation-duration:.01ms !important; transition-duration:.01ms !important; } }
 </style>

@@ -753,7 +753,6 @@ function handleMarkdownClick(event: MouseEvent, message: ChatMessage) {
   <div class="agent-page">
     <div class="agent-intro">
       <div>
-        <h2>智能助手</h2>
         <p>用自然语言查询知识库和打卡信息，涉及写入操作时我会先按系统权限执行。</p>
       </div>
     </div>
@@ -763,9 +762,7 @@ function handleMarkdownClick(event: MouseEvent, message: ChatMessage) {
       <aside class="conversation-panel" :class="{ 'drawer-open': sessionsOpen }">
         <div class="conversation-panel-header">
           <span class="conversation-panel-title">会话记录</span>
-          <el-button text circle :loading="creatingConversation" :disabled="conversationsLoading || Boolean(editingSessionId) || Boolean(renamingSessionId)" aria-label="新建会话" @click="createNewConversation">
-            <el-icon><Plus /></el-icon>
-          </el-button>
+
         </div>
         <el-button
           class="new-conversation-button"
@@ -1003,7 +1000,7 @@ function handleMarkdownClick(event: MouseEvent, message: ChatMessage) {
             @keydown="handleKeydown"
           />
           <div class="composer-footer">
-            <span>Enter 发送，Shift + Enter 换行</span>
+            <span class="desktop-composer-hint">Enter 发送，Shift + Enter 换行</span><span class="mobile-composer-hint">点击发送，与助手交流</span>
             <el-button v-if="loading" type="danger" plain @click="stopGeneration">停止生成</el-button>
             <el-button v-else type="primary" :disabled="conversationsLoading || historyLoading || Boolean(editingSessionId) || Boolean(renamingSessionId) || !input.trim()" @click="sendMessage">发送</el-button>
           </div>
@@ -1758,5 +1755,22 @@ function handleMarkdownClick(event: MouseEvent, message: ChatMessage) {
 @media (max-width: 480px) {
   .messages { height: 52vh; min-height: 260px; }
   .composer { padding: 0.75rem; }
+}
+
+.mobile-composer-hint { display:none; }
+.conversation-panel { min-height:0; }
+.message-actions { opacity:.65; transition:opacity .18s; }
+.message-actions:hover,.message-actions:focus-within { opacity:1; }
+@media(max-width:680px) {
+ .agent-intro { margin-bottom:8px; }
+ .agent-intro p { font-size:12px; line-height:1.5; }
+ .agent-layout { flex:1; min-height:0; }
+ .agent-page { min-height:calc(100dvh - 100px); }
+ .desktop-composer-hint { display:none; }
+ .mobile-composer-hint { display:inline; font-size:11px; }
+ .chat-card { display:flex; flex-direction:column; min-height:0; }
+ .messages { height:calc(100dvh - 370px); min-height:220px; }
+ .composer { padding-bottom:max(12px,env(safe-area-inset-bottom)); }
+ .message-actions { opacity:1; flex-wrap:wrap; }
 }
 </style>

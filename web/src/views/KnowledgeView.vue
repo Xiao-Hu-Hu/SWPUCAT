@@ -68,6 +68,11 @@ const items = ref<Array<{
   created_at: string
 }>>([])
 
+const itemsLoading = ref(true)
+const itemsError = ref('')
+const categoriesLoading = ref(true)
+const categoriesError = ref('')
+let itemsRequest = 0
 const selectedCategory = ref<number | undefined>(undefined)
 const searchQuery = ref('')
 
@@ -101,24 +106,33 @@ onBeforeUnmount(() => {
 })
 
 async function loadCategories() {
+  categoriesLoading.value = true
+  categoriesError.value = ''
   try {
     const res = await knowledgeApi.listCategories()
     categories.value = res.data
     return true
   } catch {
-    console.error('Failed to load categories')
+    categoriesError.value = '分类加载失败'
     return false
+  } finally {
+    categoriesLoading.value = false
   }
 }
 
 async function loadItems() {
+  const request = ++itemsRequest
+  itemsLoading.value = true
+  itemsError.value = ''
   try {
     const res = await knowledgeApi.listItems(selectedCategory.value, searchQuery.value)
-    items.value = res.data
+    if (request === itemsRequest) items.value = res.data || []
     return true
   } catch {
-    console.error('Failed to load items')
+    if (request === itemsRequest) itemsError.value = '资源加载失败，请重试'
     return false
+  } finally {
+    if (request === itemsRequest) itemsLoading.value = false
   }
 }
 
@@ -344,24 +358,28 @@ async function handleDownloadFile(id: number, name: string) {
       <div class="card">
         <div class="card-header">
           <h3>分类</h3>
-          <el-button v-if="authStore.isCaptain || authStore.isSuperAdmin" size="small" @click="showCategoryDialog = true">
-            <el-icon><Plus /></el-icon>
+          <el-button v-if="authStore.isCaptain || authStore.isSuperAdmin" size="small" aria-label="添加分类" @click="showCategoryDialog = true">
+            <el-icon><Plus /></el-icon><span>添加</span>
           </el-button>
         </div>
+        <ContentState class="category-state" :loading="categoriesLoading" :error="categoriesError" :has-content="categories.length > 0" :rows="1" compact @retry="loadCategories">
+      <template #skeleton>
+        <div class="category-list" aria-hidden="true"><div v-for="n in 4" :key="n" class="category-item skeleton-shell"><span class="sk-block sk-meta"></span></div></div>
+      </template>
         <div class="category-list">
           <div
-            class="category-item"
+            class="category-item" role="button" tabindex="0"
             :class="{ active: !selectedCategory }"
-            @click="selectedCategory = undefined; handleCategoryChange()"
+            @click="selectedCategory = undefined; handleCategoryChange()" @keydown.enter.self="selectedCategory = undefined; handleCategoryChange()" @keydown.space.prevent.self="selectedCategory = undefined; handleCategoryChange()"
           >
             <span>全部</span>
           </div>
           <div
             v-for="cat in categories"
             :key="cat.id"
-            class="category-item"
+            class="category-item" role="button" tabindex="0"
             :class="{ active: selectedCategory === cat.id }"
-            @click="selectedCategory = cat.id; handleCategoryChange()"
+            @click="selectedCategory = cat.id; handleCategoryChange()" @keydown.enter.self="selectedCategory = cat.id; handleCategoryChange()" @keydown.space.prevent.self="selectedCategory = cat.id; handleCategoryChange()"
           >
             <span>{{ cat.name }}</span>
             <span class="count">{{ cat.count }}</span>
@@ -376,13 +394,14 @@ async function handleDownloadFile(id: number, name: string) {
             </el-button>
           </div>
         </div>
+        </ContentState>
       </div>
     </div>
 
     <div class="content">
       <div class="card">
         <div class="card-header">
-          <h3>知识库 <span v-if="refreshingCount > 0" class="refresh-status" role="status">正在刷新列表…</span></h3>
+          <h3>共享资源</h3>
           <div class="actions">
             <el-input
               v-model="searchQuery"
@@ -394,15 +413,26 @@ async function handleDownloadFile(id: number, name: string) {
                 <el-icon><Search /></el-icon>
               </template>
             </el-input>
-            <el-button type="primary" @click="showLinkDialog = true">
+            <el-button @click="showLinkDialog = true">
               <el-icon><Link /></el-icon> 添加链接
             </el-button>
-            <el-button type="success" @click="showUploadDialog = true" :disabled="uploading">
+            <el-button type="primary" @click="showUploadDialog = true" :disabled="uploading">
               <el-icon><Upload /></el-icon> 上传文件
             </el-button>
           </div>
         </div>
 
+        <ContentState :loading="itemsLoading" :error="itemsError" :has-content="items.length > 0" @retry="loadItems">
+      <template #skeleton>
+        <div class="items-list" aria-hidden="true">
+          <div v-for="n in pageSize" :key="n" class="item-card skeleton-shell">
+            <div class="item-icon"><span class="sk-block sk-icon"></span></div>
+            <div class="item-info"><div class="item-name"><span class="sk-block sk-title"></span></div><div class="item-meta"><span class="sk-block sk-meta"></span></div></div>
+            <div class="item-card-actions"><span class="sk-block sk-button"></span><span class="sk-block sk-button"></span></div>
+          </div>
+        </div>
+      <div class="pagination-wrapper" aria-hidden="true"><span class="sk-block sk-pagination"></span></div>
+      </template>
         <div class="items-list">
           <div v-for="item in paginatedItems" :key="item.id" class="item-card">
             <div class="item-icon">
@@ -437,14 +467,10 @@ async function handleDownloadFile(id: number, name: string) {
               >
                 {{ downloading[item.id] !== undefined ? (downloading[item.id] < 100 ? `${downloading[item.id]}%` : '完成') : '下载' }}
               </el-button>
-              <el-button
-                v-if="item.source_origin !== 'official_catalog' && (authStore.isCaptain || authStore.user?.id === item.uploader_id)"
-                size="small"
-                type="danger"
-                @click="handleDeleteItem(item.id)"
-              >
-                删除
-              </el-button>
+              <el-dropdown v-if="item.source_origin !== 'official_catalog' && (authStore.isCaptain || authStore.user?.id === item.uploader_id)" trigger="click">
+                <el-button size="small" text :aria-label="`更多操作：${item.name}`">更多</el-button>
+                <template #dropdown><el-dropdown-menu><el-dropdown-item @click="handleDeleteItem(item.id)">删除资源</el-dropdown-item></el-dropdown-menu></template>
+              </el-dropdown>
             </div>
           </div>
           <el-empty v-if="items.length === 0" description="暂无资源" />
@@ -462,10 +488,11 @@ async function handleDownloadFile(id: number, name: string) {
             background
           />
         </div>
+        </ContentState>
       </div>
     </div>
 
-    <el-dialog v-model="showLinkDialog" title="添加链接" width="500px">
+    <el-dialog align-center v-model="showLinkDialog" title="添加链接" width="500px">
       <el-form :model="linkForm" label-width="80px">
         <el-form-item label="名称">
           <el-input v-model="linkForm.name" placeholder="请输入链接名称" />
@@ -499,7 +526,7 @@ async function handleDownloadFile(id: number, name: string) {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showCategoryDialog" title="添加分类" width="400px">
+    <el-dialog align-center v-model="showCategoryDialog" title="添加分类" width="400px">
       <el-form :model="categoryForm" label-width="80px">
         <el-form-item label="名称">
           <el-input v-model="categoryForm.name" placeholder="请输入分类名称" />
@@ -511,7 +538,7 @@ async function handleDownloadFile(id: number, name: string) {
       </template>
     </el-dialog>
 
-    <el-dialog
+    <el-dialog align-center
       v-model="showUploadDialog"
       title="上传文件"
       width="500px"
@@ -578,7 +605,7 @@ async function handleDownloadFile(id: number, name: string) {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showPreviewDialog" :title="previewItem?.name || '资源说明'" width="600px">
+    <el-dialog align-center v-model="showPreviewDialog" :title="previewItem?.name || '资源说明'" width="600px">
       <div v-if="previewItem" class="markdown-preview" v-html="renderMarkdown(previewItem.description)"></div>
       <template #footer>
         <el-button @click="showPreviewDialog = false">关闭</el-button>
@@ -604,8 +631,7 @@ async function handleDownloadFile(id: number, name: string) {
 }
 
 .upload-details,
-.upload-remaining,
-.refresh-status {
+.upload-remaining {
   color: var(--text-secondary);
   font-size: 0.75rem;
   font-weight: normal;
@@ -613,10 +639,6 @@ async function handleDownloadFile(id: number, name: string) {
 
 .upload-remaining {
   margin-top: 0.25rem;
-}
-
-.refresh-status {
-  margin-left: 0.5rem;
 }
 
 .knowledge {
@@ -880,5 +902,28 @@ async function handleDownloadFile(id: number, name: string) {
   .item-meta { flex-wrap: wrap; gap: 0.25rem 0.75rem; }
   .item-name { max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .upload-details { flex-wrap: wrap; gap: 0.5rem; }
+}
+
+.content,.item-info { min-width:0; }
+.item-name { overflow-wrap:anywhere; }
+.item-card-actions { gap:6px; }
+.category-item:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+@media(max-width:768px) {
+ .sidebar .card { display:flex; align-items:center; gap:12px; }
+ .sidebar .card-header { flex:none; gap:6px; margin:0; }
+ .sidebar .card-header h3 { display:none; }
+ .category-state { min-width:0; flex:1; }
+ .category-list { min-width:0; flex:1; }
+ .actions .el-button { margin-left:0; }
+}
+
+.item-card { min-height:82px; }
+.item-icon { flex-shrink:0; }
+.item-name { min-height:22.4px; }
+.item-name .sk-title { height:22.4px; }
+@media(max-width:768px) {
+ .item-card { min-height:144px; }
+ .item-name { min-height:44.8px; }
+ .category-item .sk-meta { width:56px; height:22.4px; }
 }
 </style>

@@ -6,6 +6,8 @@ import { ElMessage } from 'element-plus'
 import { renderMarkdown } from '@/utils/markdown'
 import { usePaginationLayout } from '@/composables/usePaginationLayout'
 
+const loading = ref(true)
+const loadError = ref('')
 const authStore = useAuthStore()
 const items = ref<Array<{
   id: number
@@ -47,6 +49,8 @@ onMounted(async () => {
 })
 
 async function loadItems() {
+  loading.value = true
+  loadError.value = ''
   try {
     if (isManager.value) {
       const res = await knowledgeApi.listPendingItems()
@@ -56,7 +60,9 @@ async function loadItems() {
       items.value = res.data
     }
   } catch {
-    console.error('Failed to load items')
+    loadError.value = '内容加载失败，请检查网络后重试'
+  } finally {
+    loading.value = false
   }
 }
 
@@ -135,9 +141,18 @@ function openPreview(item: { name: string; description: string }) {
     <div class="card">
       <div class="card-header">
         <h3>{{ isManager ? '审批管理' : '我的申请' }}</h3>
-        <span class="pending-count" v-if="isManager">{{ items.filter(i => !i.approved && !i.rejected).length }} 条待审批</span>
+        <span class="pending-count" v-if="isManager && !loading && !loadError">{{ items.filter(i => !i.approved && !i.rejected).length }} 条待审批</span>
       </div>
 
+      <ContentState :loading="loading" :error="loadError" :has-content="items.length > 0" @retry="loadItems">
+      <template #skeleton>
+        <div class="approval-list" aria-hidden="true"><div v-for="n in Math.min(pageSize,3)" :key="n" class="approval-card skeleton-shell">
+          <div class="item-icon"><span class="sk-block sk-icon"></span></div>
+          <div class="item-info"><div class="item-name"><span class="sk-block sk-title"></span></div><div class="item-meta"><span class="sk-block sk-meta"></span></div></div>
+          <div class="item-actions"><span class="sk-block sk-button"></span><span class="sk-block sk-button"></span></div>
+        </div></div>
+      <div class="pagination-wrapper" aria-hidden="true"><span class="sk-block sk-pagination"></span></div>
+      </template>
       <div class="approval-list">
         <div v-for="item in paginatedItems" :key="item.id" class="approval-card">
           <div class="item-icon">
@@ -190,7 +205,7 @@ function openPreview(item: { name: string; description: string }) {
             </template>
           </div>
         </div>
-        <el-empty v-if="items.length === 0" :description="isManager ? '暂无待审批项目' : '暂无申请记录'" />
+        <el-empty v-if="items.length === 0" :description="isManager ? '当前没有待处理的审批' : '暂无申请记录'" />
       </div>
 
       <div class="pagination-wrapper" v-if="items.length > 0">
@@ -205,9 +220,10 @@ function openPreview(item: { name: string; description: string }) {
           background
         />
       </div>
+      </ContentState>
     </div>
 
-    <el-dialog v-model="showRejectDialog" title="拒绝理由" width="500px">
+    <el-dialog align-center v-model="showRejectDialog" title="拒绝理由" width="500px">
       <el-form label-width="80px">
         <el-form-item label="拒绝理由">
           <el-input
@@ -224,7 +240,7 @@ function openPreview(item: { name: string; description: string }) {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showPreviewDialog" :title="previewItem?.name || '资源说明'" width="600px">
+    <el-dialog align-center v-model="showPreviewDialog" :title="previewItem?.name || '资源说明'" width="600px">
       <div v-if="previewItem" class="markdown-preview" v-html="renderMarkdown(previewItem.description)"></div>
       <template #footer>
         <el-button @click="showPreviewDialog = false">关闭</el-button>
