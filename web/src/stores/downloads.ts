@@ -1,13 +1,13 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElNotification } from 'element-plus'
 import { knowledgeApi } from '@/api/knowledge'
 import { useAuthStore } from '@/stores/auth'
 import { saveDownload } from '@/utils/saveDownload'
 
 interface DownloadTask {
   name: string
-  status: 'downloading' | 'saving' | 'completed' | 'failed'
+  status: 'downloading' | 'saving' | 'failed'
   loaded: number
   total?: number
   percent?: number
@@ -44,7 +44,6 @@ export const useDownloadStore = defineStore('downloads', () => {
     const task = tasks.value[id]
     if (!task) return fallback
     if (task.status === 'failed') return '重试下载'
-    if (task.status === 'completed') return '已交给浏览器保存'
     if (task.status === 'saving') return '正在准备保存…'
     if (task.percent !== undefined) return `下载中 ${task.percent}%`
     return task.loaded > 0 ? `下载中 · ${formatBytes(task.loaded)}` : '下载中…'
@@ -77,10 +76,16 @@ export const useDownloadStore = defineStore('downloads', () => {
         if (!(blob instanceof Blob)) throw new Error('Invalid download response')
         const releaseFile = saveDownload(blob, task.name)
         savedFiles.add(releaseFile)
-        task.status = 'completed'
-        ElMessage.success(`${task.name} 已交给浏览器保存`)
+        delete tasks.value[id]
+        ElNotification({
+          title: '下载完成',
+          message: task.name,
+          type: 'success',
+          position: 'top-right',
+          duration: 3000,
+          customClass: 'file-download-notification'
+        })
         const timer = setTimeout(() => {
-          if (tasks.value[id] === task) delete tasks.value[id]
           releaseFile()
           savedFiles.delete(releaseFile)
           cleanupTimers.delete(timer)
@@ -89,7 +94,14 @@ export const useDownloadStore = defineStore('downloads', () => {
       } catch {
         if (!isCurrent()) return
         task.status = 'failed'
-        ElMessage.error(`${task.name} 下载失败，请重试`)
+        ElNotification({
+          title: '下载失败',
+          message: `${task.name}，请重试`,
+          type: 'error',
+          position: 'top-right',
+          duration: 3000,
+          customClass: 'file-download-notification'
+        })
       } finally {
         if (active.get(id)?.controller === controller) active.delete(id)
       }

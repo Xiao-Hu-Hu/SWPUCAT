@@ -24,10 +24,7 @@ function fixture() {
       saved.push(item)
       return () => { item.released = true }
     } },
-    'element-plus': { ElMessage: {
-      success: text => notices.push({ kind: 'success', text }),
-      error: text => notices.push({ kind: 'error', text })
-    } }
+    'element-plus': { ElNotification: options => notices.push(options) }
   }
   const source = readFileSync(resolve(__dirname, '../src/stores/downloads.ts'), 'utf8')
   const code = ts.transpileModule(source, {
@@ -57,7 +54,12 @@ test('new page consumers share progress and reuse an active file request', async
   await Promise.all([first, repeated])
   assert.equal(f.saved.length, 1)
   assert.equal(f.notices.length, 1)
-  assert.equal(returnedPage.label(7), '已交给浏览器保存')
+  assert.equal(returnedPage.label(7), '下载')
+  assert.equal(returnedPage.label(7, '点击下载'), '点击下载')
+  assert.equal(returnedPage.tasks[7], undefined)
+  assert.equal(f.notices[0].title, '下载完成')
+  assert.equal(f.notices[0].position, 'top-right')
+  assert.equal(f.notices[0].duration, 3000)
   assert.equal(returnedPage.isBusy(7), false)
 })
 
@@ -116,5 +118,5 @@ test('old completion cleanup never removes a new download for the same file', as
   f.auth.user = null
   f.requests[1].reject(Error('canceled'))
   await second
-  assert.equal(f.notices.filter(item => item.kind === 'error').length, 0)
+  assert.equal(f.notices.filter(item => item.type === 'error').length, 0)
 })

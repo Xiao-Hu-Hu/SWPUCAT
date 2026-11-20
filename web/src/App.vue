@@ -7,6 +7,7 @@ import { RouterView } from 'vue-router'
 </template>
 
 <style>
+.file-download-notification { max-width:calc(100vw - 32px); }
 :root {
   --bg-deep: #f4f4f5;
   --bg-card: #ffffff;
