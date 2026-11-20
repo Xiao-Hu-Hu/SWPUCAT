@@ -11,7 +11,7 @@ import {
   type AgentConversationMessage,
   type AgentKnowledgeSource
 } from '@/api/agent'
-import { knowledgeApi } from '@/api/knowledge'
+import { useDownloadStore } from '@/stores/downloads'
 import { useAuthStore } from '@/stores/auth'
 import { newGreetingMessage, newTurnIdentifier, useAgentStore, type ChatMessage } from '@/stores/agent'
 import { renderMarkdown } from '@/utils/markdown'
@@ -30,7 +30,7 @@ const conversationsLoading = ref(false)
 const creatingConversation = ref(false)
 const sessionsOpen = ref(false)
 const messagesRef = ref<HTMLElement | null>(null)
-const downloadingSources = ref<Record<number, boolean>>({})
+const downloads = useDownloadStore()
 const historyRequestId = ref(0)
 const editingSessionId = ref('')
 const editingTitle = ref('')
@@ -542,88 +542,28 @@ function renderAgentMarkdown(value: string): string {
     /<a\b[^>]*\bhref="(\/api\/knowledge\/download\/\d+)"[^>]*>[\s\S]*?<\/a>/g,
     (_match, href: string) => {
       const id = href.split('/').pop() || ''
-      return `<a class="md-download-link" href="${href}" data-knowledge-download="${id}">点击下载</a>`
+      return downloadLinkHTML(href, Number(id))
     }
   )
   return normalized.replace(/(?<!href=")(\/api\/knowledge\/download\/\d+)/g, (url) => {
     const id = url.split('/').pop() || ''
-    return `<a class="md-download-link" href="${url}" data-knowledge-download="${id}">点击下载</a>`
+    return downloadLinkHTML(url, Number(id))
   })
 }
 
-function downloadBlob(blob: Blob, filename: string) {
-  const objectURL = window.URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = objectURL
-  link.download = filename
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  window.URL.revokeObjectURL(objectURL)
+function downloadLinkHTML(href: string, id: number): string {
+  const busy = downloads.isBusy(id)
+  const percent = downloads.tasks[id]?.percent || 0
+  return `<a class="md-download-link${busy ? ' is-downloading' : ''}" href="${href}" data-knowledge-download="${id}" aria-disabled="${busy}"><span class="md-download-fill" style="width:${percent}%"></span><span class="md-download-label">${downloads.label(id, '点击下载')}</span></a>`
 }
 
-function downloadButtons(id: number): HTMLElement[] {
-  const root = messagesRef.value || document
-  return Array.from(root.querySelectorAll<HTMLElement>(`a.md-download-link[data-knowledge-download="${id}"]`))
+function downloadSource(source: AgentKnowledgeSource) {
+  if (canDownloadSource(source)) void downloads.download(source.id, sourceFilename(source))
 }
 
-function markDownloadButtons(id: number) {
-  for (const button of downloadButtons(id)) {
-    button.classList.add('is-downloading')
-    button.innerHTML = '<span class="md-download-fill"></span><span class="md-download-label">下载中 0%</span>'
-  }
-}
-
-function updateDownloadButtons(id: number, percent: number) {
-  const value = Math.max(0, Math.min(100, Math.round(percent)))
-  for (const button of downloadButtons(id)) {
-    const fill = button.querySelector<HTMLElement>('.md-download-fill')
-    const label = button.querySelector<HTMLElement>('.md-download-label')
-    if (fill) fill.style.width = `${value}%`
-    if (label) label.textContent = `下载中 ${value}%`
-  }
-}
-
-function resetDownloadButtons(id: number) {
-  for (const button of downloadButtons(id)) {
-    button.classList.remove('is-downloading')
-    button.textContent = '点击下载'
-  }
-}
-
-async function downloadSource(source: AgentKnowledgeSource) {
-  if (!canDownloadSource(source) || downloadingSources.value[source.id]) return
-  downloadingSources.value[source.id] = true
-  try {
-    // This API call goes through the shared Axios interceptor and therefore
-    // carries the current bearer token (and refreshes it when necessary).
-    const response = await knowledgeApi.downloadFile(source.id)
-    const blob = response instanceof Blob ? response : (response as any).data
-    if (!(blob instanceof Blob)) throw new Error('invalid download response')
-    downloadBlob(blob, sourceFilename(source))
-  } catch {
-    ElMessage.error('知识库文件下载失败')
-  } finally {
-    delete downloadingSources.value[source.id]
-  }
-}
-
-async function downloadSourceById(id: number, message: ChatMessage) {
-  if (downloadingSources.value[id]) return
-  downloadingSources.value[id] = true
-  markDownloadButtons(id)
-  const source = message.sources?.find((s) => s.id === id)
-  try {
-    const response = await knowledgeApi.downloadFile(id, (percent) => updateDownloadButtons(id, percent))
-    const blob = response instanceof Blob ? response : (response as any).data
-    if (!(blob instanceof Blob)) throw new Error('invalid download response')
-    downloadBlob(blob, source ? sourceFilename(source) : `知识库文件-${id}`)
-  } catch {
-    ElMessage.error('知识库文件下载失败')
-  } finally {
-    delete downloadingSources.value[id]
-    resetDownloadButtons(id)
-  }
+function downloadSourceById(id: number, message: ChatMessage) {
+  const source = message.sources?.find(item => item.id === id)
+  void downloads.download(id, source ? sourceFilename(source) : `知识库文件-${id}`)
 }
 
 // Intercept clicks on download links rendered inside the assistant answer so
@@ -775,9 +715,10 @@ function handleMarkdownClick(event: MouseEvent, message: ChatMessage) {
                             v-if="canDownloadSource(source)"
                             text
                             size="small"
-                            :loading="downloadingSources[source.id]"
+                            :loading="downloads.isBusy(source.id)"
+                            :disabled="downloads.isBusy(source.id)"
                             @click="downloadSource(source)"
-                          >下载文件</el-button>
+                          >{{ downloads.label(source.id, '下载文件') }}</el-button>
                           <a
                             v-if="externalSourceURL(source)"
                             class="source-link"

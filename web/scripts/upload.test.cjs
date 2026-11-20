@@ -53,6 +53,7 @@ function fixture() {
     vue: { ...vue, onMounted: () => {}, onBeforeUnmount: (fn) => { unmount = fn } },
     '@/api/knowledge': { knowledgeApi: api },
     '@/stores/auth': { useAuthStore: () => ({ isCaptain: true }) },
+    '@/stores/downloads': { useDownloadStore: () => ({}) },
     'element-plus': {
       ElMessage: Object.fromEntries(['success', 'error', 'warning', 'info'].map(kind => [kind, text => messages.push({ kind, text })])),
       ElMessageBox: {}

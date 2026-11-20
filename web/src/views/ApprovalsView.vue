@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { knowledgeApi } from '@/api/knowledge'
+import { useDownloadStore } from '@/stores/downloads'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
 import { renderMarkdown } from '@/utils/markdown'
@@ -26,7 +27,7 @@ const items = ref<Array<{
   reviewer_name: string
   created_at: string
 }>>([])
-const downloading = ref<Record<number, number>>({})
+const downloads = useDownloadStore()
 const showRejectDialog = ref(false)
 const showPreviewDialog = ref(false)
 const previewItem = ref<{ name: string; description: string } | null>(null)
@@ -97,30 +98,8 @@ async function handleReject() {
   }
 }
 
-async function handleDownloadFile(id: number, name: string) {
-  if (downloading.value[id] !== undefined) return
-  downloading.value[id] = 0
-  try {
-    const res = await knowledgeApi.downloadFile(id, (percent) => {
-      downloading.value[id] = percent
-    })
-    const blob = res instanceof Blob ? res : (res as any).data
-    const url = window.URL.createObjectURL(blob instanceof Blob ? blob : new Blob([blob]))
-    const link = document.createElement('a')
-    link.href = url
-    link.setAttribute('download', name)
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    window.URL.revokeObjectURL(url)
-    downloading.value[id] = 100
-    setTimeout(() => {
-      delete downloading.value[id]
-    }, 1000)
-  } catch {
-    ElMessage.error('下载失败')
-    delete downloading.value[id]
-  }
+function handleDownloadFile(id: number, name: string) {
+  void downloads.download(id, name)
 }
 
 function getStatusTag(item: any) {
@@ -189,11 +168,11 @@ function openPreview(item: { name: string; description: string }) {
               v-if="item.type === 'file' && !item.rejected"
               size="small"
               type="primary"
-              :loading="downloading[item.id] !== undefined && downloading[item.id] < 100"
-              :disabled="downloading[item.id] !== undefined"
+              :loading="downloads.isBusy(item.id)"
+              :disabled="downloads.isBusy(item.id)"
               @click="handleDownloadFile(item.id, item.name)"
             >
-              {{ downloading[item.id] !== undefined ? (downloading[item.id] < 100 ? `${downloading[item.id]}%` : '完成') : '下载' }}
+              {{ downloads.label(item.id) }}
             </el-button>
             <template v-if="isManager && !item.approved && !item.rejected">
               <el-button size="small" type="success" @click="handleApprove(item.id)">

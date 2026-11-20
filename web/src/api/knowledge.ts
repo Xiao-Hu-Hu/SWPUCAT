@@ -6,6 +6,11 @@ interface UploadOptions {
   signal?: AbortSignal
 }
 
+interface DownloadOptions {
+  onProgress?: (event: AxiosProgressEvent) => void
+  signal?: AbortSignal
+}
+
 export const knowledgeApi = {
   listItems(categoryId?: number, search?: string) {
     return api.get('/knowledge/items', { params: { category_id: categoryId, search } })
@@ -32,16 +37,12 @@ export const knowledgeApi = {
   deleteItem(id: number) {
     return api.delete(`/knowledge/items/${id}`)
   },
-  downloadFile(id: number, onProgress?: (percent: number) => void) {
-    return api.get(`/knowledge/download/${id}`, {
+  downloadFile(id: number, options: DownloadOptions = {}) {
+    return api.get<Blob>(`/knowledge/download/${id}`, {
       responseType: 'blob',
       timeout: 0,
-      onDownloadProgress: (progressEvent) => {
-        if (onProgress && progressEvent.total) {
-          const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-          onProgress(percent)
-        }
-      }
+      onDownloadProgress: options.onProgress,
+      signal: options.signal
     })
   },
   listCategories() {

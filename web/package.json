@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test:checkin-chart": "node --test scripts/checkin-chart.test.mjs",
     "test:loading": "node --test scripts/loading.test.cjs",
+    "test:downloads": "node --test scripts/downloads.test.cjs",
     "test:upload": "node --test scripts/upload.test.cjs"
   },
   "dependencies": {
