@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ThemeToggle from '@/components/ThemeToggle.vue'
 import { ref, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
@@ -116,6 +117,7 @@ onUnmounted(() => { if (countdownTimer) clearInterval(countdownTimer) })
 
 <template>
   <main class="login-page">
+    <div class="login-theme"><ThemeToggle /></div>
     <section class="login-intro">
       <img src="/association-logo.png" alt="西南石油大学计算机协会徽标" class="association-logo" />
       <p class="brand-name">西南石油大学计算机协会</p>
@@ -197,14 +199,15 @@ onUnmounted(() => { if (countdownTimer) clearInterval(countdownTimer) })
 </template>
 
 <style scoped>
+.login-theme { position:absolute; right:max(20px,env(safe-area-inset-right)); top:max(16px,env(safe-area-inset-top)); }
  .login-page { min-height:100dvh; display:grid; grid-template-columns:1.1fr 1fr; align-items:center; gap:clamp(40px,8vw,120px); max-width:1160px; margin:auto; padding:64px 40px; }
 .login-intro { color:var(--text-secondary); }
 .association-logo { width:64px; height:64px; object-fit:contain; margin-bottom:20px; }
 .brand-name { font-weight:600; color:var(--text); }
-.login-intro h1 { font-size:clamp(36px,4vw,54px); line-height:1.35; letter-spacing:-.04em; margin:28px 0 20px; color:#183b56; }
+.login-intro h1 { font-size:clamp(36px,4vw,54px); line-height:1.35; letter-spacing:-.04em; margin:28px 0 20px; color:var(--login-heading); }
 .login-intro > p { line-height:1.9; }
 .intro-note { display:block; margin-top:48px; font-size:12px; letter-spacing:.08em; color:var(--text-muted); }
-.login-card { padding:40px; background:white; border:1px solid var(--border); border-radius:20px; box-shadow:0 16px 48px #1645690a; }
+.login-card { padding:40px; background:var(--bg-card); border:1px solid var(--border); border-radius:20px; box-shadow:0 16px 48px #1645690a; }
 .login-eyebrow { font-size:11px; color:var(--accent); letter-spacing:.16em; font-weight:600; }
 .login-card h2 { font-size:26px; margin:12px 0 6px; }
 .login-description { color:var(--text-muted); margin-bottom:28px; }
@@ -266,7 +269,7 @@ onUnmounted(() => { if (countdownTimer) clearInterval(countdownTimer) })
   gap: 0.5rem;
 }
 @media (max-width:768px) {
- .login-page { grid-template-columns:1fr; grid-template-rows:auto auto; align-content:center; gap:28px; padding:32px 20px; max-width:500px; }
+ .login-page { grid-template-columns:1fr; grid-template-rows:auto auto; align-content:center; gap:28px; padding:76px 20px 32px; max-width:500px; }
  .login-intro { text-align:center; }
  .association-logo { width:48px; height:48px; margin-bottom:8px; }
  .login-intro h1,.login-intro > p:not(.brand-name),.intro-note { display:none; }
