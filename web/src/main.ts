@@ -3,11 +3,15 @@ import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import 'element-plus/dist/index.css'
+import 'element-plus/theme-chalk/dark/css-vars.css'
+import { initializeTheme } from './composables/useTheme'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import App from './App.vue'
 import ContentState from './components/ContentState.vue'
 import TableSkeleton from './components/TableSkeleton.vue'
 import router from './router'
+
+initializeTheme()
 
 const app = createApp(App)
 app.component('ContentState', ContentState)

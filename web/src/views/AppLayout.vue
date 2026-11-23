@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ThemeToggle from '@/components/ThemeToggle.vue'
 import { h, ref, onMounted, onUnmounted, watch } from 'vue'
 import { ElButton, ElMessage, ElNotification, type NotificationHandle } from 'element-plus'
 import { useRouter, useRoute } from 'vue-router'
@@ -124,6 +125,8 @@ function handleLogout() {
           <el-icon :size="20"><Menu /></el-icon>
         </button>
         <h2 class="page-title">{{ menuItems.find(m => m.path === route.path)?.title || '签到打卡' }}</h2>
+        <div class="topbar-actions">
+        <ThemeToggle />
         <el-dropdown>
           <span class="user-info">
             <el-avatar :size="32" :src="authStore.user?.avatar ? `/api/avatar/${authStore.user.avatar}` : undefined">
@@ -138,6 +141,7 @@ function handleLogout() {
             </el-dropdown-menu>
           </template>
         </el-dropdown>
+        </div>
       </header>
       <main class="content" id="main-content">
         <router-view />
@@ -284,6 +288,11 @@ function handleLogout() {
   letter-spacing: -0.01em;
   color: var(--text);
 }
+
+.topbar-actions { display:flex; align-items:center; gap:16px; margin-left:auto; }
+.topbar { gap:12px; }
+.page-title { min-width:0; }
+@media(max-width:768px) { .topbar-actions { gap:8px; } }
 
 .user-info {
   display: flex;

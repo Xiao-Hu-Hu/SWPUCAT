@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { checkinApi } from '@/api/checkin'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
+import { useTheme } from '@/composables/useTheme'
 import RollingNumber from '@/components/RollingNumber.vue'
 import { normalizeCheckinStats, type CheckinChartStat } from '@/utils/checkinChart.js'
 
+const { theme } = useTheme()
+watch(theme, () => updateChart(), { flush: 'post' })
 const authStore = useAuthStore()
 const chartRef = ref<HTMLElement | null>(null)
 let chart: echarts.ECharts | null = null
@@ -172,17 +175,20 @@ function updateChart() {
   if (!chart) return
   const data = filteredStats.value
   const periodLabel = chartFilter.value === 'today' ? '今日' : chartFilter.value === 'month' ? '本月' : '本周'
+  const dark = theme.value === 'dark'
+  const muted = dark ? '#9cadc0' : '#71717a'
+  const border = dark ? '#34465a' : '#e4e4e7'
   chart.setOption({
-    animation: true,
+    animation: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
     animationDuration: 700,
     animationEasing: 'cubicOut',
-    animationDurationUpdate: 700,
+    animationDurationUpdate: 520,
     animationEasingUpdate: 'cubicOut',
     tooltip: {
       trigger: 'axis',
-      backgroundColor: '#ffffff',
-      borderColor: '#e4e4e7',
-      textStyle: { color: '#18181b' },
+      backgroundColor: dark ? '#203043' : '#ffffff',
+      borderColor: border,
+      textStyle: { color: dark ? '#e5edf5' : '#18181b' },
       axisPointer: { type: 'shadow' },
       formatter: (params: any) => {
         const d = params[0]
@@ -193,14 +199,15 @@ function updateChart() {
     xAxis: {
       type: 'category',
       data: data.map(d => d.nickname),
-      axisLabel: { color: '#71717a', rotate: data.length > 6 ? 30 : 0 },
-      axisLine: { lineStyle: { color: '#e4e4e7' } }
+      axisLabel: { color: muted, rotate: data.length > 6 ? 30 : 0 },
+      axisLine: { lineStyle: { color: border } }
     },
     yAxis: {
       type: 'value',
       name: '分钟',
-      axisLabel: { color: '#71717a' },
-      splitLine: { lineStyle: { color: '#f4f4f5' } }
+      nameTextStyle: { color: muted },
+      axisLabel: { color: muted },
+      splitLine: { lineStyle: { color: dark ? '#28394b' : '#f4f4f5' } }
     },
     series: [{
       type: 'bar',
@@ -223,7 +230,7 @@ function updateChart() {
         show: true,
         position: 'top',
         formatter: (params: any) => formatMinutes(params.value),
-        color: '#71717a',
+        color: muted,
         fontSize: 11
       }
     }]

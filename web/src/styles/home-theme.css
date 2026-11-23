@@ -1,0 +1,52 @@
+/* The public site keeps its botanical palette in both modes. */
+html.dark .association-home {
+  --paper: #14221d;
+  --ink: #e2ebe0;
+  --green: #a9d6ac;
+  --muted: #a3b4a5;
+  --line: #35483b;
+  --lime: #3f5d44;
+}
+html.dark .association-home .header { background:rgba(20,34,29,.94); }
+html.dark .association-home :is(.nav-indicator, .nav a.active, .fact-icon, .event-label, .pill) { background:#2b4031; color:#bed9af; }
+html.dark .association-home :is(.floating-tag, .member-card, .activity-card, .competition-award) { background:#1f3027; border-color:var(--line); }
+html.dark .association-home .clinic-card { background:#263b2b; border-color:#3b5240; }
+html.dark .association-home .lavender { background:#2b2e39; border-color:#414453; }
+html.dark .association-home .modeling-award { background:#323629; }
+html.dark .association-home .award-main { background-color:#303b28; border-color:var(--line); }
+html.dark .association-home :is(.filter-group, .dialog-note) { background:#223328; border-color:var(--line); }
+html.dark .association-home .filter-group .selected { background:#3a5140; color:#e2ebe0; }
+html.dark .association-home .event-row:hover { background:#203327; }
+html.dark .association-home :is(.outline-button:hover, .round-button:hover) { background:#3b5140; }
+html.dark .association-home :is(.chips span, .round-button, .outline-button, .clinic-footer, .award-detail, dialog) { border-color:var(--line); }
+html.dark .association-home :is(.hero-description, .about-description, .clinic-content p, .clinic-footer, .card-number, .filter-group button,
+  .event-time small, .event-main p, .event-action, .source-note, .competition-meta, .competition-description, .award-english,
+  .award-label, .award-main p, .award-seal, .past-awards p, .back-top, .footer-bottom, .bottom-tag small, .art-coordinate,
+  .art-note, .honor-section-label > span:last-child, .dialog-close, .dialog-inner p, .dialog-inner li) { color:var(--muted); }
+html.dark .association-home :is(.about-description strong, .dialog-note) { color:var(--ink); }
+html.dark .association-home :is(.serif-accent, .line-icon, .chips span, .event-time, .honor-section-label, .competition-grid .award-tier,
+  .award-stars, .past-awards span, .top-tag > span, .tag-symbol) { color:#b5cf9a; }
+html.dark .association-home .button:not(.light) { color:#14251a; }
+html.dark .association-home .button:not(.light):hover { background:#c7e6bc; }
+html.dark .association-home .terminal { box-shadow:12px 23px 0 #2a3c2c,0 25px 50px #08150e33; }
+html.dark .association-home .monitor { background:#243c2c; box-shadow:5px 5px 0 #354b36; }
+html.dark .association-home .monitor :is(span,small) { color:#b5cf9a; }
+html.dark .association-home .tool-badge { background:#45603c; color:#d5e6bc; border-color:#263b2b; }
+html.dark .association-home .competition-feature .competition-meta { color:#b6cc9f; }
+html.dark .association-home .competition-feature .award-tier { color:#dae9b8; }
+html.dark .association-home .competition-feature .award-detail { border-color:#5c765455; color:#c7d9b4; }
+
+/* Keep the longer official name and the switch reachable on small screens. */
+@media (max-width:1100px) and (min-width:801px) {
+  .association-home .header { padding-inline:20px; gap:10px; }
+  .association-home .header-actions { gap:8px; }
+  .association-home .nav a { padding-inline:8px; }
+}
+@media (max-width:700px) {
+  .association-home .header-actions .join-btn { display:none; }
+  .association-home .header .brand { min-width:0; gap:8px; white-space:normal; }
+  .association-home .header .brand-name { font-size:11px; line-height:1.5; letter-spacing:0; }
+  .association-home .header .brand-name small { display:none; }
+  .association-home .header .menu-toggle { flex-shrink:0; }
+  .association-home .header-actions { margin-left:auto; flex-shrink:0; }
+}

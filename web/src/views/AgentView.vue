@@ -1125,7 +1125,7 @@ function handleMarkdownClick(event: MouseEvent, message: ChatMessage) {
 }
 
 .markdown-body :deep(.md-source-label) {
-  color: #2563eb;
+  color: var(--accent);
   font-weight: 600;
 }
 
@@ -1214,8 +1214,8 @@ function handleMarkdownClick(event: MouseEvent, message: ChatMessage) {
   padding: 0.3rem 0.75rem;
   border-radius: 999px;
   border: 1px solid rgba(37, 99, 235, 0.2);
-  background: rgba(37, 99, 235, 0.08);
-  color: #2563eb;
+  background: var(--accent-bg);
+  color: var(--accent);
   font-size: 0.85em;
   font-weight: 500;
   line-height: 1.2;
@@ -1247,7 +1247,7 @@ function handleMarkdownClick(event: MouseEvent, message: ChatMessage) {
 .markdown-body :deep(.md-download-link:hover) {
   background: rgba(37, 99, 235, 0.14);
   border-color: rgba(37, 99, 235, 0.32);
-  color: #1d4ed8;
+  color: var(--accent-light);
   text-decoration: none;
 }
 
@@ -1263,8 +1263,8 @@ function handleMarkdownClick(event: MouseEvent, message: ChatMessage) {
 }
 
 .message-row.user .message-bubble {
-  color: #fff;
-  background: var(--accent);
+  color: var(--on-accent);
+  background: var(--accent-solid);
 }
 
 .message-bubble.pending {

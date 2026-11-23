@@ -684,7 +684,7 @@ function handleDownloadFile(id: number, name: string) {
 }
 
 .category-item.active {
-  background: var(--accent);
+  background: var(--accent-solid);
   color: #ffffff;
 }
 
@@ -867,7 +867,7 @@ function handleDownloadFile(id: number, name: string) {
   .sidebar .card-header { margin-bottom: 0.5rem; }
   .category-list { display: flex; flex-direction: row; flex-wrap: nowrap; overflow-x: auto; gap: 0.375rem; padding-bottom: 0.25rem; -webkit-overflow-scrolling: touch; }
   .category-item { flex: 0 0 auto; justify-content: flex-start; gap: 0.375rem; padding: 0.25rem 0.625rem; border-radius: 999px; background: var(--bg-deep); }
-  .category-item.active { background: var(--accent); color: #fff; }
+  .category-item.active { background: var(--accent-solid); color: #fff; }
   .category-item .count { margin-left: 0.25rem; }
   .card { padding: 0.875rem; }
   .content .card-header { flex-direction: column; align-items: stretch; gap: 0.75rem; }

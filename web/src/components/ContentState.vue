@@ -66,8 +66,8 @@ onBeforeUnmount(clearFeedbackTimer)
 .content-reveal { animation:content-reveal .14s ease-out; }
 @keyframes content-reveal { from { opacity:.65; } to { opacity:1; } }
 .skeleton-card { position:relative; overflow:hidden; padding:22px; border:1px solid var(--border,#e1e8ef); border-radius:12px; background:var(--bg-card,#fff); }
-.skeleton-card::after { content:''; position:absolute; inset:0; transform:translateX(-100%); background:linear-gradient(100deg,transparent 20%,rgba(255,255,255,.8) 50%,transparent 80%); animation:skeleton-sweep 1.7s ease-in-out infinite; pointer-events:none; }
-.skeleton-card > div { background:#eaf0f5; border-radius:5px; }
+.skeleton-card::after { content:''; position:absolute; inset:0; transform:translateX(-100%); background:linear-gradient(100deg,transparent 20%,var(--skeleton-glow) 50%,transparent 80%); animation:skeleton-sweep 1.7s ease-in-out infinite; pointer-events:none; }
+.skeleton-card > div { background:var(--skeleton-block); border-radius:5px; }
 .skeleton-title { width:42%; height:19px; margin-bottom:12px; }
 .skeleton-meta { width:26%; height:11px; margin-bottom:20px; }
 .skeleton-line { width:94%; height:13px; margin-bottom:10px; }
@@ -85,8 +85,8 @@ onBeforeUnmount(clearFeedbackTimer)
 
 /* Skeletons use each page's real card classes; only the contents are placeholders. */
 :global(.skeleton-shell) { position:relative; overflow:hidden; pointer-events:none; }
-:global(.skeleton-shell::after) { content:''; position:absolute; inset:0; transform:translateX(-100%); background:linear-gradient(100deg,transparent 20%,rgba(255,255,255,.8) 50%,transparent 80%); animation:skeleton-sweep 1.7s ease-in-out infinite; pointer-events:none; }
-:global(.sk-block) { display:block; background:#eaf0f5; border-radius:4px; }
+:global(.skeleton-shell::after) { content:''; position:absolute; inset:0; transform:translateX(-100%); background:linear-gradient(100deg,transparent 20%,var(--skeleton-glow) 50%,transparent 80%); animation:skeleton-sweep 1.7s ease-in-out infinite; pointer-events:none; }
+:global(.sk-block) { display:block; background:var(--skeleton-block); border-radius:4px; }
 :global(.sk-title) { width:55%; height:24px; }
 :global(.sk-meta) { width:160px; max-width:100%; height:19.2px; }
 :global(.sk-line) { width:92%; height:14px; margin:5px 0 9px; }
