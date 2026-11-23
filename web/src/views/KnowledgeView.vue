@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import type { AxiosProgressEvent } from 'axios'
 import { knowledgeApi } from '@/api/knowledge'
+import { useDownloadStore } from '@/stores/downloads'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { UploadFile, UploadUserFile } from 'element-plus'
@@ -49,7 +50,7 @@ const refreshingCount = ref(0)
 let uploadController: AbortController | undefined
 let uploadStartedAt = 0
 let disposed = false
-const downloading = ref<Record<number, number>>({})
+const downloads = useDownloadStore()
 const categories = ref<Array<{ id: number; name: string; is_system: boolean; count: number }>>([])
 const items = ref<Array<{
   id: number
@@ -325,30 +326,8 @@ function openPreview(item: { name: string; description: string }) {
   showPreviewDialog.value = true
 }
 
-async function handleDownloadFile(id: number, name: string) {
-  if (downloading.value[id] !== undefined) return
-  downloading.value[id] = 0
-  try {
-    const res = await knowledgeApi.downloadFile(id, (percent) => {
-      downloading.value[id] = percent
-    })
-    const blob = res instanceof Blob ? res : (res as any).data
-    const url = window.URL.createObjectURL(blob instanceof Blob ? blob : new Blob([blob]))
-    const link = document.createElement('a')
-    link.href = url
-    link.setAttribute('download', name)
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    window.URL.revokeObjectURL(url)
-    downloading.value[id] = 100
-    setTimeout(() => {
-      delete downloading.value[id]
-    }, 1000)
-  } catch {
-    ElMessage.error('下载失败')
-    delete downloading.value[id]
-  }
+function handleDownloadFile(id: number, name: string) {
+  void downloads.download(id, name)
 }
 </script>
 
@@ -461,11 +440,11 @@ async function handleDownloadFile(id: number, name: string) {
                 v-if="item.type === 'file'"
                 size="small"
                 type="primary"
-                :loading="downloading[item.id] !== undefined && downloading[item.id] < 100"
-                :disabled="downloading[item.id] !== undefined"
+                :loading="downloads.isBusy(item.id)"
+                :disabled="downloads.isBusy(item.id)"
                 @click="handleDownloadFile(item.id, item.name)"
               >
-                {{ downloading[item.id] !== undefined ? (downloading[item.id] < 100 ? `${downloading[item.id]}%` : '完成') : '下载' }}
+                {{ downloads.label(item.id) }}
               </el-button>
               <el-dropdown v-if="item.source_origin !== 'official_catalog' && (authStore.isCaptain || authStore.user?.id === item.uploader_id)" trigger="click">
                 <el-button size="small" text :aria-label="`更多操作：${item.name}`">更多</el-button>

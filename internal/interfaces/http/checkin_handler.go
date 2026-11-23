@@ -236,6 +236,10 @@ func (h *CheckinHandler) PublishReport(c *gin.Context) {
 	operatorName := GetUsername(c)
 
 	title, content, err := h.checkinSvc.PublishReport(c.Request.Context())
+	if errors.Is(err, checkin.ErrNoReportMembers) {
+		BadRequest(c, "本周暂无需列入打卡报告的成员")
+		return
+	}
 	if err != nil {
 		InternalError(c, "failed to generate report")
 		return

@@ -1,14 +1,60 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { h, ref, onMounted, onUnmounted, watch } from 'vue'
+import { ElButton, ElMessage, ElNotification, type NotificationHandle } from 'element-plus'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useAgentStore } from '@/stores/agent'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+const agentStore = useAgentStore()
 const isCollapse = ref(false)
 const isMobile = ref(false)
 const drawerOpen = ref(false)
+let agentNotification: NotificationHandle | undefined
+
+function closeAgentNotification() {
+  agentNotification?.close()
+  agentNotification = undefined
+}
+
+watch(() => authStore.user?.id, closeAgentNotification)
+watch(() => agentStore.outcome, (outcome) => {
+  closeAgentNotification()
+  if (!outcome) return
+  const viewingConversation = route.name === 'agent' && agentStore.sessionId === outcome.sessionId
+  if (outcome.kind === 'stopped') {
+    if (viewingConversation) ElMessage.info('已停止生成，未保存本次部分回答')
+    return
+  }
+
+  const message = outcome.kind === 'unsaved' ? '回答已生成，但会话记录保存失败；可点击重试再次保存' :
+    outcome.kind === 'failed' ? outcome.message : ''
+  if (viewingConversation) {
+    if (outcome.kind === 'unsaved') ElMessage.warning(message)
+    if (outcome.kind === 'failed') ElMessage.error(message)
+    return
+  }
+
+  agentNotification = ElNotification({
+    title: outcome.kind === 'completed' ? '助手回答已完成' : '助手生成需要处理',
+    message: h('div', [
+      h('p', message || '回答已保存到原会话。'),
+      outcome.sessionId ? h(ElButton, {
+        link: true,
+        type: 'primary',
+        onClick: () => {
+          closeAgentNotification()
+          void router.push({ name: 'agent', query: { session: outcome.sessionId } })
+        }
+      }, () => '查看会话') : null
+    ]),
+    type: outcome.kind === 'completed' ? 'success' : 'warning',
+    duration: 7000,
+    customClass: 'agent-result-notification'
+  })
+})
 
 function syncIsMobile() {
   isMobile.value = window.matchMedia('(max-width: 768px)').matches
@@ -23,6 +69,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', syncIsMobile)
+  closeAgentNotification()
 })
 
 const menuItems = [
@@ -100,6 +147,7 @@ function handleLogout() {
 </template>
 
 <style scoped>
+:global(.agent-result-notification) { max-width:calc(100vw - 32px); }
 .brand-logo { width:36px; height:36px; flex-shrink:0; }
 .sidebar-header { gap:10px; }
 .sidebar-header small { display:block; font-size:10px; color:var(--text-muted); }

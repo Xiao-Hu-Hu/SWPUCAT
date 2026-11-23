@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { isAxiosError } from 'axios'
 import { checkinApi } from '@/api/checkin'
 import { memberApi } from '@/api/member'
 
@@ -130,8 +131,12 @@ async function handlePublishReport() {
   try {
     await checkinApi.publishReport()
     ElMessage.success('打卡报告已发布到公告')
-  } catch {
-    ElMessage.error('发布失败')
+  } catch (error) {
+    if (isAxiosError(error) && error.response?.status === 400) {
+      ElMessage.warning(error.response.data?.message || '本周暂无需列入打卡报告的成员')
+    } else {
+      ElMessage.error('发布失败')
+    }
   } finally {
     reportLoading.value = false
   }
@@ -226,7 +231,7 @@ onMounted(() => {
       <el-tab-pane label="发布报告" name="report">
         <div class="tab-content report-tab">
           <p class="tab-desc">
-            点击按钮将自动生成本周打卡统计报告并发布为公告。报告包含所有成员的本周打卡时长、要求时长和差额情况。
+            自动生成本周打卡统计报告并发布为公告，列出打卡时长、要求时长和差额。要求时长为 0 的成员将自动跳过。
           </p>
           <el-button
             type="primary"

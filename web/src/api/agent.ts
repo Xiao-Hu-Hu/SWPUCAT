@@ -171,14 +171,14 @@ async function consumeAgentStream(response: Response, onDelta: (delta: string) =
 }
 
 export const agentApi = {
-  listConversations() {
-    return api.get<AgentConversation[]>('/agent/conversations')
+  listConversations(signal?: AbortSignal) {
+    return api.get<AgentConversation[]>('/agent/conversations', { signal })
   },
-  createConversation(title?: string) {
-    return api.post<AgentConversation>('/agent/conversations', title ? { title } : {})
+  createConversation(title?: string, signal?: AbortSignal) {
+    return api.post<AgentConversation>('/agent/conversations', title ? { title } : {}, { signal })
   },
-  getConversation(sessionId: string) {
-    return api.get<AgentConversationContext>(`/agent/conversations/${encodeURIComponent(sessionId)}`)
+  getConversation(sessionId: string, signal?: AbortSignal) {
+    return api.get<AgentConversationContext>(`/agent/conversations/${encodeURIComponent(sessionId)}`, { signal })
   },
   updateConversationTitle(sessionId: string, title: string) {
     return api.patch<AgentConversation>(`/agent/conversations/${encodeURIComponent(sessionId)}`, { title })
